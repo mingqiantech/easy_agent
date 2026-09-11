@@ -1,0 +1,12 @@
+{
+  "name": "@easy-agent/cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@easy-agent/core": "workspace:*",
+    "@easy-agent/llm": "workspace:*",
+    "@easy-agent/config": "workspace:*",
+    "@easy-agent/schema": "workspace:*"
+  }
+}

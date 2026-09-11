@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    "composite": true,
+    "outDir": "dist",
+    "rootDir": "src"
+  },
+  "extends": "../../tsconfig.json",
+  "include": ["src"],
+  "references": [
+    { "path": "../schema" },
+    { "path": "../llm" },
+    { "path": "../config" },
+    { "path": "../core" }
+  ]
+}

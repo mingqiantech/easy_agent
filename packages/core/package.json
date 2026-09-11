@@ -1,0 +1,13 @@
+{
+  "name": "@easy-agent/core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": { "./*": "./src/*.ts" },
+  "dependencies": {
+    "@easy-agent/schema": "workspace:*",
+    "@easy-agent/llm": "workspace:*",
+    "@easy-agent/config": "workspace:*",
+    "ulid": "2.3.0"
+  }
+}
