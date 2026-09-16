@@ -12,44 +12,44 @@ import {
 export class OpenAIProvider implements LLMProvider {
   readonly name = "openai";
   private client: ReturnType<typeof createOpenAI>;
-  constructor(config: { apiKey: "***"; baseUrl?: string }) {
+  constructor(config: { apiKey: string; baseUrl?: string }) {
     this.client = createOpenAI({
-      apiKey: "***",
+      apiKey: config.apiKey,
       baseURL: config.baseUrl,
     });
   }
   async listModels(): Promise<ModelInfo[]> {
     return [
       {
-        id: "gpt-4o",
-        name: "GPT-4o",
+        id: "glm-5.3",
+        name: "glm-5.3",
         provider: "openai",
-        contextWindow: 128000,
-        maxOutputTokens: 16348,
+        contextWindow: 1024000,
+        maxOutputTokens: 65536,
         supportsTools: true,
-        supportsVision: true,
+        supportsVision: false,
         inputConstPerMToken: 2.5,
         outputConstPerMToken: 10,
       },
       {
-        id: "gpt-4o-mini",
-        name: "GPT-4o",
+        id: "glm-5.3-flash",
+        name: "glm-5.3-flash",
         provider: "openai",
-        contextWindow: 128000,
-        maxOutputTokens: 16348,
+        contextWindow: 1024000,
+        maxOutputTokens: 65536,
         supportsTools: true,
-        supportsVision: true,
+        supportsVision: false,
         inputConstPerMToken: 0.15,
         outputConstPerMToken: 0.6,
       },
       {
-        id: "gpt-4o-mini",
-        name: "GPT-4o",
+        id: "deepseek-v4-flash",
+        name: "deepseek-v4-flash",
         provider: "openai",
-        contextWindow: 1047576,
-        maxOutputTokens: 23768,
+        contextWindow: 1024000,
+        maxOutputTokens: 65536,
         supportsTools: true,
-        supportsVision: true,
+        supportsVision: false,
         inputConstPerMToken: 2,
         outputConstPerMToken: 8,
       },

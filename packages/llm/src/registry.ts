@@ -30,7 +30,7 @@ export function getProvider(name: string, config: ProviderConfig): LLMProvider {
   if (!factory) {
     const available = Object.keys(factories).join(", ");
     throw new Error(
-      'Unknow provider:"${name}". Available providers: ${available}',
+      `Unknow provider:"${name}". Available providers: ${available}`,
     );
   }
   const provider = factory(config);
@@ -55,10 +55,13 @@ export function parseModelString(modelStr: string): {
     modelStr.startsWith("o1") ||
     modelStr.startsWith("o3")
   ) {
-    return { provider: "opensi", model: modelStr };
+    return { provider: "openai", model: modelStr };
+  }
+  if (modelStr.startsWith("claude")) {
+    return { provider: "anthropic", model: modelStr };
   }
   throw new Error(
-    'Cannot infer provider for model: "${modelStr}". ' +
-      'Use "provider/model" format, e.g. "openai/gpt-4o"',
+    `Cannot infer provider for model: "${modelStr}". ` +
+      `Use "provider/model" format, e.g. "openai/gpt-4o"`,
   );
 }
