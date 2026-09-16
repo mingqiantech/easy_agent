@@ -83,12 +83,12 @@ export class OpenAIProvider implements LLMProvider {
           totalTokens:
             result.usage.promptTokens + result.usage.completionTokens,
         },
-        finishReason: (result.finishReason = "tool-calls"
+        finishReason: result.finishReason === "tool-calls"
           ? "tool_calls"
-          : "stop"),
+          : "stop",
       };
     } catch (error: any) {
-      throw new Error("OpenAR API error:${error.message}");
+      throw new Error(`OpenAI API error: ${error.message}`);
     }
   }
 
