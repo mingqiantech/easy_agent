@@ -1,4 +1,4 @@
-import { createOpenAI } from "@easy-agent/openai";
+import { createOpenAI } from "@ai-sdk/openai";
 import { generateText, streamText } from "ai";
 import type { LLMProvider } from "../provider.js";
 import {
@@ -58,7 +58,7 @@ export class OpenAIProvider implements LLMProvider {
 
   async generate(request: LLMRequest): Promise<LLMResponse> {
     const model = this.client(request.model);
-    const messages = this.convertMessages(request.system, request.message);
+    const messages = this.convertMessages(request.system, request.messages);
     const tools = request.tools?.length
       ? this.convertTools(request.tools)
       : undefined;

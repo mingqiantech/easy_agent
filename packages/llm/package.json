@@ -7,7 +7,7 @@
   "dependencies": {
     "@easy-agent/schema": "workspace:*",
     "ai": "4.3.0",
-    "@easy-sdk/openai": "1.3.0",
-    "@easy-sdk/anthropic": "1.3.0"
+    "@ai-sdk/openai": "1.3.0",
+    "@ai-sdk/anthropic": "1.2.12"
   }
 }

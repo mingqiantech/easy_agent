@@ -57,8 +57,8 @@ export function parseModelString(modelStr: string): {
   ) {
     return { provider: "opensi", model: modelStr };
   }
-  throw new Error{
-    `Cannot infer provider for model: "${modelStr}". ` +
-    `Use "provider/model" format, e.g. "openai/gpt-4o"`
-  }
+  throw new Error(
+    'Cannot infer provider for model: "${modelStr}". ' +
+      'Use "provider/model" format, e.g. "openai/gpt-4o"',
+  );
 }
