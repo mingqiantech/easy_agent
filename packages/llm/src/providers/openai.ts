@@ -21,11 +21,11 @@ export class OpenAIProvider implements LLMProvider {
   async listModels(): Promise<ModelInfo[]> {
     return [
       {
-        id: "glm-5.3",
-        name: "glm-5.3",
+        id: "qwen3.8-flash",
+        name: "qwen3.8-flash",
         provider: "openai",
-        contextWindow: 1024000,
-        maxOutputTokens: 65536,
+        contextWindow: 983616,
+        maxOutputTokens: 131072,
         supportsTools: true,
         supportsVision: false,
         inputConstPerMToken: 2.5,
@@ -83,9 +83,8 @@ export class OpenAIProvider implements LLMProvider {
           totalTokens:
             result.usage.promptTokens + result.usage.completionTokens,
         },
-        finishReason: result.finishReason === "tool-calls"
-          ? "tool_calls"
-          : "stop",
+        finishReason:
+          result.finishReason === "tool-calls" ? "tool_calls" : "stop",
       };
     } catch (error: any) {
       throw new Error(`OpenAI API error: ${error.message}`);
