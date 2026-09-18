@@ -32,8 +32,8 @@ export class OpenAIProvider implements LLMProvider {
         outputConstPerMToken: 10,
       },
       {
-        id: "glm-5.3-flash",
-        name: "glm-5.3-flash",
+        id: "glm-5.3",
+        name: "glm-5.3",
         provider: "openai",
         contextWindow: 1024000,
         maxOutputTokens: 65536,
@@ -43,8 +43,8 @@ export class OpenAIProvider implements LLMProvider {
         outputConstPerMToken: 0.6,
       },
       {
-        id: "deepseek-v4-flash",
-        name: "deepseek-v4-flash",
+        id: "qwen3.8-max",
+        name: "qwen3.8-max",
         provider: "openai",
         contextWindow: 1024000,
         maxOutputTokens: 65536,
