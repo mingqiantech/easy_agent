@@ -4,4 +4,4 @@ export {
   type SessionInfo,
   type CreateSessionOptions,
 } from "./session.js";
-export { generateId, now } from "./utils.js";
+export { generateId, now, logDebug } from "./utils.js";

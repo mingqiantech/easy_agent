@@ -53,7 +53,7 @@ export async function startRepl(
   prompt();
 }
 
-async function handleConmmand(
+async function handleCommand(
   input: string,
   sessions: SessionManager,
   rl: readline.Interface,

@@ -8,6 +8,11 @@ export function loadConfig(overrides?: Partial<Config>): Config {
   const merged = {
     ...fileConfig,
     ...envConfig,
+    // providers 按 provider 逐个合并，避免 env 的 apiKey 覆盖掉文件里的 baseUrl
+    providers: {
+      ...(fileConfig.providers as object | undefined),
+      ...(envConfig.providers as object | undefined),
+    },
     ...overrides,
   };
   const config = ConfigSchema.parse(merged);
@@ -42,11 +47,29 @@ function loadEnvOverrides(): Partial<Config> {
     ANTHROPIC_API_KEY: "anthropic",
     GOOGLE_API_KEY: "google",
   };
+  const providerBaseUrls: Record<string, string> = {
+    OPENAI_BASE_URL: "openai",
+    ANTHROPIC_BASE_URL: "anthropic",
+    GOOGLE_BASE_URL: "google",
+  };
   for (const [envVar, providerName] of Object.entries(providerKeys)) {
     const key = process.env[envVar];
     if (key) {
       overrides.providers = overrides.providers ?? {};
-      overrides.providers[providerName] = { apiKey: key };
+      overrides.providers[providerName] = {
+        ...overrides.providers[providerName],
+        apiKey: key,
+      };
+    }
+  }
+  for (const [envVar, providerName] of Object.entries(providerBaseUrls)) {
+    const url = process.env[envVar];
+    if (url) {
+      overrides.providers = overrides.providers ?? {};
+      overrides.providers[providerName] = {
+        ...overrides.providers[providerName],
+        baseUrl: url,
+      };
     }
   }
   if (process.env.EASY_AGENT_MODEL) {

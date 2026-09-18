@@ -1,8 +1,8 @@
 import { Database } from "bun:sqlite";
 import path from "node:path";
-import fs from "nade:fs";
+import fs from "node:fs";
 let _db: Database | null = null;
-export function getDatabase(dbPath?: string): Databse {
+export function getDatabase(dbPath?: string): Database {
   if (_db) return _db;
   const resolvedPath = dbPath ?? getDefaultDbPath();
   const dir = path.dirname(resolvedPath);
@@ -21,7 +21,7 @@ function getDefaultDbPath(): string {
     path.join(require("node:os").homedir(), ".local", "share", "easy-agent");
   return path.join(stateDir, "agent.db");
 }
-function initializeShema(db: Database): void {
+function initializeSchema(db: Database): void {
   db.exec(`
     --会话表
     CREATE TABLE IF NOT EXISTS sessions (

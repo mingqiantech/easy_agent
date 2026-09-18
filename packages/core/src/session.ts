@@ -1,11 +1,11 @@
 import { getDatabase } from "./database.js";
-import { generateId, now } from "./utils.js";
-import type { LLMClient } from "easy-agent/llm/client";
+import { generateId, logDebug, now } from "./utils.js";
+import type { LLMClient } from "@easy-agent/llm/client";
 import type {
   Message,
   ToolDefinition,
   LLMResponse,
-} from "easy-agent/schema/llm";
+} from "@easy-agent/schema/llm";
 
 export interface CreateSessionOptions {
   model?: string;
@@ -174,27 +174,6 @@ export class SessionManager {
     },
   ): Promise<string> {
     const session = this.get(sessionId);
-    if (session) {
-      throw new Error(`Session not found: ${sessionId}`);
-    }
-    this.addMessage(sessionId, { role: "user", content: userText });
-    if (!session.title) {
-      const title = userText.slice(0, 50);
-      getDatabase()
-        .prepare("UPDATE sessions SET title = ? WHERE id = ?")
-        .run(title, sessionId);
-    }
-  }
-  async run(
-    sessionId: string,
-    userText: string,
-    options?: {
-      tools?: ToolDefinition[];
-      toolExecutor?: (name: string, input: unknown) => Promise<unknown>;
-      onText?: (text: string) => void;
-    },
-  ): Promise<string> {
-    const session = this.get(sessionId);
     if (!session) throw new Error(`Session not found:${sessionId}`);
     this.addMessage(sessionId, { role: "user", content: userText });
     if (!session.title) {
@@ -206,13 +185,46 @@ export class SessionManager {
     const maxSteps = 20;
     let fullResponse = "";
     let step = 0;
+    const llmTimeoutMs = Number(
+      process.env.EASY_AGENT_LLM_TIMEOUT_MS ?? 1200000,
+    );
     while (step < maxSteps) {
       step++;
       const messages = this.getMessages(sessionId);
-      const response: LLMResponse = await this.llm.generate({
+      logDebug("llm.request", {
+        sessionId,
+        step,
         model: session.model,
-        messages,
-        tools: options?.tools,
+        messageCount: messages.length,
+      });
+      const startedAt = Date.now();
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const timeout = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          reject(
+            new Error(
+              `LLM request timed out after ${llmTimeoutMs}ms (model: ${session.model}). ` +
+                `Check provider baseUrl config and network.`,
+            ),
+          );
+        }, llmTimeoutMs);
+      });
+      const response: LLMResponse = await Promise.race([
+        this.llm.generate({
+          model: session.model,
+          messages,
+          tools: options?.tools,
+        }),
+        timeout,
+      ]).finally(() => {
+        if (timer) clearTimeout(timer);
+      });
+      logDebug("llm.response", {
+        sessionId,
+        step,
+        elapsedMs: Date.now() - startedAt,
+        contentChars: response.content.length,
+        toolCalls: response.toolCalls?.length ?? 0,
       });
       this.addMessage(sessionId, {
         role: "assistant",
