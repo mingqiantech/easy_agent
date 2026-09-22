@@ -36,6 +36,29 @@ export const bashTool: Tool = {
         if (stdout.length < MAX_OUTPUT) stdout += d;
         else truncated = true;
       });
+      child.stderr.on("data", (d: Buffer) => {
+        if (stdout.length < MAX_OUTPUT) stderr += d;
+      });
+      child.on("close", (code) => {
+        clearTimeout(timer);
+        const r: any = {
+          exitCode: code ?? -1,
+          stdout: stdout.trim(),
+          stderr: stderr.trim(),
+        };
+        if (truncated) {
+          r.stdout += "\n...[truncated]";
+        }
+        if (killed) {
+          r.stderr += `\n[killed after ${input.timeout ?? 30}s]`;
+        }
+        resolve(r);
+      });
+      child.on("error", (e) => {
+        clearTimeout(timer);
+        resolve({ error: e.message, exitCode: -1 });
+      });
+      child.stdin.end();
     });
   },
 };
