@@ -12,6 +12,10 @@ export class BasicMemory {
     }
   }
 
+  async wirteMemory(content: string): Promise<void> {
+    await fs.writefile(path.join(this.workDir, "MEMORY.md"), content, "utf-8");
+  }
+
   async readUser(): Promise<string> {
     try {
       return await fs.readFile(path.join(this.workDir, "USER.md"), "utf-8");
@@ -58,6 +62,7 @@ Respond in the user's language.`;
 
     const user = await this.readUser();
     if (user?.trim()) prompt += `\n\n<user_info>\n${user}\n</user_info>`;
+
     return prompt;
   }
 }
