@@ -8,6 +8,7 @@ import {
   ModelInfo,
   Message,
 } from "@easy-agent/schema/llm";
+import { toCoreMessages } from "../convert.js";
 
 export class AnthropicProvider implements LLMProvider {
   readonly name = "anthropic";
@@ -76,7 +77,7 @@ export class AnthropicProvider implements LLMProvider {
         toolCalls: result.toolCalls?.map((tc) => ({
           id: tc.toolCallId,
           name: tc.toolName,
-          input: tc.input,
+          input: tc.args,
         })),
         usage: {
           promptTokens: result.usage.promptTokens,
@@ -88,7 +89,7 @@ export class AnthropicProvider implements LLMProvider {
           result.finishReason == "tool-calls" ? "tool_calls" : "stop",
       };
     } catch (error: any) {
-      throw new Error("Anthropic API error: ${error.message}");
+      throw new Error(`Anthropic API error: ${error.message}`);
     }
   }
   async *stream(request: LLMRequest): AsyncGenerator<LLMStreamEvent> {
@@ -126,12 +127,7 @@ export class AnthropicProvider implements LLMProvider {
     yield { type: "done", finishReason: "stop" };
   }
   private convertMessages(messages: Message[]): any[] {
-    return messages
-      .filter((m) => m.role !== "system")
-      .map((msg) => ({
-        role: msg.role === "tool" ? "user" : msg.role,
-        content: msg.content,
-      }));
+    return toCoreMessages(messages);
   }
   private convertTools(
     tools: NonNullable<LLMRequest["tools"]>,

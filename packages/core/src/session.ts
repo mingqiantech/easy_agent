@@ -110,47 +110,6 @@ export class SessionManager {
     );
     return id;
   }
-  list(limit: number = 50): SessionInfo[] {
-    const db = getDatabase();
-    const rows = db
-      .prepare(
-        `SELECT s.*,
-                (SELECT COUNT(*) FROM messages WHERE session_id = s.id) as msg_count
-         FROM sessions s
-         WHERE s.status = 'active'
-         ORDER BY s.updated_at DESC
-         LIMIT ?`,
-      )
-      .all(limit) as any[];
-    return rows.map((row) => ({
-      id: row.id,
-      title: row.title,
-      agentId: row.agent_id,
-      model: row.model,
-      status: row.status,
-      createAt: row.create_at,
-      updateAt: row.update_At,
-      messageCount: row.msg_count,
-    }));
-  }
-  delete(id: string): void {
-    const db = getDatabase();
-    db.prepare("DELETE FROM sessions WHERE id = ?").run(id);
-  }
-  addMessage(sessionId: string, message: Message): string {
-    const db = getDatabase();
-    const id = generateId();
-    const ts = now();
-    db.prepare(
-      `INSERT INTO messages (id, session_id, role, content, created_at)
-       VALUES (?, ?, ?, ?, ?)`,
-    ).run(id, sessionId, message.role, message.content, ts);
-    db.prepare("UPDATE sessions SET updated_at = ? WHERE id = ?").run(
-      ts,
-      sessionId,
-    );
-    return id;
-  }
   getMessages(sessionId: string): Message[] {
     const db = getDatabase();
     const rows = db
@@ -165,6 +124,7 @@ export class SessionManager {
       createdAt: row.created_at,
     }));
   }
+
   async run(
     sessionId: string,
     userText: string,
@@ -204,7 +164,12 @@ export class SessionManager {
 
       this.addMessage(sessionId, {
         role: "assistant",
-        content: response.content,
+        content: response.toolCalls?.length
+          ? JSON.stringify({
+              text: response.content,
+              toolCalls: response.toolCalls,
+            })
+          : response.content,
       });
       fullResponse += response.content;
       options?.onText?.(response.content);

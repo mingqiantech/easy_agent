@@ -14,7 +14,7 @@ export interface ToolResult {
 export interface ToolDefinition {
   name: string;
   description: string;
-  inputSchema: Record<string, unknown>;
+  inputSchema: unknown;
 }
 export interface Tool<TInput = any> {
   name: string;

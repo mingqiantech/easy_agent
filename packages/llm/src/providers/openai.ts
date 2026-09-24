@@ -8,6 +8,7 @@ import {
   ModelInfo,
   Message,
 } from "@easy-agent/schema/llm";
+import { toCoreMessages } from "../convert.js";
 
 export class OpenAIProvider implements LLMProvider {
   readonly name = "openai";
@@ -75,7 +76,7 @@ export class OpenAIProvider implements LLMProvider {
         toolCalls: result.toolCalls?.map((tc) => ({
           id: tc.toolCallId,
           name: tc.toolName,
-          input: tc.input,
+          input: tc.args,
         })),
         usage: {
           promptTokens: result.usage.promptTokens,
@@ -142,18 +143,10 @@ export class OpenAIProvider implements LLMProvider {
     system: string | undefined,
     messages: Message[],
   ): any[] {
-    const result: any[] = [];
-    if (system) {
-      result.push({ role: "system", content: system });
-    }
-    for (const msg of messages) {
-      if (msg.role == "system") continue;
-      result.push({
-        role: msg.role,
-        content: msg.content,
-      });
-    }
-    return result;
+    const out: any[] = [];
+    if (system) out.push({ role: "system", content: system });
+    out.push(...toCoreMessages(messages));
+    return out;
   }
   private convertTools(
     tools: NonNullable<LLMRequest["tools"]>,
