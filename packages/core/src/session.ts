@@ -6,6 +6,7 @@ import type {
   ToolDefinition,
   LLMResponse,
 } from "@easy-agent/schema/llm";
+import type { ToolRegistry } from "./tool/registry.js";
 
 export interface CreateSessionOptions {
   model?: string;
@@ -168,99 +169,68 @@ export class SessionManager {
     sessionId: string,
     userText: string,
     options?: {
-      tools?: ToolDefinition[];
-      toolExecutor?: (name: string, input: unknown) => Promise<unknown>;
+      toolRegistry?: ToolRegistry;
+      workDir?: string;
       onText?: (text: string) => void;
+      onToolCall?: (name: string, input: unknown) => void;
+      onToolResult?: (name: string, result: unknown) => void;
     },
   ): Promise<string> {
     const session = this.get(sessionId);
     if (!session) throw new Error(`Session not found:${sessionId}`);
+
+    const db = getDatabase();
+    const workDir = options?.workDir ?? process.cwd();
+
     this.addMessage(sessionId, { role: "user", content: userText });
     if (!session.title) {
-      const title = userText.slice(0, 50);
-      getDatabase()
-        .prepare("UPDATE sessions SET title = ? WHERE id = ?")
-        .run(title, sessionId);
+      db.prepare("UPDATE sessions SET title = ? WHERE id = ?").run(
+        userText.slice(0, 50),
+        sessionId,
+      );
     }
-    const maxSteps = 20;
+
+    const toolDefs = options?.toolRegistry?.getDefinitions();
     let fullResponse = "";
-    let step = 0;
-    const llmTimeoutMs = Number(
-      process.env.EASY_AGENT_LLM_TIMEOUT_MS ?? 1200000,
-    );
-    while (step < maxSteps) {
-      step++;
+
+    for (let step = 0; step < 20; step++) {
       const messages = this.getMessages(sessionId);
-      logDebug("llm.request", {
-        sessionId,
-        step,
+      const response = await this.llm.generate({
         model: session.model,
-        messageCount: messages.length,
+        messages,
+        tools: toolDefs,
+        toolChoice: toolDefs?.length ? "auto" : undefined,
       });
-      const startedAt = Date.now();
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      const timeout = new Promise<never>((_, reject) => {
-        timer = setTimeout(() => {
-          reject(
-            new Error(
-              `LLM request timed out after ${llmTimeoutMs}ms (model: ${session.model}). ` +
-                `Check provider baseUrl config and network.`,
-            ),
-          );
-        }, llmTimeoutMs);
-      });
-      const response: LLMResponse = await Promise.race([
-        this.llm.generate({
-          model: session.model,
-          messages,
-          tools: options?.tools,
-        }),
-        timeout,
-      ]).finally(() => {
-        if (timer) clearTimeout(timer);
-      });
-      logDebug("llm.response", {
-        sessionId,
-        step,
-        elapsedMs: Date.now() - startedAt,
-        contentChars: response.content.length,
-        toolCalls: response.toolCalls?.length ?? 0,
-      });
+
       this.addMessage(sessionId, {
         role: "assistant",
         content: response.content,
       });
       fullResponse += response.content;
-      if (options?.onText) {
-        options.onText(response.content);
-      }
-      if (!response.toolCalls || response.toolCalls.length === 0) {
-        break;
-      }
-      if (!options?.toolExecutor) {
-        break;
-      }
-      for (const toolCall of response.toolCalls) {
-        let result: unknown;
-        let error: string | undefined;
-        try {
-          result = await options.toolExecutor(toolCall.name, toolCall.input);
-        } catch (e: any) {
-          error = e.message;
-          result = null;
-        }
-        const toolResultContent = JSON.stringify({
-          toolCallId: toolCall.id,
-          toolName: toolCall.name,
-          result,
-          error,
+      options?.onText?.(response.content);
+
+      if (!response.toolCalls?.length || !options?.toolRegistry) break;
+
+      for (const tc of response.toolCalls) {
+        options.onToolCall?.(tc.name, tc.input);
+        const result = await options.toolRegistry.execute(tc.name, tc.input, {
+          sessionId,
+          agentId: session.agentId,
+          workDir,
         });
+        options.onToolResult?.(tc.name, result.output ?? result.error);
         this.addMessage(sessionId, {
           role: "tool",
-          content: toolResultContent,
+          content: JSON.stringify({
+            toolCallId: tc.id,
+            toolName: tc.name,
+            result: result.output,
+            error: result.error,
+          }),
         });
       }
     }
+
     return fullResponse;
   }
 }
