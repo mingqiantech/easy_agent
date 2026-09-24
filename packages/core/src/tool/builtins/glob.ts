@@ -6,7 +6,7 @@ export const globTool: Tool = {
   name: "glob",
   description: "用 glob 模式搜索文件路径（最多 500 个）。",
   inputSchema: z.object({
-    pattern: z.object().describe("glob 模式（如 **/*.ts）"),
+    pattern: z.string().describe("glob 模式（如 **/*.ts）"),
     path: z.string().optional(),
   }),
   async execute(input: any, ctx: ToolContext) {
@@ -18,7 +18,7 @@ export const globTool: Tool = {
         input.pattern
           .replace(/\./g, "\\.")
           .replace(/\*\*/g, "<<<G>>>")
-          .replace(/\*/g, "[^/]")
+          .replace(/\*/g, "[^/]*")
           .replace(/<<<G>>>/g, ".*")
           .replace(/\?/g, "[^/]") +
         "$",

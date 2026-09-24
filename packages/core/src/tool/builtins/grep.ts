@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { spaw } from "node:child_process";
+import { spawn } from "node:child_process";
 import path from "node:path";
 import type { Tool, ToolContext } from "../types.js";
 
@@ -26,7 +26,7 @@ export const grepTool: Tool = {
     args.push(input.pattern, root);
 
     return new Promise((resolve) => {
-      const child = spaw("grep", args, { stdio: ["pipe", "pipe", "pipe"] });
+      const child = spawn("grep", args, { stdio: ["pipe", "pipe", "pipe"] });
       let stdout = "";
       child.stdout.on("data", (d: Buffer) => {
         if (stdout.length < 50 * 1024) stdout += d;

@@ -5,7 +5,7 @@ export function zodToJsonSchema(
   const def = (schema as any)._def;
   if (!def) return { type: "object" };
   switch (def.typeName) {
-    case "ZzodString":
+    case "ZodString":
       return {
         type: "string",
         ...(def.description ? { description: def.description } : {}),
