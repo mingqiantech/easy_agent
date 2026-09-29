@@ -1,4 +1,4 @@
-import { Database } from "bun:aqlite";
+import { Database } from "bun:sqlite";
 import { ulid } from "ulid";
 import type { ShortTermMemory } from "./short-term.js";
 
@@ -99,7 +99,7 @@ export async function deepDreaming(
 
 function calcScore(entry: any, nowMs: number): number {
   const daysSince =
-    (nowMs - (entry.lastRecalledAt ?? entry.createDAt)) / DAY_MS;
+    (nowMs - (entry.lastRecalledAt ?? entry.createdAt)) / DAY_MS;
   const recency = Math.exp((-0.693 * daysSince) / 14);
   const recallFreq = Math.min(entry.recallCount / 10, 1);
   const queryDiv = Math.min(entry.uniqueQueries / 5, 1);

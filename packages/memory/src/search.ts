@@ -40,7 +40,7 @@ export class MemorySearcher {
     }
 
     if (corpus === "memory" || corpus === "all") {
-      const memoryFiles = await this.listMddFiles(this.memoryDir);
+      const memoryFiles = await this.listMdFiles(this.memoryDir);
 
       for (const rootFile of ["MEMORY.md", "USER.md"]) {
         const p = path.join(this.workDir, rootFile);
@@ -116,7 +116,7 @@ export class MemorySearcher {
         recursive: true,
       });
       for (const e of entries) {
-        if (e.isFiles() && e.name.endsWith(".md") && !e.name.startsWith(".")) {
+        if (e.isFile() && e.name.endsWith(".md") && !e.name.startsWith(".")) {
           results.push(path.join(dir, e.name));
         }
       }

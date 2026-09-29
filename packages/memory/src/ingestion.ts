@@ -12,7 +12,7 @@ export class SessionIngester {
     sessionID: string,
     messages: Array<{ role: string; content: string }>,
   ): Promise<number> {
-    const corpusDir = path.join(this.memoryDir, ".dream", "session-corpus");
+    const corpusDir = path.join(this.memoryDir, ".dreams", "session-corpus");
     await fs.mkdir(corpusDir, { recursive: true });
 
     const snippets: string[] = [];
@@ -28,7 +28,7 @@ export class SessionIngester {
 
     if (snippets.length === 0) return 0;
 
-    const hash = createHash("md5").updage(sessionID).digest("hex").slice(0, 12);
+    const hash = createHash("md5").update(sessionID).digest("hex").slice(0, 12);
     const filePath = path.join(corpusDir, `${hash}.md`);
 
     const content = snippets.join("\n\n");
