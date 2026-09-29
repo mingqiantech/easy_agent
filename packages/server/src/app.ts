@@ -34,6 +34,11 @@ export function createApp(deps: ServerDeps): Hono {
 
   app.get("/health", (c) => c.json({ status: "ok", version: "0.3.0" }));
 
+  app.get("/api/sessions", (c) => {
+    const limit = Number(c.req.query("limit") ?? 50);
+    return c.json({ sessions: deps.sessions.list(limit) });
+  });
+
   app.post("/api/sessions", async (c) => {
     const body = await c.req.json();
     const systemPrompt = await deps.memory.buildSystemPrompt();
@@ -62,7 +67,7 @@ export function createApp(deps: ServerDeps): Hono {
   app.post("/api/sessions/:id/messages", async (c) => {
     const body = await c.req.json();
     const response = await deps.sessions.run(c.req.param("id"), body.text, {
-      ToolRegistry: deps.tools,
+      toolRegistry: deps.tools,
     });
     return c.json({ response });
   });

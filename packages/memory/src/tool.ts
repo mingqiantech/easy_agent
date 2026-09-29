@@ -1,7 +1,6 @@
 import { z } from "zod";
-import type { Tool, Toolcontext } from "@easy-agent/core/tool/types";
+import type { Tool, ToolContext } from "@easy-agent/core/tool/types";
 import { MemorySearcher } from "./search.js";
-import { ToolContext } from "../../core/src/tool";
 
 export function createMemorySearchTool(searcher: MemorySearcher): Tool {
   return {

@@ -49,6 +49,39 @@ function initializeSchema(db: Database): void {
 
     CREATE INDEX IF NOT EXISTS idx_messages_session
       ON messages(session_id, created_at ASC);
+
+    -- 短期记忆表（Dreaming 晋升来源）
+    CREATE TABLE IF NOT EXISTS short_term_memory (
+      id TEXT PRIMARY KEY,
+      text TEXT NOT NULL,
+      origin TEXT,
+      recall_count INTEGER NOT NULL DEFAULT 0,
+      unique_queries INTEGER NOT NULL DEFAULT 0,
+      recall_days TEXT DEFAULT '[]',
+      last_recalled_at INTEGER,
+      created_at INTEGER NOT NULL,
+      promoted_at INTEGER,
+      forgotten_at INTEGER
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_stm_active
+      ON short_term_memory(created_at)
+      WHERE promoted_at IS NULL AND forgotten_at IS NULL;
+
+    -- Dreaming 状态表
+    CREATE TABLE IF NOT EXISTS dreaming_state (
+      phase TEXT PRIMARY KEY,
+      last_run_at INTEGER NOT NULL,
+      state TEXT DEFAULT '{}',
+      updated_at INTEGER NOT NULL
+    );
+
+    -- 会话摄入状态表
+    CREATE TABLE IF NOT EXISTS session_ingestion (
+      session_id TEXT PRIMARY KEY,
+      snippet_count INTEGER NOT NULL,
+      ingested_at INTEGER NOT NULL
+    );
   `);
 }
 export function closeDatabase(): void {

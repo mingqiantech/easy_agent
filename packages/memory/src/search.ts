@@ -20,6 +20,9 @@ export interface SearchOptions {
 }
 
 export class MemorySearcher {
+  /** 搜索命中回调（用于短期记忆 recall 统计） */
+  onHit?: (filePath: string) => void;
+
   constructor(
     private workDir: string,
     private memoryDir: string,
@@ -56,25 +59,29 @@ export class MemorySearcher {
           hits.push(...fileHits);
         } catch {}
       }
+    }
 
-      if (corpus === "sessions" || corpus === "all") {
-        const corpusDir = path.join(
-          this.memoryDir,
-          ".dreams",
-          "session-corpus",
-        );
-        const sessionFiles = await this.listMdFiles(corpusDir);
-        for (const file of sessionFiles) {
-          try {
-            const content = await fs.readFile(file, "utf-8");
-            hits.push(...this.extractHits(content, file, keywords, "session"));
-          } catch {}
-        }
+    if (corpus === "sessions" || corpus === "all") {
+      const corpusDir = path.join(this.memoryDir, ".dreams", "session-corpus");
+      const sessionFiles = await this.listMdFiles(corpusDir);
+      for (const file of sessionFiles) {
+        try {
+          const content = await fs.readFile(file, "utf-8");
+          hits.push(...this.extractHits(content, file, keywords, "session"));
+        } catch {}
       }
     }
 
     hits.sort((a, b) => b.score - a.score);
-    return { hits: hits.slice(0, limit), warnings };
+    const top = hits.slice(0, limit);
+    if (this.onHit) {
+      for (const h of top) {
+        try {
+          this.onHit(h.path);
+        } catch {}
+      }
+    }
+    return { hits: top, warnings };
   }
 
   private extractHits(

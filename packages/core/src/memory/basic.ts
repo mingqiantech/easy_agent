@@ -12,8 +12,8 @@ export class BasicMemory {
     }
   }
 
-  async wirteMemory(content: string): Promise<void> {
-    await fs.writefile(path.join(this.workDir, "MEMORY.md"), content, "utf-8");
+  async writeMemory(content: string): Promise<void> {
+    await fs.writeFile(path.join(this.workDir, "MEMORY.md"), content, "utf-8");
   }
 
   async readUser(): Promise<string> {

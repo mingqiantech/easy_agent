@@ -51,6 +51,11 @@
     "packages/memory": {
       "name": "@easy-agent/memory",
       "version": "0.1.0",
+      "dependencies": {
+        "@easy-agent/core": "workspace:*",
+        "ulid": "2.3.0",
+        "zod": "3.25.76",
+      },
     },
     "packages/schema": {
       "name": "@easy-agent/schema",
@@ -67,6 +72,7 @@
         "@easy-agent/core": "workspace:*",
         "@easy-agent/llm": "workspace:*",
         "@easy-agent/memory": "workspace:*",
+        "@easy-agent/schema": "workspace:*",
         "@hono/node-server": "^1.13.0",
         "hono": "^4.6.0",
       },

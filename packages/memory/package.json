@@ -5,5 +5,10 @@
   "type": "module",
   "exports": {
     "./*": "./src/*.ts"
+  },
+  "dependencies": {
+    "@easy-agent/core": "workspace:*",
+    "ulid": "2.3.0",
+    "zod": "3.25.76"
   }
 }

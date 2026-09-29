@@ -171,7 +171,7 @@ export class SessionManager {
             })
           : response.content,
       });
-      fullResponse += response.content;
+      fullResponse += response.content ?? '';
       options?.onText?.(response.content);
 
       if (!response.toolCalls?.length || !options?.toolRegistry) break;

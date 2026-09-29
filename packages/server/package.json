@@ -3,13 +3,16 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "exports": { "./*": "./src/*.ts" },
+  "exports": {
+    "./*": "./src/*.ts"
+  },
   "dependencies": {
     "@easy-agent/core": "workspace:*",
     "@easy-agent/llm": "workspace:*",
     "@easy-agent/config": "workspace:*",
     "@easy-agent/memory": "workspace:*",
     "hono": "^4.6.0",
-    "@hono/node-server": "^1.13.0"
+    "@hono/node-server": "^1.13.0",
+    "@easy-agent/schema": "workspace:*"
   }
 }
