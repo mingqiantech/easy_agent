@@ -7,6 +7,7 @@ import { ToolRegistry } from "@easy-agent/core/tool/registry";
 import type { MemorySearcher } from "@easy-agent/memory/search";
 import type { BasicMemory } from "@easy-agent/core/memory/basic";
 import { serveStatic } from "hono/bun";
+import path from "node:path";
 
 export interface ServerDeps {
   llm: LLMClient;
@@ -22,7 +23,13 @@ export function createApp(deps: ServerDeps): Hono {
   app.use("*", cors());
   app.use("*", logger());
 
-  app.use("/static/*", serveStatic({ root: "./public" }));
+  app.use(
+    "/static/*",
+    serveStatic({
+      root: path.join(import.meta.dir, "../public"),
+      rewriteRequestPath: (p) => p.replace(/^\/static/, ""),
+    }),
+  );
   app.get("/", (c) => c.redirect("/static/index.html"));
 
   app.get("/health", (c) => c.json({ status: "ok", version: "0.3.0" }));
