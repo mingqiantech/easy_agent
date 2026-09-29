@@ -15,7 +15,7 @@ async function main() {
 
   const llm = new LLMClient({ providers: config.providers });
   const sessions = new SessionManager(llm, {
-    defaultModel: config.defaultMpdel,
+    defaultModel: config.defaultModel,
   });
   const tools = new ToolRegistry();
   const memory = new BasicMemory(process.cwd());
