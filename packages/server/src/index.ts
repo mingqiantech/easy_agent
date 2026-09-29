@@ -7,7 +7,6 @@ import { BasicMemory } from "@easy-agent/core/memory/basic";
 import { MemorySearcher } from "@easy-agent/memory/search";
 import { loadConfig } from "@easy-agent/config/loader";
 import { getDatabase } from "@easy-agent/core/database";
-import { memoryGetTool } from "../../core/src/tool/builtins/memory-get.js";
 
 async function main() {
   const config = loadConfig();

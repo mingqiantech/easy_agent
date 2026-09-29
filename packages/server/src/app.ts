@@ -27,7 +27,7 @@ export function createApp(deps: ServerDeps): Hono {
 
   app.get("/health", (c) => c.json({ status: "ok", version: "0.3.0" }));
 
-  app.get("/api/sessions", (c) => {
+  app.post("/api/sessions", async (c) => {
     const body = await c.req.json();
     const systemPrompt = await deps.memory.buildSystemPrompt();
     const session = deps.sessions.create({

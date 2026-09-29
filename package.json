@@ -8,7 +8,8 @@
   ],
   "scripts": {
     "dev": "bun run packages/cli/src/entry.ts",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "dev:server": "bun run packages/server/src/index.ts"
   },
   "devDependencies": {
     "typescript": "5.8.2",
