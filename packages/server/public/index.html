@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>My Agent</title>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:system-ui;background:#1a1a2e;color:#eee;height:100vh;display:flex}
+    .sidebar{width:260px;background:#16213e;border-right:1px solid #333;display:flex;flex-direction:column}
+    .new-btn{padding:12px 16px;cursor:pointer;color:#e94560;border-bottom:1px solid #333}
+    .new-btn:hover{background:rgba(233,69,96,.1)}
+    .session-list{flex:1;overflow-y:auto}
+    .session-item{padding:12px 16px;cursor:pointer;border-bottom:1px solid rgba(51,51,51,.5)}
+    .session-item:hover{background:rgba(255,255,255,.05)}
+    .session-item.active{background:#0f3460}
+    .session-title{font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .session-meta{font-size:11px;color:#888;margin-top:4px}
+    .main{flex:1;display:flex;flex-direction:column}
+    .messages{flex:1;overflow-y:auto;padding:20px}
+    .message{margin-bottom:16px;display:flex}
+    .message.user{justify-content:flex-end}
+    .bubble{max-width:75%;padding:12px 16px;border-radius:12px;white-space:pre-wrap;word-break:break-word;line-height:1.5}
+    .message.user .bubble{background:#0f3460}
+    .message.assistant .bubble{background:#16213e;border:1px solid #333}
+    .message.tool .bubble{background:#111;border:1px solid #444;font-size:12px;font-family:monospace}
+    .input-area{padding:16px;border-top:1px solid #333;display:flex;gap:8px;align-items:flex-end}
+    .input-area textarea{flex:1;background:#16213e;color:#eee;border:1px solid #333;border-radius:12px;padding:12px;font-size:14px;font-family:inherit;resize:none;min-height:48px;max-height:200px}
+    .input-area textarea:focus{outline:none;border-color:#e94560}
+    .send-btn{background:#e94560;color:#fff;border:none;border-radius:12px;padding:12px 24px;cursor:pointer;font-size:14px;font-weight:600}
+    .send-btn:hover{opacity:.85}
+    .send-btn:disabled{opacity:.4;cursor:not-allowed}
+    @media(max-width:768px){.sidebar{display:none}}
+  </style>
+</head>
+<body>
+  <div class="sidebar">
+    <div class="new-btn" onclick="createSession()">+ New Session</div>
+    <div class="session-list" id="sessionList"></div>
+  </div>
+  <div class="main">
+    <div class="messages" id="messages"></div>
+    <div class="input-area">
+      <textarea id="input" rows="1" placeholder="输入消息... (Enter 发送)"
+        onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();send()}"></textarea>
+      <button class="send-btn" id="sendBtn" onclick="send()">发送</button>
+    </div>
+  </div>
+  <script>
+    const API='';let sid=null;
+    const esc=t=>{const d=document.createElement('div');d.textContent=t;return d.innerHTML};
+
+    async function loadSessions(){
+      const r=await fetch(`${API}/api/sessions`);const{sessions}=await r.json();
+      document.getElementById('sessionList').innerHTML=sessions.map(s=>`
+        <div class="session-item ${s.id===sid?'active':''}" onclick="selectSession('${s.id}')">
+          <div class="session-title">${esc(s.title||'untitled')}</div>
+          <div class="session-meta">${s.messageCount} msgs</div>
+        </div>`).join('');
+    }
+
+    async function createSession(){
+      const r=await fetch(`${API}/api/sessions`,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+      const{session}=await r.json();sid=session.id;
+      document.getElementById('messages').innerHTML='';await loadSessions();
+    }
+
+    async function selectSession(id){sid=id;await loadSessions();await loadMessages();}
+
+    async function loadMessages(){
+      if(!sid)return;
+      const r=await fetch(`${API}/api/sessions/${sid}/messages`);const{messages}=await r.json();
+      const c=document.getElementById('messages');
+      c.innerHTML=messages.filter(m=>m.role!=='system').map(m=>`
+        <div class="message ${m.role}"><div class="bubble">${esc(typeof m.content==='string'?m.content:JSON.stringify(m.content,null,2))}</div></div>
+      `).join('');
+      c.scrollTop=c.scrollHeight;
+    }
+
+    async function send(){
+      const input=document.getElementById('input'),text=input.value.trim();
+      if(!text||!sid)return;input.value='';
+      document.getElementById('sendBtn').disabled=true;
+      const c=document.getElementById('messages');
+      c.innerHTML+=`<div class="message user"><div class="bubble">${esc(text)}</div></div>`;
+      const ai=document.createElement('div');ai.className='message assistant';
+      ai.innerHTML='<div class="bubble" style="color:#888">thinking...</div>';
+      c.appendChild(ai);c.scrollTop=c.scrollHeight;
+      try{
+        const r=await fetch(`${API}/api/sessions/${sid}/messages`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text})});
+        const{response}=await r.json();
+        ai.querySelector('.bubble').style.color='';ai.querySelector('.bubble').textContent=response;
+      }catch(e){ai.querySelector('.bubble').textContent='❌ '+e.message;}
+      document.getElementById('sendBtn').disabled=false;c.scrollTop=c.scrollHeight;await loadSessions();
+    }
+
+    loadSessions();
+  </script>
+</body>
+</html>
