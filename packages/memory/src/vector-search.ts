@@ -86,7 +86,7 @@ export class VectorSearch {
         source: r.source,
         filePath: r.file_path,
         excerpt: r.excerpt,
-        score: 1 - r.distcance,
+        score: 1 - r.distance,
       }));
     } catch {
       return [];

@@ -21,7 +21,7 @@ export interface CronJobConfig {
   };
 
   sessionTarget: "main" | "isolated";
-  enable: boolean;
+  enabled: boolean;
 }
 
 export class CronManager {
@@ -44,7 +44,7 @@ export class CronManager {
       JSON.stringify(job.schedule),
       job.payload.kind,
       JSON.stringify(job.payload),
-      job.enable ? 1 : 0,
+      job.enabled ? 1 : 0,
       nextRun,
       now,
       now,
@@ -61,7 +61,7 @@ export class CronManager {
         id: r.id,
         name: r.name,
         description: r.description,
-        scheduler: JSON.parse(r.schedule_config),
+        schedule: JSON.parse(r.schedule_config),
         payload: JSON.parse(r.payload_config),
         enabled: !!r.enabled,
         lastRunAt: r.last_run_at,
@@ -88,7 +88,7 @@ export class CronManager {
         id: r.id,
         name: r.name,
         payload: JSON.parse(r.payload_config),
-        scheduler: JSON.parse(r.schedule_config),
+        schedule: JSON.parse(r.schedule_config),
       }));
   }
 

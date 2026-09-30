@@ -3,7 +3,7 @@ import { ulid } from "ulid";
 
 export interface StandingIntent {
   id: string;
-  keywords: string;
+  keywords: string[];
   text: string;
   scope: "conversation" | "channel" | "anywhere";
   maxFires?: number;
@@ -16,7 +16,7 @@ export class StandingIntentManager {
   private intents: StandingIntent[] = [];
 
   create(
-    input: Omit<StandingIntent, "id" | "fireCount" | "createAt">,
+    input: Omit<StandingIntent, "id" | "fireCount" | "createdAt">,
   ): StandingIntent {
     const intent: StandingIntent = {
       ...input,

@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import type { Tool, ToolContext } from "../types.js";
 
-export const readTool: tool = {
+export const readTool: Tool = {
   name: "read",
   description: "读取文件内容。大文件用 offset/limit 分段读。",
   inputSchema: z.object({
@@ -29,7 +29,7 @@ export const readTool: tool = {
         : lines.length;
       return {
         content: lines.slice(start, end).join("\n"),
-        totalLines: lines.length.length,
+        totalLines: lines.length,
         hasMore: end < lines.length,
       };
     } catch (e: any) {

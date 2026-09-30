@@ -21,7 +21,7 @@ export interface DreamingDeps {
   writeMemory: (content: string) => Promise<void>;
 }
 
-export async function lightDream(
+export async function lightDreaming(
   deps: DreamingDeps,
 ): Promise<{ processed: number; extracted: number }> {
   const now = Date.now();

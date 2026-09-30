@@ -28,13 +28,13 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${this.baseUrl}`,
+          Authorization: `Bearer ${this.apiKey}`,
         },
         body: JSON.stringify({ model: this.model, input: batch }),
       });
 
       if (!response.ok) {
-        throw new ERROR(
+        throw new Error(
           `Embedding API error: ${response.status} ${await response.text()}`,
         );
       }

@@ -63,7 +63,7 @@ export class ToolRegistry {
     if (!tool)
       return {
         output: null,
-        error: `Unknow tool: "${name}".Available:${this.names().join(", ")}`,
+        error: `Unknown tool: "${name}".Available:${this.names().join(", ")}`,
       };
     try {
       const validated = tool.inputSchema.parse(input);

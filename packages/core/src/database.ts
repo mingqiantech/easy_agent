@@ -82,6 +82,53 @@ function initializeSchema(db: Database): void {
       snippet_count INTEGER NOT NULL,
       ingested_at INTEGER NOT NULL
     );
+    -- Cron 定时任务表
+    CREATE TABLE IF NOT EXISTS cron_jobs (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      description TEXT,
+      schedule_kind TEXT NOT NULL,
+      schedule_config TEXT NOT NULL,
+      payload_kind TEXT NOT NULL,
+      payload_config TEXT NOT NULL,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      next_run_at INTEGER,
+      last_run_at INTEGER,
+      run_count INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_cron_due
+      ON cron_jobs(enabled, next_run_at);
+
+    -- Cron 运行记录表
+    CREATE TABLE IF NOT EXISTS cron_runs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      job_id TEXT NOT NULL,
+      status TEXT NOT NULL,
+      started_at INTEGER NOT NULL,
+      completed_at INTEGER
+    );
+
+    -- 工具调用记录表（可观测性统计）
+    CREATE TABLE IF NOT EXISTS tool_calls (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id TEXT,
+      tool_name TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'ok',
+      duration_ms INTEGER,
+      created_at INTEGER NOT NULL
+    );
+
+    -- 记忆条目表（向量搜索 join 用）
+    CREATE TABLE IF NOT EXISTS memory_entries (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      source TEXT NOT NULL,
+      file_path TEXT NOT NULL,
+      excerpt TEXT NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
   `);
 }
 export function closeDatabase(): void {

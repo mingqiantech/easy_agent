@@ -7,6 +7,7 @@ import { ToolRegistry } from "@easy-agent/core/tool/registry";
 import type { MemorySearcher } from "@easy-agent/memory/search";
 import type { BasicMemory } from "@easy-agent/core/memory/basic";
 import { serveStatic } from "hono/bun";
+import { Observability } from "@easy-agent/core/observability";
 import path from "node:path";
 
 export interface ServerDeps {
@@ -32,7 +33,8 @@ export function createApp(deps: ServerDeps): Hono {
   );
   app.get("/", (c) => c.redirect("/static/index.html"));
 
-  app.get("/health", (c) => c.json({ status: "ok", version: "0.3.0" }));
+  const observability = new Observability();
+  app.get("/health", (c) => c.json(observability.getHealthCheck()));
 
   app.get("/api/sessions", (c) => {
     const limit = Number(c.req.query("limit") ?? 50);
@@ -85,8 +87,6 @@ export function createApp(deps: ServerDeps): Hono {
   });
 
   app.get("/api/tools", (c) => c.json({ tools: deps.tools.getDefinitions() }));
-
-  app.get("/health", (c) => c.json(observability.getHealthCheck()));
 
   return app;
 }

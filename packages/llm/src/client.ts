@@ -8,13 +8,13 @@ import type {
   LLMResponse,
   LLMStreamEvent,
 } from "@easy-agent/schema/llm";
-export interface LLMCliientConfig {
+export interface LLMClientConfig {
   providers: Record<string, ProviderConfig>;
 }
 
 export class LLMClient {
-  private config: LLMCliientConfig;
-  constructor(config: LLMCliientConfig) {
+  private config: LLMClientConfig;
+  constructor(config: LLMClientConfig) {
     this.config = config;
   }
   async generate(request: LLMRequest): Promise<LLMResponse> {
