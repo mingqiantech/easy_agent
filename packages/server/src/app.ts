@@ -86,5 +86,7 @@ export function createApp(deps: ServerDeps): Hono {
 
   app.get("/api/tools", (c) => c.json({ tools: deps.tools.getDefinitions() }));
 
+  app.get("/health", (c) => c.json(observability.getHealthCheck()));
+
   return app;
 }

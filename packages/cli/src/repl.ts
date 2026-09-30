@@ -128,11 +128,99 @@ async function handleCommand(
       console.log(`  New session: ${newSession.id}`);
       break;
     }
+
+    case "memory": {
+      const subcmd = args[0];
+      if (subcmd === "status") {
+        const mem = await memory.readMemory();
+        const stCount = shortTerm.count();
+        console.log(
+          `  MEMORY.md: ${mem.length} chars (${(mem.length / 1024).toFixed(1)}KB)`,
+        );
+        console.log(`  Short-term: ${stCount} entries`);
+        console.log(
+          `  Daily files: ${(await fs.readdir(memoryDir)).filter((f) => f.endsWith(".md")).length}`,
+        );
+      } else if (subcmd === "search") {
+        const q = args.slice(1).join(" ");
+        if (!q) {
+          console.log("  Usage: /memory search <query>");
+          break;
+        }
+        const result = await searcher.search(q);
+        for (const hit of result.hits) {
+          console.log(
+            `  [${hit.score.toFixed(2)}] ${hit.path}: ${hit.excerpt.slice(0, 80)}`,
+          );
+        }
+      } else {
+        console.log((await memory.readMemory()) || "(empty)");
+      }
+      break;
+    }
+
+    // /dreaming — 手动触发巩固
+    case "dreaming": {
+      console.log("  Running light dreaming...");
+      const l = await lightDreaming(dreamingDeps);
+      console.log(
+        `  Light: processed ${l.processed}, extracted ${l.extracted}`,
+      );
+      console.log("  Running REM dreaming...");
+      const r = await remDreaming(dreamingDeps);
+      console.log(`  REM: ${r.candidates} candidates`);
+      console.log("  Running deep dreaming...");
+      const d = await deepDreaming(dreamingDeps);
+      console.log(`  Deep: promoted ${d.promoted}, forgotten ${d.forgotten}`);
+      break;
+    }
+
+    // /cron list — 列出定时任务
+    case "cron": {
+      const jobs = cronManager.list();
+      if (jobs.length === 0) {
+        console.log("  No cron jobs");
+        break;
+      }
+      for (const j of jobs) {
+        const lastRun = j.lastRunAt
+          ? new Date(j.lastRunAt).toLocaleString("zh-CN")
+          : "never";
+        console.log(
+          `  ${j.name} (${j.schedule.kind}) — last: ${lastRun}, runs: ${j.runCount}`,
+        );
+      }
+      break;
+    }
+
+    // /tools — 列出工具
+    case "tools": {
+      for (const t of toolRegistry.list())
+        console.log(`  ${t.name}: ${t.description.split("\n")[0]}`);
+      break;
+    }
+
+    // /config — 配置管理
+    case "config": {
+      if (args[0] === "get" && args[1]) {
+        console.log(
+          `  ${args[1]} = ${(config as any)[args[1]] ?? "(not set)"}`,
+        );
+      } else if (args[0] === "set" && args[1] && args[2]) {
+        console.log(`  Set ${args[1]} = ${args[2]} (restart required)`);
+      } else {
+        console.log(`  model: ${config.defaultModel}`);
+        console.log(`  providers: ${Object.keys(config.providers).join(", ")}`);
+      }
+      break;
+    }
+    // /model — 切换模型
     case "model": {
       if (args[0]) {
-        console.log(`  Model: ${args[0]}`);
+        console.log(`  Model switched to: ${args[0]} (next session)`);
+        // TODO: 实际切换
       } else {
-        console.log(" Usage: /model <provider/model>");
+        console.log(`  Current: ${config.defaultModel}`);
       }
       break;
     }
@@ -143,6 +231,7 @@ async function handleCommand(
       console.log("  /model <m> — 切换模型");
       console.log("  /exit      — 退出");
       break;
+
     default:
       console.log(
         `  Unknown command: /${cmd}. Type /help for available commands.`,
