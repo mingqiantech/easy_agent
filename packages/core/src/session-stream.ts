@@ -1,6 +1,7 @@
 import type { SessionManager } from "./session.js";
 import type { ToolRegistry } from "./tool/registry.js";
 import type { LLMStreamEvent } from "@easy-agent/schema/llm";
+import { needsCompaction, compactHistory } from "./compaction.js";
 
 export interface StreamCallbacks {
   onText?: (text: string) => void;
@@ -35,6 +36,29 @@ export async function runStream(
 
   for (let step = 0; step < 20; step++) {
     const messages = sessions.getMessages(sessionId);
+
+    if (needsCompaction(messages)) {
+      console.log("📦 Compacting history...");
+      const result = await compactHistory(this.llm, session.model, messages);
+
+      const db = getDatabase(); // 获取数据库实例
+      db.prepare(
+        "DELETE FROM messages WHERE session_id = ? AND role != 'system'",
+      ).run(sessionId);
+
+      this.addMessage(
+        sessionId,
+        result.compacted.find(
+          (m) => m.role === "system" && m.content.includes("[对话摘要]"),
+        )!,
+      );
+
+      result.compacted
+        .filter((m) => m.role !== "system" || !m.content.includes("[对话摘要]"))
+        .forEach((m) => this.addMessage(sessionId, m));
+
+      console.log(`   Compacted ${result.removed} messages into summary`);
+    }
 
     // 流式调用
     let assistantText = "";
