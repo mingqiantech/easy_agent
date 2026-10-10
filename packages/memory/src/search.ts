@@ -39,7 +39,7 @@ export class MemorySearcher {
       .filter((w) => w.length > 1);
 
     if (keywords.length === 0) {
-      return { hits: [], warnings: ["Query too short"] };
+      return { hits: [], warning: ["Query too short"] };
     }
 
     if (corpus === "memory" || corpus === "all") {
@@ -81,7 +81,7 @@ export class MemorySearcher {
         } catch {}
       }
     }
-    return { hits: top, warnings };
+    return { hits: top, warning: warnings };
   }
 
   private extractHits(

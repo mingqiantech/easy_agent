@@ -21,7 +21,7 @@ export function zodToJsonSchema(
       return zodToJsonSchema(def.innerType);
     case "ZodEnum":
       return { type: "string", enum: def.values };
-    case "zodArray":
+    case "ZodArray":
       return { type: "array", items: zodToJsonSchema(def.type) };
     case "ZodObject": {
       const shape = def.shape();

@@ -1,5 +1,4 @@
 import type { Tool, ToolContext, ToolResult, ToolDefinition } from "./types.js";
-import { zodToJsonSchema } from "./schema-utils.js";
 import { readTool } from "./builtins/read.js";
 import { writeTool } from "./builtins/write.js";
 import { editTool } from "./builtins/edit.js";

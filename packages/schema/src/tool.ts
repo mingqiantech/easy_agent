@@ -3,7 +3,8 @@ import { z } from "zod";
 export const ToolDefinition = z.object({
   name: z.string(),
   description: z.string(),
-  inputSchema: z.record(z.unknown()),
+  // 运行时透传 zod schema 给 ai-sdk v4（其内部自行转 JSON Schema）
+  inputSchema: z.any(),
 });
 
 export type ToolDefinition = z.infer<typeof ToolDefinition>;

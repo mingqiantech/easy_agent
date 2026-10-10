@@ -14,6 +14,7 @@ export interface ToolResult {
 export interface ToolDefinition {
   name: string;
   description: string;
+  /** 透传 zod schema（ai-sdk v4 要求）；自行序列化成 JSON 时用 zodToJsonSchema */
   inputSchema: unknown;
 }
 export interface Tool<TInput = any> {

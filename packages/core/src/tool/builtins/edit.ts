@@ -1,7 +1,8 @@
 import { z } from "zod";
 import fs from "node:fs/promises";
 import path from "node:path";
-import type { Tool, Toolcontext } from "../types.js";
+import type { Tool, ToolContext } from "../types.js";
+import { isPathSafe } from "../../security/input-validation.js";
 
 export const editTool: Tool = {
   name: "edit",
@@ -15,6 +16,9 @@ export const editTool: Tool = {
     const filePath = path.isAbsolute(input.path)
       ? input.path
       : path.resolve(ctx.workDir, input.path);
+    if (!isPathSafe(filePath, ctx.workDir)) {
+      return { error: `Blocked: path outside workDir or sensitive: ${filePath}` };
+    }
     try {
       const content = await fs.readFile(filePath, "utf-8");
       const count = content.split(input.oldText).length - 1;

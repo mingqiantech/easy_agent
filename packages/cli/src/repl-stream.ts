@@ -1,4 +1,4 @@
-import * as readlinw from "node:readline";
+import * as readline from "node:readline";
 import type { SessionManager } from "@easy-agent/core/session";
 import type { ToolRegistry } from "@easy-agent/core/tool/registry";
 import { runStream } from "@easy-agent/core/session-stream";

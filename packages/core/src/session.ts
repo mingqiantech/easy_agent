@@ -1,5 +1,6 @@
 import { getDatabase } from "./database.js";
 import { generateId, logDebug, now } from "./utils.js";
+import { needsCompaction, compactHistory } from "./compaction.js";
 import type { LLMClient } from "@easy-agent/llm/client";
 import type {
   Message,
@@ -125,6 +126,37 @@ export class SessionManager {
     }));
   }
 
+  /**
+   * Week5 Step 2：长对话自动压缩。
+   * 超过阈值时用 LLM 将旧消息摘要为一条系统消息，保留最近消息。
+   */
+  async compactIfNeeded(sessionId: string): Promise<boolean> {
+    const messages = this.getMessages(sessionId);
+    if (!needsCompaction(messages)) return false;
+
+    const session = this.get(sessionId);
+    if (!session) return false;
+
+    console.log("📦 Compacting history...");
+    const result = await compactHistory(this.llm, session.model, messages);
+
+    const db = getDatabase();
+    db.prepare(
+      "DELETE FROM messages WHERE session_id = ? AND role != 'system'",
+    ).run(sessionId);
+
+    const summary = result.compacted.find(
+      (m) => m.role === "system" && m.content.includes("[对话摘要]"),
+    );
+    if (summary) this.addMessage(sessionId, summary);
+    result.compacted
+      .filter((m) => m.role !== "system" && m !== summary)
+      .forEach((m) => this.addMessage(sessionId, m));
+
+    console.log(`   Compacted ${result.removed} messages into summary`);
+    return true;
+  }
+
   async run(
     sessionId: string,
     userText: string,
@@ -154,6 +186,7 @@ export class SessionManager {
     let fullResponse = "";
 
     for (let step = 0; step < 20; step++) {
+      await this.compactIfNeeded(sessionId);
       const messages = this.getMessages(sessionId);
       const response = await this.llm.generate({
         model: session.model,

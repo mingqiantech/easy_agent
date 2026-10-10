@@ -8,17 +8,13 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
-    "declaration": true,
-    "declarationMap": true,
-    "sourceMap": true,
-    "outDir": "dist",
-    "types": ["bun-types"]
+    "noEmit": true,
+    "types": ["bun"]
   },
-  "references": [
-    { "path": "packages/schema" },
-    { "path": "packages/llm" },
-    { "path": "packages/config" },
-    { "path": "packages/core" },
-    { "path": "packages/cli" }
-  ]
+  "include": [
+    "packages/*/src/**/*.ts",
+    "packages/*/test/**/*.ts",
+    "plugins/**/*.ts"
+  ],
+  "exclude": ["node_modules", "**/dist"]
 }

@@ -2,6 +2,8 @@ import { z } from "zod";
 import { Message } from "./message.js";
 import { ToolCall, ToolDefinition } from "./tool.js";
 
+export { Message, ToolCall, ToolDefinition };
+
 /**
  * 生成选项（控制模型输出行为）
  */

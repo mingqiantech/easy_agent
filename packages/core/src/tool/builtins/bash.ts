@@ -2,6 +2,7 @@ import { z } from "zod";
 import { spawn } from "node:child_process";
 import path from "node:path";
 import type { Tool, ToolContext } from "../types.js";
+import { checkCommandSafety } from "../../security/input-validation.js";
 
 const MAX_OUTPUT = 50 * 1024;
 export const bashTool: Tool = {
@@ -14,6 +15,14 @@ export const bashTool: Tool = {
     timeout: z.number().optional().describe("超时秒数"),
   }),
   async execute(input: any, ctx: ToolContext) {
+    // 安全加固（Week5 Step 5）：危险命令直接拦截
+    const safety = checkCommandSafety(input.command);
+    if (!safety.safe) {
+      return {
+        error: `Blocked by safety check: ${safety.blocked.join("; ")}`,
+        exitCode: -1,
+      };
+    }
     const cwd = input.workdir
       ? path.resolve(ctx.workDir, input.workdir)
       : ctx.workDir;

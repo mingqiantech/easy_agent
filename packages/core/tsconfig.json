@@ -5,7 +5,7 @@
     "rootDir": "src"
   },
   "extends": "../../tsconfig.json",
-  "include": ["src", "../memory/src/embedding.ts"],
+  "include": ["src"],
   "references": [
     { "path": "../schema" },
     { "path": "../llm" },

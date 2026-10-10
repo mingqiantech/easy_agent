@@ -14,7 +14,7 @@ export class AnthropicProvider implements LLMProvider {
   readonly name = "anthropic";
   private client: ReturnType<typeof createAnthropic>;
 
-  constructor(config: { apiKey: "***"; baseUrl?: string }) {
+  constructor(config: { apiKey: string; baseUrl?: string }) {
     this.client = createAnthropic({
       apiKey: "***",
       baseURL: config.baseUrl,
@@ -30,8 +30,8 @@ export class AnthropicProvider implements LLMProvider {
         maxOutputTokens: 131072,
         supportsTools: true,
         supportsVision: false,
-        inputConstPerMToken: 2.5,
-        outputConstPerMToken: 10,
+        inputCostPerMToken: 2.5,
+        outputCostPerMToken: 10,
       },
       {
         id: "glm-5.3",
@@ -41,8 +41,8 @@ export class AnthropicProvider implements LLMProvider {
         maxOutputTokens: 65536,
         supportsTools: true,
         supportsVision: false,
-        inputConstPerMToken: 0.15,
-        outputConstPerMToken: 0.6,
+        inputCostPerMToken: 0.15,
+        outputCostPerMToken: 0.6,
       },
       {
         id: "qwen3.8-max",
@@ -52,8 +52,8 @@ export class AnthropicProvider implements LLMProvider {
         maxOutputTokens: 65536,
         supportsTools: true,
         supportsVision: false,
-        inputConstPerMToken: 2,
-        outputConstPerMToken: 8,
+        inputCostPerMToken: 2,
+        outputCostPerMToken: 8,
       },
     ];
   }
@@ -95,7 +95,7 @@ export class AnthropicProvider implements LLMProvider {
   async *stream(request: LLMRequest): AsyncGenerator<LLMStreamEvent> {
     const model = this.client(request.model);
     const messages = this.convertMessages(request.messages);
-    const tool = request.tools?.length
+    const tools = request.tools?.length
       ? this.convertTools(request.tools)
       : undefined;
     const result = streamText({

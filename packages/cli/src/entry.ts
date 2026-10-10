@@ -29,7 +29,7 @@ async function main() {
   console.log(`   Providers: ${providerNames.join(", ")}`);
   console.log("");
 
-  await startRepl(sessions, config);
+  await startRepl(sessions, config, llm);
 
   closeDatabase();
 }

@@ -7,6 +7,8 @@ import { BasicMemory } from "@easy-agent/core/memory/basic";
 import { MemorySearcher } from "@easy-agent/memory/search";
 import { ShortTermMemory } from "@easy-agent/memory/short-term";
 import { createMemorySearchTool } from "@easy-agent/memory/tool";
+import { SubAgentManager } from "@easy-agent/core/agent/sub-agent";
+import { createSubAgentTool } from "@easy-agent/core/agent/sub-agent-tool";
 
 import { loadConfig } from "@easy-agent/config/loader";
 import { getDatabase } from "@easy-agent/core/database";
@@ -30,6 +32,15 @@ async function main() {
 
   // memory_search 注册进工具表，agent 对话可用
   tools.register(createMemorySearchTool(searcher));
+
+  // Week5 Step 3：子 Agent 工具
+  const subAgents = new SubAgentManager(
+    sessions,
+    tools,
+    llm,
+    config.defaultModel,
+  );
+  tools.register(createSubAgentTool(subAgents));
 
   const app = createApp({
     llm,

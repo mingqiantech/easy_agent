@@ -80,7 +80,7 @@ export class OpenRouterProvider implements LLMProvider {
       toolCalls: result.toolCalls?.map((tc) => ({
         id: tc.toolCallId,
         name: tc.toolName,
-        input: tc.input,
+        input: tc.args,
       })),
       usage: {
         promptTokens: result.usage.promptTokens,

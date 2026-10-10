@@ -73,11 +73,11 @@ export class SubAgentManager {
       });
       response += llmResponse.content;
 
-      if (!llmResponse.toolCall?.length) {
+      if (!llmResponse.toolCalls?.length) {
         break;
       }
 
-      for (const tc of llmResponse.toolCall) {
+      for (const tc of llmResponse.toolCalls) {
         const result = await this.tools.execute(tc.name, tc.input, {
           sessionId,
           agentId: "sub-agent",

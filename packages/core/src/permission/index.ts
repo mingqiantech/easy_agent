@@ -9,7 +9,7 @@ export interface PermissionRule {
 
 export class PermissionManager {
   private rules = new Map<string, PermissionRule>();
-  constructor(rules: PermissionRulep[] = []) {
+  constructor(rules: PermissionRule[] = []) {
     for (const r of rules) this.rules.set(r.tool, r);
   }
 

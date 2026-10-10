@@ -1,0 +1,13 @@
+node_modules
+**/node_modules
+dist
+**/dist
+*.db
+.env
+.env.local
+.git
+memory
+MEMORY.md
+data
+workspace
+.sandbox

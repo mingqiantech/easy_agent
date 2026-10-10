@@ -2,7 +2,8 @@ import { z } from "zod";
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { Tool, ToolContext } from "../types.js";
-export const writeTool: tool = {
+import { isPathSafe } from "../../security/input-validation.js";
+export const writeTool: Tool = {
   name: "write",
   description: "写入或覆盖文件。自动创建父目录。",
   inputSchema: z.object({
@@ -13,6 +14,9 @@ export const writeTool: tool = {
     const filePath = path.isAbsolute(input.path)
       ? input.path
       : path.resolve(ctx.workDir, input.path);
+    if (!isPathSafe(filePath, ctx.workDir)) {
+      return { error: `Blocked: path outside workDir or sensitive: ${filePath}` };
+    }
     try {
       await fs.mkdir(path.dirname(filePath), { recursive: true });
       await fs.writeFile(filePath, input.content, "utf-8");

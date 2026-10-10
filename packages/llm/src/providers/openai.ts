@@ -29,8 +29,8 @@ export class OpenAIProvider implements LLMProvider {
         maxOutputTokens: 131072,
         supportsTools: true,
         supportsVision: false,
-        inputConstPerMToken: 2.5,
-        outputConstPerMToken: 10,
+        inputCostPerMToken: 2.5,
+        outputCostPerMToken: 10,
       },
       {
         id: "glm-5.3",
@@ -40,8 +40,8 @@ export class OpenAIProvider implements LLMProvider {
         maxOutputTokens: 65536,
         supportsTools: true,
         supportsVision: false,
-        inputConstPerMToken: 0.15,
-        outputConstPerMToken: 0.6,
+        inputCostPerMToken: 0.15,
+        outputCostPerMToken: 0.6,
       },
       {
         id: "qwen3.8-max",
@@ -51,8 +51,8 @@ export class OpenAIProvider implements LLMProvider {
         maxOutputTokens: 65536,
         supportsTools: true,
         supportsVision: false,
-        inputConstPerMToken: 2,
-        outputConstPerMToken: 8,
+        inputCostPerMToken: 2,
+        outputCostPerMToken: 8,
       },
     ];
   }

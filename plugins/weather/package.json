@@ -1,0 +1,9 @@
+{
+  "name": "@easy-agent/plugin-weather",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@easy-agent/core": "workspace:*",
+    "zod": "3.25.76"
+  }
+}

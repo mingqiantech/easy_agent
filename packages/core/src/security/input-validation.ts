@@ -1,3 +1,5 @@
+import path from "node:path";
+
 /**
  * 危险命令检测
  */
@@ -57,5 +59,3 @@ export function isPathSafe(filePath: string, workDir: string): boolean {
 
   return true;
 }
-
-import path from "node:path";
