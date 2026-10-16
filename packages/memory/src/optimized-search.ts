@@ -1,5 +1,5 @@
 import { Database } from "bun:sqlite";
-import type { EmbeddingProvider } from "./embdeding.js";
+import type { EmbeddingProvider } from "./embedding.js";
 
 export interface OptimizedSearchResult {
   hits: Array<{

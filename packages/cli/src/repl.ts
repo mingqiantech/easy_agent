@@ -6,6 +6,7 @@ import { ToolRegistry } from "@easy-agent/core/tool/registry";
 import { BasicMemory } from "@easy-agent/core/memory/basic";
 import { SubAgentManager } from "@easy-agent/core/agent/sub-agent";
 import { createSubAgentTool } from "@easy-agent/core/agent/sub-agent-tool";
+import { createVisionTool } from "@easy-agent/core/tool/builtins/vision";
 
 export async function startRepl(
   sessions: SessionManager,
@@ -26,6 +27,11 @@ export async function startRepl(
     config.defaultModel,
   );
   toolRegistry.register(createSubAgentTool(subAgents));
+
+  // Week6: Vision 工具（图片理解）
+  toolRegistry.register(
+    createVisionTool(config.visionModel ?? config.defaultModel),
+  );
   const session = sessions.create({
     model: config.defaultModel,
     systemPrompt: await memory.buildSystemPrompt(),

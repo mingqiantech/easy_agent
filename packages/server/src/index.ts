@@ -9,6 +9,7 @@ import { ShortTermMemory } from "@easy-agent/memory/short-term";
 import { createMemorySearchTool } from "@easy-agent/memory/tool";
 import { SubAgentManager } from "@easy-agent/core/agent/sub-agent";
 import { createSubAgentTool } from "@easy-agent/core/agent/sub-agent-tool";
+import { createVisionTool } from "@easy-agent/core/tool/builtins/vision";
 
 import { loadConfig } from "@easy-agent/config/loader";
 import { getDatabase } from "@easy-agent/core/database";
@@ -41,6 +42,9 @@ async function main() {
     config.defaultModel,
   );
   tools.register(createSubAgentTool(subAgents));
+
+  // Week6: Vision 工具（图片理解）
+  tools.register(createVisionTool(config.visionModel ?? config.defaultModel));
 
   const app = createApp({
     llm,

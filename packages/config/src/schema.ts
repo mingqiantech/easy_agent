@@ -6,5 +6,20 @@ export const ConfigSchema = z.object({
     .default({}),
   stateDir: z.string().default(""),
   workspaceDir: z.string().default("."),
+  // Week 6: 渠道配置（可选）
+  telegram: z
+    .object({
+      botToken: z.string().default(""),
+      allowedUserIds: z.array(z.number()).default([]),
+    })
+    .optional(),
+  discord: z
+    .object({
+      botToken: z.string().default(""),
+      applicationId: z.string().default(""),
+      allowedUserIds: z.array(z.string()).default([]),
+    })
+    .optional(),
+  visionModel: z.string().optional(),
 });
 export type Config = z.infer<typeof ConfigSchema>;

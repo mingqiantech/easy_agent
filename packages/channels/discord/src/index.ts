@@ -25,8 +25,8 @@ async function main() {
 
   channels.register(
     new DiscordAdapter({
-      botToken: config.discord.botToken,
-      applicationId: config.discord.applicationId,
+      botToken: process.env.DISCORD_BOT_TOKEN || config.discord?.botToken || "",
+      applicationId: process.env.DISCORD_APP_ID || config.discord?.applicationId || "",
       allowedUserIds: process.env.DISCORD_ALLOWED_USERS?.split(","),
     }),
   );

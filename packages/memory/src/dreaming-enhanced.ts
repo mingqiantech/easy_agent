@@ -6,7 +6,7 @@ const DAY_MS = 86400000;
 export interface EnhancedDreamingDeps {
   db: Database;
   shortTerm: ShortTermMemory;
-  llmGenereate: (prompt: string, system?: string) => Promise<string>;
+  llmGenerate: (prompt: string, system?: string) => Promise<string>;
   readMemory: () => Promise<string>;
   writeMemory: (content: string) => Promise<void>;
 }
@@ -19,8 +19,8 @@ export interface EnhancedDreamingDeps {
  * 2. 去重（相似的条目合并）
  * 3. 关联（找到记忆之间的关联）
  */
-export async function enhancedDreaming(deps: EnhancedDreamingDeps): promise<{
-  progress: number;
+export async function enhancedDreaming(deps: EnhancedDreamingDeps): Promise<{
+  processed: number;
   promoted: number;
   forgotten: number;
   deduplicated: number;
@@ -30,7 +30,7 @@ export async function enhancedDreaming(deps: EnhancedDreamingDeps): promise<{
 
   if (entries.length === 0) {
     return {
-      process: 0,
+      processed: 0,
       promoted: 0,
       forgotten: executeForget(deps, now),
       deduplicated: 0,

@@ -9,7 +9,7 @@ async function main() {
   const config = loadConfig();
   getDatabase();
 
-  const llm = new LLMClient({ provider: config.provider });
+  const llm = new LLMClient({ providers: config.providers });
   const sessions = new SessionManager(llm, {
     defaultModel: config.defaultModel,
   });
@@ -17,11 +17,11 @@ async function main() {
 
   const bot = new TelegramBot(
     {
-      botToken: config.telegramBotToken,
+      botToken: process.env.TG_BOT_TOKEN || config.telegram?.botToken || "",
       defaultModel: config.defaultModel,
       allowedUserIds: process.env.TG_ALLOWED_USERS
         ? process.env.TG_ALLOWED_USERS.split(",").map(Number)
-        : undefined,
+        : config.telegram?.allowedUserIds,
       workDir: process.cwd(),
     },
     sessions,
