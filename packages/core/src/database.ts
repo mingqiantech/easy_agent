@@ -129,7 +129,61 @@ function initializeSchema(db: Database): void {
       excerpt TEXT NOT NULL,
       updated_at INTEGER NOT NULL
     );
+
+    -- Week7: 用户表
+    CREATE TABLE IF NOT EXISTS users (
+      id TEXT PRIMARY KEY,
+      username TEXT UNIQUE NOT NULL,
+      display_name TEXT,
+      role TEXT NOT NULL DEFAULT 'user' CHECK(role IN ('admin', 'user', 'guest')),
+      status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'suspended', 'deleted')),
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      last_active_at INTEGER
+    );
+
+    -- 渠道身份关联表
+    CREATE TABLE IF NOT EXISTS user_channels (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      channel TEXT NOT NULL,
+      channel_user_id TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      UNIQUE(channel, channel_user_id)
+    );
+
+    -- 用户配额表
+    CREATE TABLE IF NOT EXISTS user_quotas (
+      user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      daily_token_limit INTEGER NOT NULL DEFAULT 100000,
+      daily_tokens_used INTEGER NOT NULL DEFAULT 0,
+      daily_request_limit INTEGER NOT NULL DEFAULT 100,
+      daily_requests_used INTEGER NOT NULL DEFAULT 0,
+      quota_reset_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+
+    -- 审计日志表
+    CREATE TABLE IF NOT EXISTS audit_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id TEXT,
+      session_id TEXT,
+      action TEXT NOT NULL,
+      details TEXT DEFAULT '{}',
+      created_at INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_audit_user
+      ON audit_logs(user_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_audit_action
+      ON audit_logs(action, created_at DESC);
   `);
+
+  // Week7: 给 sessions 加 user_id 列（存在则跳过）
+  const cols = db.prepare("PRAGMA table_info(sessions)").all() as Array<{ name: string }>;
+  if (!cols.some((c) => c.name === "user_id")) {
+    db.exec("ALTER TABLE sessions ADD COLUMN user_id TEXT");
+  }
 }
 export function closeDatabase(): void {
   if (_db) {
