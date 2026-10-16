@@ -12,6 +12,7 @@ import { createSubAgentTool } from "@easy-agent/core/agent/sub-agent-tool";
 import { createVisionTool } from "@easy-agent/core/tool/builtins/vision";
 import { ImageGenerator } from "@easy-agent/core/image-gen/index";
 import { createImageGenTool } from "@easy-agent/core/tool/builtins/image-gen";
+import { MonitoringSystem } from "@easy-agent/core/monitoring/index";
 
 import { loadConfig } from "@easy-agent/config/loader";
 import { getDatabase } from "@easy-agent/core/database";
@@ -54,6 +55,11 @@ async function main() {
       new ImageGenerator({ baseUrl: config.providers.openai?.baseUrl }),
     ),
   );
+
+  // Week8: 监控告警（默认规则：库过大/错误率飙升）
+  const monitoring = new MonitoringSystem();
+  monitoring.addDefaultRules(async (msg) => console.error(msg));
+  monitoring.start(60000);
 
   const app = createApp({
     llm,

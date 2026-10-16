@@ -9,6 +9,8 @@ import { createSubAgentTool } from "@easy-agent/core/agent/sub-agent-tool";
 import { createVisionTool } from "@easy-agent/core/tool/builtins/vision";
 import { ImageGenerator } from "@easy-agent/core/image-gen/index";
 import { createImageGenTool } from "@easy-agent/core/tool/builtins/image-gen";
+import { PluginRegistry } from "@easy-agent/core/plugin/registry";
+import path from "node:path";
 
 export async function startRepl(
   sessions: SessionManager,
@@ -20,6 +22,10 @@ export async function startRepl(
   await memory.ensureMemoryFile();
 
   const toolRegistry = new ToolRegistry(true);
+
+  // Week8: 插件市场
+  const pluginRegistry = new PluginRegistry(path.join(workDir, "plugins"));
+  await pluginRegistry.scan();
 
   // Week5 Step 3：子 Agent 注册为工具
   const subAgents = new SubAgentManager(
@@ -53,7 +59,7 @@ export async function startRepl(
     `   Memory: ${memSize > 0 ? `${(memSize / 1024).toFixed(1)}KB` : "empty"}`,
   );
   console.log(`   Tools: ${toolRegistry.names().join(", ")}`);
-  console.log(`   /tools /memory /sessions /exit\n`);
+  console.log(`   /tools /memory /sessions /plugins /exit\n`);
 
   const rl = readline.createInterface({
     input: process.stdin,
@@ -70,7 +76,7 @@ export async function startRepl(
       }
 
       if (t.startsWith("/")) {
-        const cmd = t.slice(1).split(" ")[0];
+        const [cmd, ...rest] = t.slice(1).split(" ");
         if (cmd === "exit" || cmd === "q") {
           console.log("Bye!");
           process.exit(0);
@@ -90,7 +96,40 @@ export async function startRepl(
                 `  ${s.id.slice(0, 8)} | ${s.title ?? "untitled"} | ${s.messageCount} msgs`,
               ),
             );
-        else console.log("  /tool /memory /sessions /exit");
+        else if (cmd === "plugins") {
+          const sub = rest[0] ?? "list";
+          try {
+            if (sub === "list") {
+              const l = await pluginRegistry.scan();
+              console.log(
+                l.length
+                  ? l
+                      .map(
+                        (p) =>
+                          `  ${p.enabled ? "✓" : "✗"} ${p.name} v${p.version}${p.description ? " — " + p.description : ""}`,
+                      )
+                      .join("\n")
+                  : "  (无插件：将插件放入 plugins/<name>/ 目录)",
+              );
+            } else if (sub === "enable" && rest[1]) {
+              await pluginRegistry.enable(rest[1]);
+              console.log(`  ✓ Enabled: ${rest[1]}`);
+            } else if (sub === "disable" && rest[1]) {
+              await pluginRegistry.disable(rest[1]);
+              console.log(`  ✗ Disabled: ${rest[1]}`);
+            } else if (sub === "install" && rest[1]) {
+              await pluginRegistry.install(rest[1]);
+              console.log(`  ✓ Installed: ${rest[1]}`);
+            } else if (sub === "uninstall" && rest[1]) {
+              await pluginRegistry.uninstall(rest[1]);
+              console.log(`  ✗ Uninstalled: ${rest[1]}`);
+            } else {
+              console.log("  /plugins list|enable <n>|disable <n>|install <pkg>|uninstall <n>");
+            }
+          } catch (e: any) {
+            console.log(`  ❌ ${e.message}`);
+          }
+        } else console.log("  /tools /memory /sessions /plugins /exit");
 
         prompt();
         return;
