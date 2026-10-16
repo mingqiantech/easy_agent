@@ -7,6 +7,8 @@ import { BasicMemory } from "@easy-agent/core/memory/basic";
 import { SubAgentManager } from "@easy-agent/core/agent/sub-agent";
 import { createSubAgentTool } from "@easy-agent/core/agent/sub-agent-tool";
 import { createVisionTool } from "@easy-agent/core/tool/builtins/vision";
+import { ImageGenerator } from "@easy-agent/core/image-gen/index";
+import { createImageGenTool } from "@easy-agent/core/tool/builtins/image-gen";
 
 export async function startRepl(
   sessions: SessionManager,
@@ -31,6 +33,13 @@ export async function startRepl(
   // Week6: Vision 工具（图片理解）
   toolRegistry.register(
     createVisionTool(config.visionModel ?? config.defaultModel),
+  );
+
+  // Week8: 图片生成工具
+  toolRegistry.register(
+    createImageGenTool(
+      new ImageGenerator({ baseUrl: config.providers.openai?.baseUrl }),
+    ),
   );
   const session = sessions.create({
     model: config.defaultModel,

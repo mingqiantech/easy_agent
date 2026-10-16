@@ -10,6 +10,8 @@ import { createMemorySearchTool } from "@easy-agent/memory/tool";
 import { SubAgentManager } from "@easy-agent/core/agent/sub-agent";
 import { createSubAgentTool } from "@easy-agent/core/agent/sub-agent-tool";
 import { createVisionTool } from "@easy-agent/core/tool/builtins/vision";
+import { ImageGenerator } from "@easy-agent/core/image-gen/index";
+import { createImageGenTool } from "@easy-agent/core/tool/builtins/image-gen";
 
 import { loadConfig } from "@easy-agent/config/loader";
 import { getDatabase } from "@easy-agent/core/database";
@@ -45,6 +47,13 @@ async function main() {
 
   // Week6: Vision 工具（图片理解）
   tools.register(createVisionTool(config.visionModel ?? config.defaultModel));
+
+  // Week8: 图片生成工具
+  tools.register(
+    createImageGenTool(
+      new ImageGenerator({ baseUrl: config.providers.openai?.baseUrl }),
+    ),
+  );
 
   const app = createApp({
     llm,
