@@ -9,3 +9,4 @@ export { Workflow, type WorkflowRunResult, type WorkflowContext } from "./workfl
 export { BackupManager, type BackupInfo } from "./backup/index.js";
 export { UserManager, type User, type UserQuota } from "./user/manager.js";
 export { AuditLogger, type AuditEntry } from "./audit/index.js";
+export { TextToSpeech, type TTSConfig } from "./tts/index.js";
