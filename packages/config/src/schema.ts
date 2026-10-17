@@ -32,7 +32,7 @@ export const ConfigSchema = z.object({
   /** 主模型选择（优先于 defaultModel）；ref 或 alias，支持 fallbacks 链 */
   model: ModelSelectionSchema.optional(),
   providers: z
-    .record(z.object({ apiKey: z.string(), baseUrl: z.string().optional() }))
+    .record(z.object({ apiKey: z.string(), baseUrl: z.string().optional(), api: z.string().optional() }))
     .default({}),
   stateDir: z.string().default(""),
   workspaceDir: z.string().default("."),

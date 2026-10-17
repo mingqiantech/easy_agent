@@ -1,42 +1,32 @@
 {
-  // 复制到 ~/.easy-agent/easy-agent.json 即成为全局配置
-  // API key 不写在这里：用 .env / 环境变量（OPENAI_API_KEY 等）注入
-
-  // ── 模型目录（OpenClaw 方案）：key = "provider/model"，alias 给短名 ──
+  // ── 模型目录（OpenClaw 方案）：key = "<provider>/<model-id>"，alias 给短名 ──
   "models": {
-    "openai/qwen3.8-flash": { "alias": "qwen" },
+    "qwencloud-token-plan/qwen3.8-flash": { "alias": "flash", "supportsVision": true },
+    "qwencloud-token-plan/qwen3.8-max":   { "alias": "max",   "supportsVision": true },
     "openai/deepseek-v3": { "alias": "cheap" },
-    "anthropic/claude-sonnet-4-6": { "alias": "sonnet" }
+    "ollama/qwen3.5:9b":  { "alias": "local9b" }
   },
 
-  // ── 主模型 + 有序故障转移链（可写 ref 或 alias） ──
-  // 主模型调用失败时自动按 fallbacks 顺序切换；
-  // 未配置本字段时回退使用 defaultModel（向后兼容）
-  "model": {
-    "primary": "qwen",
-    "fallbacks": ["cheap"]
-  },
+  // ── 主模型 + 有序故障转移链；ref / alias / 裸 id 三种写法均可 ──
+  "model": { "primary": "flash", "fallbacks": ["cheap", "local9b"] },
 
-  // "defaultModel": "openai/qwen3.8-flash",
-
+  // ── providers ──
+  // "api" = 底层协议（openai | anthropic | ollama | google | openrouter），
+  //   允许自定义网关名（对齐 openclaw 的 provider 命名，如 "qwencloud-token-plan"）。
+  // 值支持 "${ENV_VAR}" 占位符：运行时从环境变量（含 ~/.easy-agent/.env）注入，密钥不落盘。
   "providers": {
-    "openai": {
-      // apiKey 由 OPENAI_API_KEY 注入；这里只放网关地址等非敏感项
-      "baseUrl": "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"
+    "qwencloud-token-plan": {
+      "api": "openai",
+      "baseUrl": "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
+      "apiKey": "${OPENAI_API_KEY}"
+    },
+    "ollama": {
+      "api": "ollama",
+      "baseUrl": "http://localhost:11434",
+      "apiKey": "ollama"
     }
   },
 
-  // ── 用途槽位（可选，同样支持 alias） ──
-  "visionModel": "qwen",
-  "imageGenModel": "openai/dall-e-3",
-
-  "telegram": {
-    "botToken": "",
-    "allowedUserIds": []
-  },
-  "discord": {
-    "botToken": "",
-    "applicationId": "",
-    "allowedUserIds": []
-  }
+  "visionModel": "flash",
+  "imageGenModel": "openai/dall-e-3"
 }

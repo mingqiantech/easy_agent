@@ -7,6 +7,8 @@ import { OpenRouterProvider } from "./providers/openrouter.js";
 export interface ProviderConfig {
   apiKey: string;
   baseUrl?: string;
+  /** 工厂类型名（默认用 provider 自身名）；支持 "qwencloud-token-plan": {api:"openai"} 自定义别名 */
+  api?: string;
 }
 type ProviderConstructor = (config: ProviderConfig) => LLMProvider;
 
@@ -30,11 +32,12 @@ export function getProvider(name: string, config: ProviderConfig): LLMProvider {
   if (instances.has(cacheKey)) {
     return instances.get(cacheKey)!;
   }
-  const factory = factories[name];
+  const kind = config.api ?? name;
+  const factory = factories[kind];
   if (!factory) {
     const available = Object.keys(factories).join(", ");
     throw new Error(
-      `Unknown provider:"${name}". Available providers: ${available}`,
+      `Unknown provider:"${name}" (api="${kind}"). Available api types: ${available}`,
     );
   }
   const provider = factory(config);

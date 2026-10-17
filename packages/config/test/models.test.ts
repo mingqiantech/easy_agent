@@ -6,7 +6,7 @@ import os from "node:os";
 const TEST_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "easy-agent-models-test-"));
 process.env.EASY_AGENT_STATE_DIR = TEST_DIR;
 
-import { loadConfig } from "../src/loader.js";
+import { loadConfig, stripJsonComments } from "../src/loader.js";
 import {
   resolveRef,
   modelChain,
@@ -131,5 +131,68 @@ describe("loadConfig normalization", () => {
     });
     expect(resolveImageGenModelId(config)).toBe("dall-e-3");
     expect(resolveImageGenModelId(loadConfig(base))).toBeUndefined();
+  });
+});
+
+describe("providers 进阶（OpenClaw 式自定义 provider）", () => {
+  it("stripJsonComments 不破坏字符串内的 // 与 URL", () => {
+    const src = [
+      "{",
+      "  // c https://a.example",
+      '  "url": "https://x.example/v1" /* b */',
+      "}",
+    ].join(String.fromCharCode(10));
+    const parsed = JSON.parse(stripJsonComments(src));
+    expect(parsed.url).toBe("https://x.example/v1");
+  });
+
+  it("overrides 的 apiKey 支持 ENV 引用；api 字段透传", () => {
+    const saved = process.env.MY_GW_SECRET;
+    process.env.MY_GW_SECRET = "sk-from-env";
+    const ref = String.fromCharCode(36, 123) + "MY_GW_SECRET" + String.fromCharCode(125);
+    const config = loadConfig({
+      providers: {
+        mygw: {
+          apiKey: ref,
+          baseUrl: "https://gw.example/v1",
+          api: "openai",
+        },
+      },
+    });
+    const gw = config.providers.mygw!;
+    expect(gw.apiKey).toBe("sk-from-env");
+    expect(gw.api).toBe("openai");
+    expect(gw.baseUrl).toBe("https://gw.example/v1");
+    if (saved === undefined) delete process.env.MY_GW_SECRET;
+    else process.env.MY_GW_SECRET = saved;
+  });
+
+  it("文件与 env 按 provider 字段合并：env apiKey 优先，文件 baseUrl/api 保留", () => {
+    const cfgFile = [TEST_DIR, "easy-agent.json"].join("/");
+    const savedK = process.env.OPENAI_API_KEY;
+    const savedU = process.env.OPENAI_BASE_URL;
+    const ph = String.fromCharCode(36, 123) + "OPENAI_API_KEY" + String.fromCharCode(125);
+    require("node:fs").writeFileSync(
+      cfgFile,
+      JSON.stringify({
+        providers: {
+          openai: { apiKey: ph, baseUrl: "https://file.example/v1", api: "openai" },
+        },
+      }),
+    );
+    process.env.OPENAI_API_KEY = "sk-env-wins";
+    delete process.env.OPENAI_BASE_URL;
+
+    const config = loadConfig();
+    const p = config.providers.openai!;
+    expect(p.apiKey).toBe("sk-env-wins");
+    expect(p.baseUrl).toBe("https://file.example/v1");
+    expect(p.api).toBe("openai");
+
+    if (savedK === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = savedK;
+    if (savedU === undefined) delete process.env.OPENAI_BASE_URL;
+    else process.env.OPENAI_BASE_URL = savedU;
+    require("node:fs").unlinkSync(cfgFile);
   });
 });

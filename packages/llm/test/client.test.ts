@@ -109,3 +109,24 @@ describe("LLMClient failover (OpenClaw 方案)", () => {
     expect(fallbackCalls).toBe(before);
   });
 });
+
+describe("registry 别名路由（自定义 provider 名经 api 字段）", () => {
+  it("routes custom provider name via api field", async () => {
+    const client = new LLMClient({
+      providers: { "token-plan": { apiKey: "tp-key-0001", api: "okp" } },
+    });
+    const before = fallbackCalls;
+    const r = await client.generate({ model: "token-plan/some-model", messages: [] });
+    expect(r.content).toBe("from fallback");
+    expect(fallbackCalls).toBe(before + 1);
+  });
+
+  it("unknown api type reports available types", async () => {
+    const client = new LLMClient({
+      providers: { weird: { apiKey: "w12345678", api: "nope" } },
+    });
+    await expect(
+      client.generate({ model: "weird/m", messages: [] }),
+    ).rejects.toThrow(/Unknown provider.*openai/);
+  });
+});
