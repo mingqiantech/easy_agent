@@ -27,3 +27,4 @@ export {
   type Notification,
   type NotificationLevel,
 } from "./notifications/index.js";
+export { SkillManager, parseSkillFile, type Skill } from "./skill/manager.js";
