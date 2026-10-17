@@ -9,6 +9,7 @@ import type { BasicMemory } from "@easy-agent/core/memory/basic";
 import { serveStatic } from "hono/bun";
 import { Observability } from "@easy-agent/core/observability";
 import { getDatabase } from "@easy-agent/core/database";
+import { loadSettings, saveSettings } from "./settings.js";
 import path from "node:path";
 import os from "node:os";
 import fs from "node:fs";
@@ -55,6 +56,8 @@ export interface ServerDeps {
   config: any;
   /** 多 Agent：name -> 运行时（模型/工作区/记忆） */
   agents: Record<string, AgentRuntime>;
+  /** 梦境单轮执行器（index.ts 注入：接线 + 防并发） */
+  runDreaming?: () => Promise<Record<string, unknown>>;
 }
 
 export function createApp(deps: ServerDeps): Hono {
@@ -306,6 +309,105 @@ export function createApp(deps: ServerDeps): Hono {
     const p = c.req.query("path");
     if (!p) return c.json({ error: "missing path" }, 400);
     return c.json(await deps.memory.readMemory());
+  });
+
+  // ── 设置：梦境调度 + 记忆（Web 设置页） ──
+  app.get("/api/settings", (c) => {
+    const db2 = getDatabase();
+    const rows = db2
+      .prepare("SELECT phase, last_run_at, state FROM dreaming_state")
+      .all() as any[];
+    const status: Record<string, any> = {};
+    for (const r of rows) {
+      let parsed: any = {};
+      try {
+        parsed = JSON.parse(r.state || "{}");
+      } catch {}
+      status[r.phase] = { lastRunAt: r.last_run_at, ...parsed };
+    }
+    return c.json({
+      settings: loadSettings(deps.config.stateDir),
+      dreamingStatus: status,
+      paths: {
+        stateDir: deps.config.stateDir,
+        workspaceDir: deps.config.workspaceDir,
+      },
+    });
+  });
+
+  app.patch("/api/settings", async (c) => {
+    const body = await c.req.json().catch(() => ({}) as any);
+    const cur = loadSettings(deps.config.stateDir);
+    const d = body.dreaming ?? {};
+    if (typeof d.enabled === "boolean") cur.dreaming.enabled = d.enabled;
+    if (typeof d.intervalMinutes === "number") {
+      const v = Math.round(d.intervalMinutes);
+      if (v < 5 || v > 10080)
+        return c.json({ error: "intervalMinutes 需在 5~10080 分钟之间" }, 400);
+      cur.dreaming.intervalMinutes = v;
+    }
+    saveSettings(deps.config.stateDir, cur);
+    return c.json({ settings: cur });
+  });
+
+  app.post("/api/settings/dreaming/run", async (c) => {
+    if (!deps.runDreaming) return c.json({ error: "梦境不可用" }, 503);
+    try {
+      return c.json({ ok: true, result: await deps.runDreaming() });
+    } catch (e: any) {
+      return c.json({ error: String(e?.message ?? e) }, 500);
+    }
+  });
+
+  // MEMORY.md 读写（设置页记忆编辑器）
+  app.get("/api/memory/content", async (c) =>
+    c.json({ content: await deps.memory.readMemory() }),
+  );
+  app.put("/api/memory/content", async (c) => {
+    const body = await c.req.json().catch(() => ({}) as any);
+    if (typeof body.content !== "string")
+      return c.json({ error: "content 必须是字符串" }, 400);
+    await deps.memory.writeMemory(body.content);
+    return c.json({ ok: true });
+  });
+
+  // ── Token 用量 ──
+  app.get("/api/usage", (c) => {
+    const db2 = getDatabase();
+    const days = Math.min(Math.max(Number(c.req.query("days") ?? 30), 1), 365);
+    const since = Date.now() - days * 86400000;
+    const totals = db2
+      .prepare(
+        `SELECT COUNT(*) calls, COALESCE(SUM(prompt_tokens),0) prompt,
+                COALESCE(SUM(completion_tokens),0) completion,
+                COALESCE(SUM(total_tokens),0) total
+         FROM token_usage WHERE created_at >= ?`,
+      )
+      .get(since) as any;
+    const daily = db2
+      .prepare(
+        `SELECT strftime('%Y-%m-%d', created_at/1000, 'unixepoch') day,
+                SUM(prompt_tokens) prompt, SUM(completion_tokens) completion,
+                SUM(total_tokens) total, COUNT(*) calls
+         FROM token_usage WHERE created_at >= ?
+         GROUP BY day ORDER BY day DESC LIMIT ?`,
+      )
+      .all(since, days + 2) as any[];
+    const byModel = db2
+      .prepare(
+        `SELECT model, SUM(total_tokens) total, COUNT(*) calls
+         FROM token_usage WHERE created_at >= ?
+         GROUP BY model ORDER BY total DESC`,
+      )
+      .all(since) as any[];
+    const byAgent = db2
+      .prepare(
+        `SELECT s.agent_id agent, SUM(t.total_tokens) total, COUNT(*) calls
+         FROM token_usage t JOIN sessions s ON s.id = t.session_id
+         WHERE t.created_at >= ? GROUP BY s.agent_id ORDER BY total DESC`,
+      )
+      .all(since) as any[];
+    return c.json({ days, totals, daily: daily.reverse(), byModel, byAgent });
   });
 
   app.get("/api/tools", (c) => c.json({ tools: deps.tools.getDefinitions() }));

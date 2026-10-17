@@ -16,6 +16,12 @@ import { MonitoringSystem } from "@easy-agent/core/monitoring/index";
 
 import { loadConfig } from "@easy-agent/config/loader";
 import { modelFallbackMap, resolveImageGenModelId, resolveAgents } from "@easy-agent/config/models";
+import { loadSettings } from "./settings.js";
+import {
+  lightDreaming,
+  remDreaming,
+  deepDreaming,
+} from "@easy-agent/memory/dreaming";
 import { getDatabase } from "@easy-agent/core/database";
 import net from "node:net";
 
@@ -104,6 +110,34 @@ async function main() {
   }
   console.log(`🤖 Agents: ${Object.keys(agents).join(", ")}`);
 
+  // 梦境（Dreaming）：浅眠→REM→深眠，短期记忆提炼晋升；设置页与调度器共用
+  const dreamDeps = {
+    db,
+    shortTerm,
+    llmGenerate: async (prompt: string) =>
+      (
+        await llm.generate({
+          model: config.defaultModel,
+          messages: [{ role: "user" as const, content: prompt }],
+        })
+      ).content,
+    readMemory: () => memory.readMemory(),
+    writeMemory: (content: string) => memory.writeMemory(content),
+  };
+  let dreamBusy = false;
+  async function runDreamingCycle() {
+    if (dreamBusy) throw new Error("上一次梦境仍在运行中");
+    dreamBusy = true;
+    try {
+      const light = await lightDreaming(dreamDeps);
+      const rem = await remDreaming(dreamDeps);
+      const deep = await deepDreaming(dreamDeps);
+      return { light, rem, deep };
+    } finally {
+      dreamBusy = false;
+    }
+  }
+
   const app = createApp({
     llm,
     sessions,
@@ -112,7 +146,28 @@ async function main() {
     memory,
     config,
     agents,
+    runDreaming: runDreamingCycle,
   });
+
+  // 梦境调度：每分钟查 settings.json；上次运行时间从 dreaming_state 读（重启不丢）
+  setInterval(async () => {
+    try {
+      const st = loadSettings(config.stateDir);
+      if (!st.dreaming.enabled || dreamBusy) return;
+      const row = db
+        .prepare("SELECT MAX(last_run_at) AS t FROM dreaming_state")
+        .get() as any;
+      if (
+        Date.now() - Number(row?.t ?? 0) <
+        st.dreaming.intervalMinutes * 60000
+      )
+        return;
+      await runDreamingCycle();
+      console.log("🌙 梦境巩固完成");
+    } catch (e: any) {
+      console.warn("🌙 梦境失败:", String(e?.message).slice(0, 140));
+    }
+  }, 60000);
   const port = Number(process.env.PORT ?? 4096);
   if (await portInUse(port)) {
     console.error(

@@ -79,6 +79,22 @@
     .agent-card .sub{font-size:11px;color:var(--muted);margin:4px 0 8px}
     .task{font-size:12px;background:var(--bg);border-radius:8px;padding:6px 9px;margin-top:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
     .task b{color:var(--accent)}
+    .settings-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px;padding:20px;overflow:auto}
+    .card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:16px;box-shadow:var(--shadow)}
+    .card h3{font-size:14px;margin-bottom:10px}
+    .set-row{display:flex;gap:10px;align-items:center;font-size:13px;margin-bottom:10px}
+    .set-row select,.usage-head select{padding:6px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);font-size:13px;color:var(--fg)}
+    .hint{font-size:12px;color:var(--muted);margin-top:10px;line-height:1.7}
+    .mem-ta{width:100%;height:200px;background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:10px;font:12px/1.6 ui-monospace,monospace;color:var(--fg);resize:vertical;margin-top:8px}
+    .metrics{display:flex;gap:12px;flex-wrap:wrap;padding:16px 20px 0}
+    .metric{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:10px 18px;box-shadow:var(--shadow);min-width:110px}
+    .m-val{font-size:20px;font-weight:800}
+    .m-lab{font-size:11px;color:var(--muted)}
+    .usage-head{display:flex;gap:8px;align-items:center;padding:16px 20px 0;font-size:13px;color:var(--muted)}
+    .usage-tables{display:grid;grid-template-columns:1fr 1fr;gap:14px;padding:14px 20px 20px}
+    .usage-table{width:100%;border-collapse:collapse;font-size:12px}
+    .usage-table th{text-align:left;color:var(--muted);font-weight:600;padding:4px 8px;border-bottom:1px solid var(--border)}
+    .usage-table td{padding:5px 8px;border-bottom:1px solid var(--border)}
     @media(max-width:768px){.sidebar{position:absolute;z-index:10;height:100%;transform:translateX(-100%);transition:.2s}.sidebar.open{transform:none}}
   </style>
 </head>
@@ -95,6 +111,8 @@
       <div class="tabs">
         <div class="tab active" id="tabChat" onclick="showView('chat')">💬 对话</div>
         <div class="tab" id="tabTopo" onclick="showView('topo')">🕸 Agent 拓扑</div>
+        <div class="tab" id="tabSettings" onclick="showView('settings')">⚙️ 设置</div>
+        <div class="tab" id="tabUsage" onclick="showView('usage')">📊 用量</div>
       </div>
       <div class="model-pick">
         <label>💭 思考</label>
@@ -120,11 +138,48 @@
       <div class="topo-wrap"><svg id="topoSvg" width="760" height="380"></svg></div>
       <div class="topo-cards" id="topoCards"></div>
     </div>
+
+    <div class="view" id="settingsView" hidden>
+      <div class="settings-grid">
+        <div class="card">
+          <h3>🌙 梦境 Dreaming</h3>
+          <div class="hint" style="margin-top:0">定期把短期记忆的高频条目提炼、归纳、晋升到 MEMORY.md（浅眠→REM→深眠）。开启后网关自动按间隔运行。</div>
+          <div class="set-row" style="margin-top:12px"><label><input type="checkbox" id="dreamEnabled"> 启用定时梦境</label></div>
+          <div class="set-row">间隔 <select id="dreamInterval">
+            <option value="60">1 小时</option><option value="180">3 小时</option><option value="360">6 小时</option><option value="720">12 小时</option><option value="1440">24 小时</option>
+          </select></div>
+          <button class="action-btn" onclick="runDreamNow()" id="dreamRunBtn">▶ 立即运行一次</button>
+          <button class="action-btn" onclick="saveSettings()" style="margin-left:8px">💾 保存设置</button>
+          <div class="hint" id="dreamStatus"></div>
+        </div>
+        <div class="card">
+          <h3>🧠 长期记忆 MEMORY.md</h3>
+          <div class="hint" id="memPaths" style="margin-top:0"></div>
+          <textarea class="mem-ta" id="memEdit" spellcheck="false"></textarea>
+          <button class="action-btn" onclick="saveMemory()" style="margin-top:10px">💾 保存记忆</button>
+          <div class="hint" id="setMsg"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="view" id="usageView" hidden>
+      <div class="usage-head">统计范围
+        <select id="usageDays" onchange="loadUsage()">
+          <option value="7">7 天</option><option value="30" selected>30 天</option><option value="90">90 天</option>
+        </select>
+      </div>
+      <div class="metrics" id="usageMetrics"></div>
+      <div style="padding:14px 20px 0"><div class="card"><h3>每日用量</h3><svg id="usageChart" width="100%" height="170"></svg></div></div>
+      <div class="usage-tables">
+        <div class="card"><h3>按模型</h3><table class="usage-table" id="usageModels"></table></div>
+        <div class="card"><h3>按 Agent</h3><table class="usage-table" id="usageAgents"></table></div>
+      </div>
+    </div>
   </div>
 
   <script>
     const API='';
-    let sid=null, agent='default', topoTimer=null, models=[];
+    let sid=null, agent='default', topoTimer=null, usageTimer=null, models=[];
     const esc=t=>{const d=document.createElement('div');d.textContent=t;return d.innerHTML};
     const hhmm=ts=>new Date(ts).toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'});
 
@@ -272,12 +327,14 @@
 
     /* ── 拓扑视图 ── */
     function showView(v){
-      document.getElementById('chatView').hidden=v!=='chat';
-      document.getElementById('topoView').hidden=v!=='topo';
-      document.getElementById('tabChat').classList.toggle('active',v==='chat');
-      document.getElementById('tabTopo').classList.toggle('active',v==='topo');
+      const map={chat:'chatView',topo:'topoView',settings:'settingsView',usage:'usageView'};
+      for(const k in map)document.getElementById(map[k]).hidden=v!==k;
+      for(const t of ['Chat','Topo','Settings','Usage'])document.getElementById('tab'+t).classList.toggle('active',v===t.toLowerCase());
+      if(topoTimer){clearInterval(topoTimer);topoTimer=null;}
+      if(usageTimer){clearInterval(usageTimer);usageTimer=null;}
       if(v==='topo'){refreshTopo();topoTimer=setInterval(refreshTopo,5000);}
-      else if(topoTimer){clearInterval(topoTimer);topoTimer=null;}
+      if(v==='settings')loadSettingsView();
+      if(v==='usage'){loadUsage();usageTimer=setInterval(loadUsage,15000);}
     }
     async function refreshTopo(){
       try{
@@ -327,6 +384,75 @@
     }
     function pickAgentByName(name){
       document.getElementById('agentSel').value=name;switchAgent();showView('chat');
+    }
+
+    /* ── 设置页 ── */
+    const ago=ts=>{if(!ts)return '从未';const s=(Date.now()-ts)/1000;return s<90?'刚刚':s<3600?Math.round(s/60)+' 分钟前':s<86400?Math.round(s/3600)+' 小时前':Math.round(s/86400)+' 天前'};
+    async function loadSettingsView(){
+      try{
+        const j=await (await fetch(`${API}/api/settings`)).json();
+        document.getElementById('dreamEnabled').checked=!!j.settings.dreaming.enabled;
+        document.getElementById('dreamInterval').value=String(j.settings.dreaming.intervalMinutes);
+        const ph={light:'🌗 浅眠',rem:'🌀 REM',deep:'🌑 深眠'};
+        document.getElementById('dreamStatus').innerHTML=['light','rem','deep'].map(k=>{
+          const s=j.dreamingStatus[k];
+          if(!s)return `<div>${ph[k]}：从未运行</div>`;
+          const info=Object.entries(s).filter(([k2])=>k2!=='lastRunAt').map(([k2,v2])=>`${k2}=${v2}`).join(' ');
+          return `<div>${ph[k]}：${ago(s.lastRunAt)}${info?' · '+esc(info):''}</div>`;
+        }).join('');
+        document.getElementById('memPaths').textContent='工作区: '+j.paths.workspaceDir;
+        const m=await (await fetch(`${API}/api/memory/content`)).json();
+        document.getElementById('memEdit').value=m.content??'';
+      }catch(e){}
+    }
+    async function saveSettings(){
+      const body={dreaming:{enabled:document.getElementById('dreamEnabled').checked,intervalMinutes:Number(document.getElementById('dreamInterval').value)}};
+      const r=await fetch(`${API}/api/settings`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+      const j=await r.json();
+      document.getElementById('setMsg').textContent=j.error?'❌ '+j.error:'✓ 设置已保存，调度器一分钟内生效';
+    }
+    async function runDreamNow(){
+      const b=document.getElementById('dreamRunBtn');b.disabled=true;b.textContent='运行中…';
+      try{
+        const j=await (await fetch(`${API}/api/settings/dreaming/run`,{method:'POST'})).json();
+        document.getElementById('setMsg').textContent=j.error?'❌ '+j.error:'✓ 梦境完成: '+JSON.stringify(j.result);
+        loadSettingsView();
+      }finally{b.disabled=false;b.textContent='▶ 立即运行一次';}
+    }
+    async function saveMemory(){
+      const j=await (await fetch(`${API}/api/memory/content`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:document.getElementById('memEdit').value})})).json();
+      document.getElementById('setMsg').textContent=j.ok?'✓ MEMORY.md 已保存':'❌ '+(j.error||'失败');
+    }
+
+    /* ── 用量页 ── */
+    const fmtK=n=>{n=n||0;return n>=1e6?(n/1e6).toFixed(2)+'M':n>=1e3?(n/1e3).toFixed(1)+'k':String(Math.round(n))};
+    async function loadUsage(){
+      try{
+        const days=Number(document.getElementById('usageDays').value||30);
+        const u=await (await fetch(`${API}/api/usage?days=${days}`)).json();
+        const t=u.totals||{};
+        document.getElementById('usageMetrics').innerHTML=[
+          ['总 tokens',fmtK(t.total)],['输入',fmtK(t.prompt)],['输出',fmtK(t.completion)],['LLM 调用',t.calls||0],
+        ].map(([l,v])=>`<div class="metric"><div class="m-val">${v}</div><div class="m-lab">${l}</div></div>`).join('');
+        renderUsageChart(u.daily||[]);
+        const rows=(list,key)=>'<tr><th>'+key+'</th><th>tokens</th><th>次数</th></tr>'+(list||[]).map(x=>`<tr><td>${esc(x[key])}</td><td>${fmtK(x.total)}</td><td>${x.calls}</td></tr>`).join('')||'<tr><td colspan="3" style="color:var(--muted)">暂无数据</td></tr>';
+        document.getElementById('usageModels').innerHTML=rows(u.byModel,'model');
+        document.getElementById('usageAgents').innerHTML=rows(u.byAgent,'agent');
+      }catch(e){}
+    }
+    function renderUsageChart(daily){
+      const svg=document.getElementById('usageChart');
+      const W=svg.clientWidth||720,H=170,pad=10;
+      const defs='<defs><linearGradient id="ub" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#4f6df5"/><stop offset="1" stop-color="#8b5cf6"/></linearGradient></defs>';
+      if(!daily.length){svg.innerHTML=defs+'<text x="12" y="90" font-size="12" fill="#8b93a3">暂无用量记录</text>';return;}
+      const max=Math.max(...daily.map(d=>d.total),1);
+      const step=(W-2*pad)/daily.length,bw=Math.max(3,Math.min(34,step-6));
+      svg.innerHTML=defs+daily.map((d,i)=>{
+        const h=Math.max(3,(d.total/max)*(H-56));
+        const x=pad+i*step+(step-bw)/2,y=H-30-h;
+        const lbl=daily.length<=16||i%Math.ceil(daily.length/10)===0?`<text x="${x+bw/2}" y="${H-12}" font-size="9" fill="#8b93a3" text-anchor="middle">${d.day.slice(5)}</text>`:'';
+        return `<rect x="${x}" y="${y}" width="${bw}" height="${h}" rx="3" fill="url(#ub)" style="cursor:pointer"><title>${d.day}: ${d.total} tokens / ${d.calls} 次</title></rect>${lbl}`;
+      }).join('')+`<text x="${W-pad}" y="14" font-size="10" fill="#8b93a3" text-anchor="end">峰值 ${fmtK(max)}</text>`;
     }
 
     (async function init(){

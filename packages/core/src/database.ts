@@ -121,6 +121,18 @@ function initializeSchema(db: Database): void {
       created_at INTEGER NOT NULL
     );
 
+    -- token 用量记录表（每步 LLM 调用）
+    CREATE TABLE IF NOT EXISTS token_usage (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id TEXT NOT NULL,
+      model TEXT NOT NULL,
+      prompt_tokens INTEGER NOT NULL DEFAULT 0,
+      completion_tokens INTEGER NOT NULL DEFAULT 0,
+      total_tokens INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_token_usage_created ON token_usage (created_at);
+
     -- 记忆条目表（向量搜索 join 用）
     CREATE TABLE IF NOT EXISTS memory_entries (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
