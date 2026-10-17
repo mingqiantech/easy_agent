@@ -22,6 +22,10 @@ describe("SessionManager", () => {
   it("lists sessions", () => {
     const list = sessions.list();
     expect(list.length).toBeGreaterThan(0);
+    // 回归测试：updateAt 曾因错误列名 row.update_at 恒为 undefined
+    const s = list[0]!;
+    expect(typeof s.updateAt).toBe("number");
+    expect(s.updateAt).toBeGreaterThanOrEqual(s.createAt);
   });
 
   it("adds and retrieves messages", () => {

@@ -89,7 +89,7 @@ export class SessionManager {
       model: row.model,
       status: row.status,
       createAt: row.created_at,
-      updateAt: row.update_at,
+      updateAt: row.updated_at,
       messageCount: row.msg_count,
     }));
   }
