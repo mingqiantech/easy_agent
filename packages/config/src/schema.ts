@@ -24,6 +24,10 @@ export const CatalogEntrySchema = z.object({
   supportsTools: z.boolean().optional(),
   /** 是否支持深度思考（false 时 agent 的 thinking 自动降级为 off） */
   reasoning: z.boolean().optional(),
+  /** 元信息（对齐 openclaw 模型目录；暂只存不消费） */
+  contextWindow: z.number().optional(),
+  maxOutputTokens: z.number().optional(),
+  name: z.string().optional(),
 });
 export type CatalogEntry = z.infer<typeof CatalogEntrySchema>;
 

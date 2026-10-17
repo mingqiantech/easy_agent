@@ -90,7 +90,7 @@ describe("modelFallbackMap", () => {
 });
 
 describe("loadConfig normalization", () => {
-  const base = { providers: { openai: { apiKey: "***" } } };
+  const base = { providers: { openai: { apiKey: "sk-base" } } };
 
   it("model object overrides defaultModel, chain[0] written back", () => {
     const config = loadConfig({

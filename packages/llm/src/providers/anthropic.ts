@@ -20,8 +20,15 @@ export class AnthropicProvider implements LLMProvider {
 
   constructor(config: { apiKey: string; baseUrl?: string }) {
     this.client = createAnthropic({
-      apiKey: "***",
-      baseURL: config.baseUrl,
+      apiKey: config.apiKey,
+      // token-plan 订阅密钥只认 Authorization: Bearer（单独 x-api-key 返回 401）；
+      // 两个头同发，兼容标准 Anthropic 端点与网关端点
+      headers: { Authorization: "Bearer " + config.apiKey },
+      // baseURL 规范化：openclaw 风格 baseUrl 不带 /v1，ai-sdk 需要 {base}/v1
+      baseURL: (function () {
+        const b = (config.baseUrl || "https://api.anthropic.com").replace(/\/+$/, "");
+        return /\/v1\d?$/.test(b) ? b : b + "/v1";
+      })(),
     });
   }
   async listModels(): Promise<ModelInfo[]> {

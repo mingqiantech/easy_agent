@@ -58,9 +58,9 @@ registerProvider("okp", () => new OkProvider());
 registerProvider("partialp", () => new PartialStreamProvider());
 
 const providers = {
-  failp: { apiKey: "***" },
-  okp: { apiKey: "***" },
-  partialp: { apiKey: "***" },
+  failp: { apiKey: "sk-failp" },
+  okp: { apiKey: "sk-okp" },
+  partialp: { apiKey: "sk-partialp" },
 };
 
 describe("LLMClient failover (OpenClaw 方案)", () => {

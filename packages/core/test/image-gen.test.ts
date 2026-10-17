@@ -16,7 +16,7 @@ describe("ImageGenerator (offline tests)", () => {
     delete process.env.OPENAI_API_KEY;
     expect(new ImageGenerator().available).toBe(false);
 
-    process.env.OPENAI_API_KEY = "***";
+    process.env.OPENAI_API_KEY = "sk-test";
     expect(new ImageGenerator().available).toBe(true);
 
     if (saved === undefined) delete process.env.OPENAI_API_KEY;
@@ -32,7 +32,7 @@ describe("ImageGenerator (offline tests)", () => {
 
   it("rejects empty prompt", async () => {
     const saved = process.env.OPENAI_API_KEY;
-    process.env.OPENAI_API_KEY = "***";
+    process.env.OPENAI_API_KEY = "sk-test";
     await expect(gen.generate("   ")).rejects.toThrow("Prompt is empty");
     if (saved === undefined) delete process.env.OPENAI_API_KEY;
     else process.env.OPENAI_API_KEY = saved;
@@ -40,7 +40,7 @@ describe("ImageGenerator (offline tests)", () => {
 
   it("rejects invalid size before calling API", async () => {
     const saved = process.env.OPENAI_API_KEY;
-    process.env.OPENAI_API_KEY = "***";
+    process.env.OPENAI_API_KEY = "sk-test";
     await expect(gen.generate("a cat", { size: "9999x9999" as any })).rejects.toThrow(
       "Invalid size",
     );
