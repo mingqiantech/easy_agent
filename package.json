@@ -13,7 +13,9 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "bun test",
     "build:binary": "bun build --compile packages/cli/src/entry.ts --outfile dist/easy-agent",
-    "build:server": "bun build --compile packages/server/src/index.ts --outfile dist/easy-agent-gateway"
+    "build:server": "bun build --compile packages/server/src/index.ts --outfile dist/easy-agent-gateway",
+    "install:global": "bash scripts/install.sh",
+    "install:global:with-server": "bash scripts/install.sh --server"
   },
   "devDependencies": {
     "typescript": "5.8.2",
