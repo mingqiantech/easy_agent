@@ -9,6 +9,7 @@ import {
   Message,
 } from "@easy-agent/schema/llm";
 import { toCoreMessages } from "../convert.js";
+import { openaiThinkingOptions } from "../thinking.js";
 
 export class OpenAIProvider implements LLMProvider {
   readonly name = "openai";
@@ -70,6 +71,7 @@ export class OpenAIProvider implements LLMProvider {
         tools,
         temperature: request.generation?.temperature,
         maxTokens: request.generation?.maxTokens,
+        providerOptions: openaiThinkingOptions(request.generation?.thinking),
       });
       return {
         content: result.text,
@@ -104,6 +106,7 @@ export class OpenAIProvider implements LLMProvider {
       tools,
       temperature: request.generation?.temperature,
       maxTokens: request.generation?.maxTokens,
+      providerOptions: openaiThinkingOptions(request.generation?.thinking),
     });
     for await (const part of result.fullStream) {
       switch (part.type) {

@@ -127,7 +127,7 @@
       try{
         const r=await fetch(`${API}/api/agents`);const{agents}=await r.json();
         const sel=document.getElementById('agentSel');
-        sel.innerHTML=agents.map(a=>`<option value="${esc(a.name)}">${esc(a.name)} · ${esc(a.description)}</option>`).join('');
+        sel.innerHTML=agents.map(a=>`<option value="${esc(a.name)}">${esc(a.name)} · ${esc(a.description)}${a.thinking&&a.thinking!=='off'?' 💭'+esc(a.thinking):''}</option>`).join('');
         sel.value=agent;
       }catch(e){}
     }
@@ -300,7 +300,7 @@
       document.getElementById('topoCards').innerHTML=(t.nodes??[]).map(n=>`
         <div class="agent-card">
           <h4><span class="dot ${n.busy?'busy':''}"></span>${esc(n.name)}</h4>
-          <div class="sub">${esc(n.description)} · ${esc((n.model||'').split('/').pop())} · 派生子任务 ${n.subAgentCalls}</div>
+          <div class="sub">${esc(n.description)} · ${esc((n.model||'').split('/').pop())}${n.thinking&&n.thinking!=='off'?' · 💭'+esc(n.thinking):''} · 派生子任务 ${n.subAgentCalls}</div>
           ${n.currentTasks.map(tk=>`<div class="task"><b>${esc(tk.title)}</b> · ${tk.msgCount} 条 · ${tk.ageSec<60?tk.ageSec+'秒前':Math.round(tk.ageSec/60)+'分钟前'}</div>`).join('')||'<div class="task" style="color:var(--muted)">暂无活动会话</div>'}
         </div>`).join('');
     }

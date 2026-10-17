@@ -10,6 +10,17 @@
   // ── 主模型 + 有序故障转移链；ref / alias / 裸 id 三种写法均可 ──
   "model": { "primary": "flash", "fallbacks": ["cheap", "local9b"] },
 
+  // ── 思考等级（OpenClaw 风格 thinking）：off | low | medium | high ──
+  // 全局默认；各 agent 可用 thinking 独立覆盖；
+  // 目录中标记 "reasoning": false 的模型会自动降级为 off（不发送思考参数）
+  "thinkingDefault": "low",
+
+  // ── 多 Agent（model/thinking/workspaceDir/description 各自独立；页面可切换） ──
+  "agents": {
+    "coder":  { "description": "编程助手", "model": "max", "thinking": "high" },
+    "writer": { "description": "写作助手", "model": "flash", "thinking": "low" }
+  },
+
   // ── providers ──
   // "api" = 底层协议（openai | anthropic | ollama | google | openrouter），
   //   允许自定义网关名（对齐 openclaw 的 provider 命名，如 "qwencloud-token-plan"）。

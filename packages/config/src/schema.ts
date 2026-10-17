@@ -22,11 +22,18 @@ export const CatalogEntrySchema = z.object({
   /** 能力标记（供选模型时参考） */
   supportsVision: z.boolean().optional(),
   supportsTools: z.boolean().optional(),
+  /** 是否支持深度思考（false 时 agent 的 thinking 自动降级为 off） */
+  reasoning: z.boolean().optional(),
 });
 export type CatalogEntry = z.infer<typeof CatalogEntrySchema>;
 
+export const ThinkingEnum = z.enum(["off", "low", "medium", "high"]);
+export type ThinkingLevel = z.infer<typeof ThinkingEnum>;
+
 export const ConfigSchema = z.object({
   defaultModel: z.string().default("openai/qwen3.8-flash"),
+  /** 全局思考等级默认值（各 agent 可用 thinking 覆盖） */
+  thinkingDefault: ThinkingEnum.default("off"),
   /** 模型目录："provider/model" -> { alias?, ... } */
   models: z.record(CatalogEntrySchema).default({}),
   /** 主模型选择（优先于 defaultModel）；ref 或 alias，支持 fallbacks 链 */
@@ -50,13 +57,15 @@ export const ConfigSchema = z.object({
       allowedUserIds: z.array(z.string()).default([]),
     })
     .optional(),
-  /** 多 Agent 定义："名字" -> { model?, workspaceDir?, description? } */
+  /** 多 Agent 定义："名字" -> { model?, workspaceDir?, description?, thinking? } */
   agents: z
     .record(
       z.object({
         description: z.string().optional(),
         model: z.string().optional(),
         workspaceDir: z.string().optional(),
+        /** 该 agent 的思考等级；缺省继承 thinkingDefault */
+        thinking: ThinkingEnum.optional(),
       }),
     )
     .default({}),

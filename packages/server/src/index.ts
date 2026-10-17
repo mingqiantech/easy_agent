@@ -98,6 +98,7 @@ async function main() {
       model: a.model,
       description: a.description,
       workspaceDir: a.workspaceDir,
+      thinking: a.thinking,
       memory: mem,
     };
   }

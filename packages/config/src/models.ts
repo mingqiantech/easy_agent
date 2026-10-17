@@ -64,17 +64,38 @@ export function resolveImageGenModelId(config: Config): string | undefined {
   return idx !== -1 ? ref.slice(idx + 1) : ref;
 }
 
+export type ThinkingLevel = "off" | "low" | "medium" | "high";
+
 export interface ResolvedAgent {
   name: string;
   model: string;
   workspaceDir: string;
   description: string;
+  thinking: ThinkingLevel;
+}
+
+/**
+ * 有效思考等级：agent.thinking > thinkingDefault；
+ * 若目标模型在目录中明确标记 reasoning:false，自动降级为 off。
+ */
+function effectiveThinking(
+  config: Config,
+  modelRef: string,
+  override?: string,
+): ThinkingLevel {
+  const t = ((override as ThinkingLevel | undefined) ??
+    config.thinkingDefault ??
+    "off") as ThinkingLevel;
+  if (t === "off") return "off";
+  const entry = config.models?.[modelRef];
+  if (entry && entry.reasoning === false) return "off";
+  return t;
 }
 
 /**
  * 解析全部 Agent（多 Agent 支持，OpenClaw 式）：
  * default 始终存在 = 主模型 + 全局工作区；配置里 agents.* 逐个叠加，
- * model/workspaceDir 缺省继承 default。
+ * model/workspaceDir/thinking 缺省继承 default。
  */
 export function resolveAgents(config: Config): ResolvedAgent[] {
   const primary = modelChain(config)[0];
@@ -83,15 +104,18 @@ export function resolveAgents(config: Config): ResolvedAgent[] {
       name: "default",
       model: primary,
       workspaceDir: config.workspaceDir,
-      description: "\u9ed8\u8ba4\u52a9\u624b",
+      description: "默认助手",
+      thinking: effectiveThinking(config, primary),
     },
   ];
   for (const [name, a] of Object.entries(config.agents ?? {})) {
+    const model = a.model ? resolveRef(config, a.model) : primary;
     out.push({
       name,
-      model: a.model ? resolveRef(config, a.model) : primary,
+      model,
       workspaceDir: a.workspaceDir ?? config.workspaceDir,
       description: a.description ?? name,
+      thinking: effectiveThinking(config, model, a.thinking),
     });
   }
   return out;

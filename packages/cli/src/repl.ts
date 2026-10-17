@@ -10,7 +10,7 @@ import { createVisionTool } from "@easy-agent/core/tool/builtins/vision";
 import { ImageGenerator } from "@easy-agent/core/image-gen/index";
 import { createImageGenTool } from "@easy-agent/core/tool/builtins/image-gen";
 import { PluginRegistry } from "@easy-agent/core/plugin/registry";
-import { modelChain, resolveImageGenModelId } from "@easy-agent/config/models";
+import { modelChain, resolveImageGenModelId, resolveAgents } from "@easy-agent/config/models";
 import path from "node:path";
 
 export async function startRepl(
@@ -25,6 +25,9 @@ export async function startRepl(
   if (fresh.length > 0) {
     console.log(`📦 工作区初始化: ${workDir} (+${fresh.join(", ")})`);
   }
+
+  // 本 REPL 以 default agent 身份运行，思考等级跟随配置
+  const selfAgent = resolveAgents(config).find((a) => a.name === "default")!;
 
   const toolRegistry = new ToolRegistry(true);
 
@@ -140,6 +143,7 @@ export async function startRepl(
         } else if (cmd === "model") {
           const chain = modelChain(config);
           console.log(`  primary: ${chain[0]}`);
+          console.log(`  thinking: ${selfAgent.thinking}`);
           if (chain.length > 1)
             console.log(`  fallbacks: ${chain.slice(1).join(" → ")}`);
           const catalog = Object.entries(config.models ?? {});
@@ -159,6 +163,7 @@ export async function startRepl(
         const response = await sessions.run(sid, t, {
           toolRegistry,
           workDir,
+          thinking: selfAgent.thinking,
           onToolCall: (name, input) =>
             console.log(`\n🔧 ${name} ${JSON.stringify(input)}`),
           onToolResult: (name, result) => {

@@ -42,6 +42,7 @@ export interface AgentRuntime {
   model: string;
   description: string;
   workspaceDir: string;
+  thinking: string;
   memory: BasicMemory;
 }
 
@@ -80,6 +81,7 @@ export function createApp(deps: ServerDeps): Hono {
         name: a.name,
         model: a.model,
         description: a.description,
+        thinking: a.thinking,
       })),
     }),
   );
@@ -201,6 +203,7 @@ export function createApp(deps: ServerDeps): Hono {
         name: a.name,
         model: a.model,
         description: a.description,
+        thinking: a.thinking,
         sessions: agg?.c ?? 0,
         lastActive: agg?.last ?? 0,
         busy: nowTs - (agg?.last ?? 0) < 120000, // 2 分钟内有更新
@@ -238,8 +241,17 @@ export function createApp(deps: ServerDeps): Hono {
 
   app.post("/api/sessions/:id/messages", async (c) => {
     const body = await c.req.json();
-    const response = await deps.sessions.run(c.req.param("id"), body.text, {
+    const id = c.req.param("id");
+    const sess = deps.sessions.get(id);
+    const agent = sess ? deps.agents[sess.agentId] : undefined;
+    const response = await deps.sessions.run(id, body.text, {
       toolRegistry: deps.tools,
+      thinking: agent?.thinking as
+        | "off"
+        | "low"
+        | "medium"
+        | "high"
+        | undefined,
     });
     return c.json({ response });
   });

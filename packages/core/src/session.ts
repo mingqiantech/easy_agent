@@ -180,6 +180,7 @@ export class SessionManager {
     options?: {
       toolRegistry?: ToolRegistry;
       workDir?: string;
+      thinking?: "off" | "low" | "medium" | "high";
       onText?: (text: string) => void;
       onToolCall?: (name: string, input: unknown) => void;
       onToolResult?: (name: string, result: unknown) => void;
@@ -210,6 +211,10 @@ export class SessionManager {
         messages,
         tools: toolDefs,
         toolChoice: toolDefs?.length ? "auto" : undefined,
+        generation:
+          options?.thinking && options.thinking !== "off"
+            ? { thinking: options.thinking }
+            : undefined,
       });
 
       this.addMessage(sessionId, {

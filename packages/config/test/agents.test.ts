@@ -35,6 +35,7 @@ describe("resolveAgents（多 Agent）", () => {
       model: "openai/qwen3.8-flash",
       workspaceDir: "/home/dia/.easy-agent/workspace",
       description: "默认助手",
+      thinking: "off",
     });
   });
 
@@ -66,5 +67,32 @@ describe("resolveAgents（多 Agent）", () => {
     });
     const list = resolveAgents(config);
     expect(list[0].model).toBe("openai/deepseek-v3");
+  });
+
+  it("thinking: per-agent override > thinkingDefault; reasoning:false 自动降级", () => {
+    const config = fakeConfig({
+      thinkingDefault: "low",
+      models: {
+        ...catalog,
+        "openai/qwen-nothink": { alias: "nothink", reasoning: false },
+      },
+      agents: {
+        smart: { model: "max", thinking: "high" },
+        basic: {},
+        nope: { model: "openai/qwen-nothink", thinking: "high" },
+      },
+    } as any);
+    const list = resolveAgents(config);
+    expect(list[0]!.thinking).toBe("low"); // default 继承全局
+    expect(list[1]!.thinking).toBe("high"); // agent 独立覆盖
+    expect(list[2]!.thinking).toBe("low"); // 缺省继承全局
+    expect(list[3]!.thinking).toBe("off"); // 模型不支持 → 降级
+  });
+
+  it("thinkingDefault 缺省为 off（向后兼容：无 thinking 配置不变行为）", () => {
+    const config = fakeConfig({ agents: { x: { thinking: "medium" } } } as any);
+    const list = resolveAgents(config);
+    expect(list[0]!.thinking).toBe("off");
+    expect(list[1]!.thinking).toBe("medium");
   });
 });

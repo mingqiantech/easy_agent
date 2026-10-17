@@ -7,11 +7,16 @@ export { Message, ToolCall, ToolDefinition };
 /**
  * 生成选项（控制模型输出行为）
  */
+export const ThinkingLevelSchema = z.enum(["off", "low", "medium", "high"]);
+export type ThinkingLevel = z.infer<typeof ThinkingLevelSchema>;
+
 export const GenerationOptions = z.object({
   temperature: z.number().min(0).max(2).optional(),
   maxTokens: z.number().positive().optional(),
   topP: z.number().min(0).max(1).optional(),
   stopSequences: z.array(z.string()).optional(),
+  /** 思考等级（对齐 OpenClaw thinking）：off 不发送；openai 系走 reasoning_effort，anthropic 走 thinking.budget_tokens */
+  thinking: ThinkingLevelSchema.optional(),
 });
 export type GenerationOptions = z.infer<typeof GenerationOptions>;
 

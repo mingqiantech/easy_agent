@@ -9,6 +9,10 @@ import {
   Message,
 } from "@easy-agent/schema/llm";
 import { toCoreMessages } from "../convert.js";
+import {
+  anthropicMaxTokens,
+  anthropicThinkingOptions,
+} from "../thinking.js";
 
 export class AnthropicProvider implements LLMProvider {
   readonly name = "anthropic";
@@ -70,7 +74,11 @@ export class AnthropicProvider implements LLMProvider {
         messages,
         tools,
         temperature: request.generation?.temperature,
-        maxTokens: request.generation?.maxTokens ?? 8192,
+        maxTokens: anthropicMaxTokens(
+          request.generation?.thinking,
+          request.generation?.maxTokens,
+        ),
+        providerOptions: anthropicThinkingOptions(request.generation?.thinking),
       });
       return {
         content: result.text,
@@ -104,7 +112,11 @@ export class AnthropicProvider implements LLMProvider {
       messages,
       tools,
       temperature: request.generation?.temperature,
-      maxTokens: request.generation?.maxTokens ?? 8192,
+      maxTokens: anthropicMaxTokens(
+        request.generation?.thinking,
+        request.generation?.maxTokens,
+      ),
+      providerOptions: anthropicThinkingOptions(request.generation?.thinking),
     });
     for await (const part of result.fullStream) {
       switch (part.type) {
