@@ -56,13 +56,22 @@ if [[ ! -f "${HOME}/.easy-agent/easy-agent.json" ]]; then
   mkdir -p "${HOME}/.easy-agent"
   cat > "${HOME}/.easy-agent/easy-agent.json" <<'EOF'
 {
-  "defaultModel": "openai/qwen3.8-flash",
+  "models": {
+    "qwencloud-token-plan/qwen3.8-flash": { "alias": "flash", "reasoning": true },
+    "qwencloud-token-plan/qwen3.8-max":   { "alias": "max",   "reasoning": true }
+  },
+  "model": { "primary": "flash", "fallbacks": ["max"] },
+  "thinkingDefault": "off",
   "providers": {
-    "openai": { "baseUrl": "" }
+    "qwencloud-token-plan": {
+      "api": "anthropic",
+      "baseUrl": "https://token-plan.maas.qianwenaiapi.com/apps/anthropic",
+      "apiKey": "${OPENAI_API_KEY}"
+    }
   }
 }
 EOF
-  echo "📦 已生成 ~/.easy-agent/easy-agent.json（记得填 baseUrl）"
+  echo "📦 已生成 ~/.easy-agent/easy-agent.json；密钥写入 ~/.easy-agent/.env 的 OPENAI_API_KEY=<你的key>"
 fi
 if [[ ! -f "${HOME}/.easy-agent/.env" && -f "${ROOT}/.env" ]]; then
   cp "${ROOT}/.env" "${HOME}/.easy-agent/.env"
