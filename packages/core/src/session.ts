@@ -13,6 +13,9 @@ export interface CreateSessionOptions {
   model?: string;
   agentId?: string;
   systemPrompt?: string;
+  /** 首页会话：置顶且不可删除 */
+  pinned?: boolean;
+  title?: string;
 }
 export interface SessionInfo {
   id: string;
@@ -20,6 +23,7 @@ export interface SessionInfo {
   agentId: string;
   model: string;
   status: string;
+  pinned: boolean;
   createAt: number;
   updateAt: number;
   messageCount: number;
@@ -38,9 +42,17 @@ export class SessionManager {
     const ts = now();
     const model = options.model ?? this.defaultModel;
     db.prepare(
-      `INSERT INTO sessions (id, title, agent_id, model, status, created_at, updated_at)
-       VALUES (?, ?, ?, ?, 'active', ?, ?)`,
-    ).run(id, null, options.agentId ?? "default", model, ts, ts);
+      `INSERT INTO sessions (id, title, agent_id, model, status, pinned, created_at, updated_at)
+       VALUES (?, ?, ?, ?, 'active', ?, ?, ?)`,
+    ).run(
+      id,
+      options.title ?? null,
+      options.agentId ?? "default",
+      model,
+      options.pinned ? 1 : 0,
+      ts,
+      ts,
+    );
     if (options.systemPrompt) {
       const msgId = generateId();
       db.prepare(
@@ -65,6 +77,7 @@ export class SessionManager {
       agentId: row.agent_id,
       model: row.model,
       status: row.status,
+      pinned: !!row.pinned,
       createAt: row.created_at,
       updateAt: row.updated_at,
       messageCount: countRow?.count ?? 0,
@@ -88,14 +101,21 @@ export class SessionManager {
       agentId: row.agent_id,
       model: row.model,
       status: row.status,
+      pinned: !!row.pinned,
       createAt: row.created_at,
       updateAt: row.updated_at,
       messageCount: row.msg_count,
     }));
   }
-  delete(id: string): void {
+  /** 删除会话；pinned（首页）不可删。返回是否真正删除。 */
+  delete(id: string): boolean {
     const db = getDatabase();
+    const row = db
+      .prepare("SELECT pinned FROM sessions WHERE id = ?")
+      .get(id) as any;
+    if (!row || row.pinned) return false;
     db.prepare("DELETE FROM sessions WHERE id = ?").run(id);
+    return true;
   }
   /** 会话内切换模型（后续对话用新模型） */
   setModel(id: string, model: string): void {

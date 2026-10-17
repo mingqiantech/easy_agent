@@ -243,6 +243,10 @@ function initializeSchema(db: Database): void {
   if (!cols.some((c) => c.name === "user_id")) {
     db.exec("ALTER TABLE sessions ADD COLUMN user_id TEXT");
   }
+  // 首页会话：每个 agent 置顶且不可删除的会话
+  if (!cols.some((c) => c.name === "pinned")) {
+    db.exec("ALTER TABLE sessions ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0");
+  }
 }
 export function closeDatabase(): void {
   if (_db) {

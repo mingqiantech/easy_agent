@@ -89,9 +89,25 @@ export function createApp(deps: ServerDeps): Hono {
     }),
   );
 
-  app.get("/api/sessions", (c) => {
+  // 首页会话：每个 agent 自动获得一个置顶、不可删除的固定会话
+  async function ensureHomeSession(agentName: string): Promise<void> {
+    const rt = deps.agents[agentName];
+    if (!rt) return;
+    if (deps.sessions.list(50, agentName).some((s) => s.pinned)) return;
+    const systemPrompt = await rt.memory.buildSystemPrompt();
+    deps.sessions.create({
+      agentId: agentName,
+      model: rt.model,
+      pinned: true,
+      title: "首页",
+      systemPrompt,
+    });
+  }
+
+  app.get("/api/sessions", async (c) => {
     const limit = Number(c.req.query("limit") ?? 50);
     const agent = c.req.query("agent") || undefined;
+    if (agent) await ensureHomeSession(agent);
     return c.json({ sessions: deps.sessions.list(limit, agent) });
   });
 
@@ -234,7 +250,9 @@ export function createApp(deps: ServerDeps): Hono {
   });
 
   app.delete("/api/sessions/:id", (c) => {
-    deps.sessions.delete(c.req.param("id"));
+    const ok = deps.sessions.delete(c.req.param("id"));
+    if (!ok)
+      return c.json({ error: "首页会话不可删除" }, 403);
     return c.json({ ok: true });
   });
 

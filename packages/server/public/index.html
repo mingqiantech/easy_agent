@@ -31,9 +31,11 @@
     .s-main{flex:1;min-width:0}
     .session-title{font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
     .session-meta{font-size:11px;color:var(--muted);margin-top:3px}
-    .del-btn{border:none;background:none;color:var(--muted);cursor:pointer;font-size:14px;padding:4px;border-radius:6px;visibility:hidden}
-    .session-item:hover .del-btn{visibility:visible}
-    .del-btn:hover{color:var(--danger);background:rgba(239,68,68,.08)}
+    .act-btn{border:none;background:none;color:var(--muted);cursor:pointer;font-size:13px;padding:4px 6px;border-radius:6px;visibility:hidden}
+    .session-item:hover .act-btn{visibility:visible}
+    .act-btn:hover{color:var(--accent);background:var(--accent-soft)}
+    .act-btn.del:hover{color:var(--danger);background:rgba(239,68,68,.08)}
+    .home-tag{color:var(--accent);margin-right:4px}
     .main{flex:1;display:flex;flex-direction:column;min-width:0}
     .topbar{display:flex;align-items:center;gap:10px;padding:10px 16px;background:var(--card);border-bottom:1px solid var(--border)}
     .tabs{display:flex;gap:6px}
@@ -217,14 +219,16 @@
     async function loadSessions(){
       const r=await fetch(`${API}/api/sessions?agent=${encodeURIComponent(agent)}`);
       const{sessions}=await r.json();
-      if(!sid && sessions.length>0){ sid=sessions[0].id; await loadMessages(); }
-      document.getElementById('sessionList').innerHTML=sessions.map(s=>`
+      const sorted=[...sessions].sort((a,b)=>(b.pinned?1:0)-(a.pinned?1:0));
+      if(!sid && sorted.length>0){ sid=sorted[0].id; await loadMessages(); }
+      document.getElementById('sessionList').innerHTML=sorted.map(s=>`
         <div class="session-item ${s.id===sid?'active':''}" onclick="selectSession('${s.id}')">
           <div class="s-main">
-            <div class="session-title">${esc(s.title||'新会话')}</div>
+            <div class="session-title">${s.pinned?'<span class="home-tag">⌂</span>':''}${esc(s.title||'新会话')}</div>
             <div class="session-meta">${s.messageCount} 条 · ${hhmm(s.updateAt)} · ${esc((s.model||'').split('/').pop())}</div>
           </div>
-          <button class="del-btn" title="删除会话" onclick="event.stopPropagation();delSession('${s.id}')">✕</button>
+          ${s.pinned?'':`<button class="act-btn" title="重命名" onclick="event.stopPropagation();renameSession('${s.id}')">✎</button>
+          <button class="act-btn del" title="删除会话" onclick="event.stopPropagation();delSession('${s.id}')">✕</button>`}
         </div>`).join('');
       if(sid) loadModelForSession();
     }
@@ -236,8 +240,16 @@
     async function selectSession(id){sid=id;await loadSessions();await loadMessages();}
     async function delSession(id){
       if(!confirm('删除该会话及其全部消息？'))return;
-      await fetch(`${API}/api/sessions/${id}`,{method:'DELETE'});
+      const j=await (await fetch(`${API}/api/sessions/${id}`,{method:'DELETE'})).json();
+      if(j.error){alert('❌ '+j.error);return;}
       if(id===sid){sid=null;document.getElementById('messages').innerHTML='<div class="empty">选择或创建一个会话</div>';}
+      await loadSessions();
+    }
+    async function renameSession(id){
+      const name=prompt('新会话名：');
+      if(name===null||!name.trim())return;
+      const j=await (await fetch(`${API}/api/sessions/${id}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({title:name.trim().slice(0,60)})})).json();
+      if(j.error){alert('❌ '+j.error);return;}
       await loadSessions();
     }
 
