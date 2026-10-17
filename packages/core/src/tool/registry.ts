@@ -8,6 +8,7 @@ import { grepTool } from "./builtins/grep.js";
 import { webfetchTool } from "./builtins/webfetch.js";
 import { memoryGetTool } from "./builtins/memory-get.js";
 import { gitTool } from "./builtins/git.js";
+import { extractTool } from "./builtins/extract.js";
 
 const BUILTINS = [
   readTool,
@@ -19,6 +20,7 @@ const BUILTINS = [
   webfetchTool,
   memoryGetTool,
   gitTool,
+  extractTool,
 ];
 export class ToolRegistry {
   private tools = new Map<string, Tool>();

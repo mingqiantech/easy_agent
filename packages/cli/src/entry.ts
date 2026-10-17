@@ -6,6 +6,14 @@ import { startRepl } from "./repl.js";
 import { SessionManager } from "../../core/src";
 
 async function main() {
+  // Week10: bun run dev mcp serve — 以 MCP stdio 模式启动工具服务
+  if (process.argv[2] === "mcp" && process.argv[3] === "serve") {
+    const { ToolRegistry } = await import("@easy-agent/core/tool/registry");
+    const { startMCPServer } = await import("@easy-agent/core/mcp/server");
+    await startMCPServer(new ToolRegistry(true));
+    return;
+  }
+
   const config = loadConfig();
   const providerNames = Object.keys(config.providers);
   if (providerNames.length === 0) {
