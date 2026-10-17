@@ -26,9 +26,10 @@ async function main() {
     defaultModel: config.defaultModel,
   });
   const tools = new ToolRegistry();
-  const memory = new BasicMemory(process.cwd());
-  const memoryDir = `${process.cwd()}/memory`;
-  const searcher = new MemorySearcher(process.cwd(), memoryDir);
+  const workspaceDir = config.workspaceDir || process.cwd();
+  const memory = new BasicMemory(workspaceDir);
+  const memoryDir = `${workspaceDir}/memory`;
+  const searcher = new MemorySearcher(workspaceDir, memoryDir);
   const shortTerm = new ShortTermMemory(db);
 
   // 搜索命中 -> 短期记忆 recall 统计（Dreaming 晋升依据）

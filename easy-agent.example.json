@@ -1,0 +1,22 @@
+{
+  // 复制到 ~/.easy-agent/easy-agent.json 即成为全局配置
+  // 说明：API key 不建议写在这里，优先用 .env / 环境变量（OPENAI_API_KEY 等）
+  "defaultModel": "openai/qwen3.8-flash",
+  "workspaceDir": "",
+  "providers": {
+    "openai": {
+      // apiKey 由 OPENAI_API_KEY 环境变量注入；这里只放网关地址等非敏感项
+      "baseUrl": "https://ark.cn-beijing.volces.com/api/coding/v3"
+    }
+  },
+  "visionModel": "openai/glm-5.3",
+  "telegram": {
+    "botToken": "",
+    "allowedUserIds": []
+  },
+  "discord": {
+    "botToken": "",
+    "applicationId": "",
+    "allowedUserIds": []
+  }
+}

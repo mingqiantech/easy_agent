@@ -18,7 +18,7 @@ export function getDatabase(dbPath?: string): Database {
 function getDefaultDbPath(): string {
   const stateDir =
     process.env.EASY_AGENT_STATE_DIR ??
-    path.join(require("node:os").homedir(), ".local", "share", "easy-agent");
+    path.join(require("node:os").homedir(), ".easy-agent");
   return path.join(stateDir, "agent.db");
 }
 function initializeSchema(db: Database): void {

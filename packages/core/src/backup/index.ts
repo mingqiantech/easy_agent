@@ -124,7 +124,7 @@ export class BackupManager {
 
   private currentDbPath(): string {
     return process.env.EASY_AGENT_DB_PATH ?? path.join(
-      process.env.EASY_AGENT_STATE_DIR ?? path.join(process.env.HOME ?? "/tmp", ".local", "share", "easy-agent"),
+      process.env.EASY_AGENT_STATE_DIR ?? path.join(process.env.HOME ?? "/tmp", ".easy-agent"),
       "agent.db",
     );
   }

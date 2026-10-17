@@ -17,9 +17,13 @@ export async function startRepl(
   config: Config,
   llm: LLMClient,
 ): Promise<void> {
-  const workDir = process.cwd();
+  const workDir = config.workspaceDir || process.cwd();
   const memory = new BasicMemory(workDir);
   await memory.ensureMemoryFile();
+  const fresh = await memory.initWorkspace();
+  if (fresh.length > 0) {
+    console.log(`📦 工作区初始化: ${workDir} (+${fresh.join(", ")})`);
+  }
 
   const toolRegistry = new ToolRegistry(true);
 

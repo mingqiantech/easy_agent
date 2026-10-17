@@ -9,8 +9,11 @@
   ],
   "scripts": {
     "dev": "bun run packages/cli/src/entry.ts",
+    "dev:server": "bun run packages/server/src/index.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "dev:server": "bun run packages/server/src/index.ts"
+    "test": "bun test",
+    "build:binary": "bun build --compile packages/cli/src/entry.ts --outfile dist/easy-agent",
+    "build:server": "bun build --compile packages/server/src/index.ts --outfile dist/easy-agent-gateway"
   },
   "devDependencies": {
     "typescript": "5.8.2",

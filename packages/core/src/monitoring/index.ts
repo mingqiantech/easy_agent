@@ -84,7 +84,7 @@ export class MonitoringSystem {
       check: async () => {
         const dbPath =
           process.env.EASY_AGENT_DB_PATH ??
-          `${process.env.EASY_AGENT_STATE_DIR ?? `${process.env.HOME}/.local/share/easy-agent`}/agent.db`;
+          `${process.env.EASY_AGENT_STATE_DIR ?? `${process.env.HOME}/.easy-agent`}/agent.db`;
         const file = Bun.file(dbPath);
         const sizeMB = (await file.exists()) ? (await file.size) / 1024 / 1024 : 0;
         return { trigger: sizeMB > 500, value: Math.round(sizeMB), threshold: 500 };

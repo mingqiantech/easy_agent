@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { ConfigSchema, type Config } from "./schema.js";
+import { getStateDir, getWorkspaceDir } from "./path.js";
 export function loadConfig(overrides?: Partial<Config>): Config {
   const fileConfig = loadConfigFile();
   const envConfig = loadEnvOverrides();
@@ -17,13 +18,20 @@ export function loadConfig(overrides?: Partial<Config>): Config {
   };
   const config = ConfigSchema.parse(merged);
   if (!config.stateDir) {
-    config.stateDir = path.join(os.homedir(), ".local", "share", "easy-agent");
+    config.stateDir = getStateDir();
+  }
+  // 工作区：未配置时默认 ~/.easy-agent/workspace（env 可覆盖）
+  if (!config.workspaceDir || config.workspaceDir === ".") {
+    config.workspaceDir = getWorkspaceDir();
   }
   fs.mkdirSync(config.stateDir, { recursive: true });
+  fs.mkdirSync(config.workspaceDir, { recursive: true });
   return config;
 }
 function loadConfigFile(): Record<string, unknown> {
+  // 优先级：全局状态目录 > 项目目录 > 老版 XDG 路径（向后兼容）
   const paths = [
+    path.join(getStateDir(), "easy-agent.json"),
     path.join(process.cwd(), "easy-agent.json"),
     path.join(process.cwd(), "easy-agent.jsonc"),
     path.join(os.homedir(), ".config", "easy-agent", "config.json"),

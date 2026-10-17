@@ -50,6 +50,35 @@ export class BasicMemory {
     }
   }
 
+  /**
+   * 初始化工作区（OpenClaw 风格）：首次启动时生成模板文件。
+   * 已存在的文件不覆盖。
+   */
+  async initWorkspace(): Promise<string[]> {
+    const created: string[] = [];
+
+    const templates: Record<string, string> = {
+      "MEMORY.md": "# Long-Term Memory\n\n_No memories yet._\n",
+      "USER.md":
+        "# USER.md - About Your Human\n\n- **Name:**\n- **Timezone:**\n- **Language:**\n\n## Context\n\n_(慢慢了如指掌)_\n",
+      "AGENTS.md":
+        "# AGENTS.md - Workspace Instructions\n\n## Memory\n\n- 每天记 `memory/YYYY-MM-DD.md`；重要决策写入 MEMORY.md\n- 想记住的事 → 写文件，不要只记在脑子里\n\n## Red Lines\n\n- 不外泄私人数据\n- 破坏性命令先问\n",
+    };
+
+    for (const [name, content] of Object.entries(templates)) {
+      const p = path.join(this.workDir, name);
+      try {
+        await fs.access(p);
+      } catch {
+        await fs.writeFile(p, content, "utf-8");
+        created.push(name);
+      }
+    }
+
+    await fs.mkdir(path.join(this.workDir, "memory"), { recursive: true });
+    return created;
+  }
+
   async buildSystemPrompt(): Promise<string> {
     let prompt = `You are a helpful AI assistant with tools. Be direct and concise.
 Current date: ${new Date().toISOString().slice(0, 10)}
