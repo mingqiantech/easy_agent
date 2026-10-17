@@ -9,6 +9,32 @@ import type { BasicMemory } from "@easy-agent/core/memory/basic";
 import { serveStatic } from "hono/bun";
 import { Observability } from "@easy-agent/core/observability";
 import path from "node:path";
+import os from "node:os";
+import fs from "node:fs";
+
+/**
+ * 静态资源目录解析：
+ * 源码运行走 import.meta.dir；编译成单文件后该路径不存在，
+ * 回退到 ~/.easy-agent/public（install.sh --server 会拷入）。
+ */
+export function resolvePublicDir(): string {
+  const candidates = [
+    process.env.EASY_AGENT_PUBLIC_DIR,
+    path.join(import.meta.dir, "../public"),
+    path.join(
+      process.env.EASY_AGENT_STATE_DIR ?? path.join(os.homedir(), ".easy-agent"),
+      "public",
+    ),
+  ].filter(Boolean) as string[];
+  for (const dir of candidates) {
+    try {
+      if (fs.existsSync(path.join(dir, "index.html"))) return dir;
+    } catch {
+      // 路径无效，继续下一个
+    }
+  }
+  return candidates[1] ?? candidates[0];
+}
 
 export interface ServerDeps {
   llm: LLMClient;
@@ -27,7 +53,7 @@ export function createApp(deps: ServerDeps): Hono {
   app.use(
     "/static/*",
     serveStatic({
-      root: path.join(import.meta.dir, "../public"),
+      root: resolvePublicDir(),
       rewriteRequestPath: (p) => p.replace(/^\/static/, ""),
     }),
   );

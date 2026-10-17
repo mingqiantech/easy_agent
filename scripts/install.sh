@@ -20,9 +20,15 @@ if [[ "${1:-}" == "--server" ]]; then
   echo "🔨 构建 Gateway..."
   bun build --compile packages/server/src/index.ts --outfile dist/easy-agent-gateway
   mkdir -p "${BIN_DIR}"
+  # 正在运行的 gateway 会占用二进制，先停再拷
+  pkill -x easy-agent-gateway 2>/dev/null || true
+  sleep 0.5
   cp dist/easy-agent-gateway "${BIN_DIR}/easy-agent-gateway"
   chmod +x "${BIN_DIR}/easy-agent-gateway"
-  echo "✓ ${BIN_DIR}/easy-agent-gateway"
+  # Web 静态资源：编译后的二进制从 ~/.easy-agent/public 读取
+  mkdir -p "${HOME}/.easy-agent/public"
+  cp packages/server/public/* "${HOME}/.easy-agent/public/"
+  echo "✓ ${BIN_DIR}/easy-agent-gateway (+web 资源)"
 fi
 
 mkdir -p "${BIN_DIR}"
