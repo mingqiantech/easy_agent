@@ -7,6 +7,7 @@ import { globTool } from "./builtins/glob.js";
 import { grepTool } from "./builtins/grep.js";
 import { webfetchTool } from "./builtins/webfetch.js";
 import { memoryGetTool } from "./builtins/memory-get.js";
+import { gitTool } from "./builtins/git.js";
 
 const BUILTINS = [
   readTool,
@@ -17,6 +18,7 @@ const BUILTINS = [
   grepTool,
   webfetchTool,
   memoryGetTool,
+  gitTool,
 ];
 export class ToolRegistry {
   private tools = new Map<string, Tool>();

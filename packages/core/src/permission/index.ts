@@ -74,4 +74,11 @@ export const defaultRules: PermissionRule[] = [
   { tool: "grep", default: "allow" },
   { tool: "webfetch", default: "allow" },
   { tool: "memory_get", default: "allow" },
+  {
+    tool: "git",
+    default: "allow",
+    // 写远程/改写历史需要确认
+    denylist: ["*--force*", "*reset --hard*", "*clean -fd*"],
+  },
+  { tool: "image_gen", default: "allow" },
 ];

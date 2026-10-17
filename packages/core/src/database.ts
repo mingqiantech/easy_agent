@@ -177,6 +177,53 @@ function initializeSchema(db: Database): void {
       ON audit_logs(user_id, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_audit_action
       ON audit_logs(action, created_at DESC);
+
+    -- Week9: 团队表
+    CREATE TABLE IF NOT EXISTS teams (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      display_name TEXT,
+      description TEXT,
+      owner_id TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+
+    -- 团队成员
+    CREATE TABLE IF NOT EXISTS team_members (
+      id TEXT PRIMARY KEY,
+      team_id TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      role TEXT NOT NULL DEFAULT 'member' CHECK(role IN ('owner', 'admin', 'member', 'viewer')),
+      joined_at INTEGER NOT NULL,
+      UNIQUE(team_id, user_id)
+    );
+
+    -- 团队工作区
+    CREATE TABLE IF NOT EXISTS team_workspaces (
+      id TEXT PRIMARY KEY,
+      team_id TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      work_dir TEXT NOT NULL,
+      shared_memory TEXT DEFAULT '',
+      created_at INTEGER NOT NULL,
+      UNIQUE(team_id, name)
+    );
+
+    -- 通知表
+    CREATE TABLE IF NOT EXISTS notifications (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      title TEXT NOT NULL,
+      body TEXT NOT NULL,
+      level TEXT NOT NULL DEFAULT 'info' CHECK(level IN ('info', 'warning', 'error')),
+      channel TEXT NOT NULL DEFAULT 'in_app',
+      read INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_notifications_user
+      ON notifications(user_id, read, created_at DESC);
   `);
 
   // Week7: 给 sessions 加 user_id 列（存在则跳过）

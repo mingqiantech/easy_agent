@@ -20,3 +20,10 @@ export {
 export { Benchmark, type BenchmarkResult } from "./benchmark/index.js";
 export { LLMCache, RequestPool } from "./llm-cache.js";
 export { MonitoringSystem, type AlertRule } from "./monitoring/index.js";
+export { TeamManager, type Team, type TeamRole, type TeamMember } from "./team/manager.js";
+export {
+  NotificationManager,
+  sendWebhookNotification,
+  type Notification,
+  type NotificationLevel,
+} from "./notifications/index.js";
