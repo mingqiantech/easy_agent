@@ -3,13 +3,14 @@ import { SessionManager } from "@easy-agent/core/session";
 import { ToolRegistry } from "@easy-agent/core/tool/registry";
 import { getDatabase } from "@easy-agent/core/database";
 import { loadConfig } from "@easy-agent/config/loader";
+import { modelFallbackMap } from "@easy-agent/config/models";
 import { TelegramBot } from "./bot.js";
 
 async function main() {
   const config = loadConfig();
   getDatabase();
 
-  const llm = new LLMClient({ providers: config.providers });
+  const llm = new LLMClient({ providers: config.providers, fallbacks: modelFallbackMap(config) });
   const sessions = new SessionManager(llm, {
     defaultModel: config.defaultModel,
   });

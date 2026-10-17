@@ -3,6 +3,7 @@ import path from "node:path";
 import os from "node:os";
 import { ConfigSchema, type Config } from "./schema.js";
 import { getStateDir, getWorkspaceDir } from "./path.js";
+import { modelChain, resolveVisionModel } from "./models.js";
 export function loadConfig(overrides?: Partial<Config>): Config {
   loadEnvFile(path.join(getStateDir(), ".env"));
   const fileConfig = loadConfigFile();
@@ -18,6 +19,12 @@ export function loadConfig(overrides?: Partial<Config>): Config {
     ...overrides,
   };
   const config = ConfigSchema.parse(merged);
+
+  // OpenClaw 方案归一化：model 选择（含 alias）优先于 defaultModel；
+  // 解析后写回，所有下游调用方（repl/server/channels）自动受益
+  config.defaultModel = modelChain(config)[0];
+  config.visionModel = resolveVisionModel(config);
+
   if (!config.stateDir) {
     config.stateDir = getStateDir();
   }

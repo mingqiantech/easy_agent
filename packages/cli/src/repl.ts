@@ -10,6 +10,7 @@ import { createVisionTool } from "@easy-agent/core/tool/builtins/vision";
 import { ImageGenerator } from "@easy-agent/core/image-gen/index";
 import { createImageGenTool } from "@easy-agent/core/tool/builtins/image-gen";
 import { PluginRegistry } from "@easy-agent/core/plugin/registry";
+import { modelChain, resolveImageGenModelId } from "@easy-agent/config/models";
 import path from "node:path";
 
 export async function startRepl(
@@ -48,7 +49,10 @@ export async function startRepl(
   // Week8: 图片生成工具
   toolRegistry.register(
     createImageGenTool(
-      new ImageGenerator({ baseUrl: config.providers.openai?.baseUrl }),
+      new ImageGenerator({
+        baseUrl: config.providers.openai?.baseUrl,
+        model: resolveImageGenModelId(config),
+      }),
     ),
   );
   const session = sessions.create({
@@ -63,7 +67,7 @@ export async function startRepl(
     `   Memory: ${memSize > 0 ? `${(memSize / 1024).toFixed(1)}KB` : "empty"}`,
   );
   console.log(`   Tools: ${toolRegistry.names().join(", ")}`);
-  console.log(`   /tools /memory /sessions /plugins /exit\n`);
+  console.log(`   /tools /memory /sessions /plugins /model /exit\n`);
 
   const rl = readline.createInterface({
     input: process.stdin,
@@ -133,7 +137,18 @@ export async function startRepl(
           } catch (e: any) {
             console.log(`  ❌ ${e.message}`);
           }
-        } else console.log("  /tools /memory /sessions /plugins /exit");
+        } else if (cmd === "model") {
+          const chain = modelChain(config);
+          console.log(`  primary: ${chain[0]}`);
+          if (chain.length > 1)
+            console.log(`  fallbacks: ${chain.slice(1).join(" → ")}`);
+          const catalog = Object.entries(config.models ?? {});
+          if (catalog.length > 0) {
+            console.log("  catalog:");
+            for (const [ref, e] of catalog)
+              console.log(`    ${e.alias ? e.alias + " → " : ""}${ref}`);
+          }
+        } else console.log("  /tools /memory /sessions /plugins /model /exit");
 
         prompt();
         return;

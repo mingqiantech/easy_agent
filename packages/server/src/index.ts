@@ -15,6 +15,7 @@ import { createImageGenTool } from "@easy-agent/core/tool/builtins/image-gen";
 import { MonitoringSystem } from "@easy-agent/core/monitoring/index";
 
 import { loadConfig } from "@easy-agent/config/loader";
+import { modelFallbackMap, resolveImageGenModelId } from "@easy-agent/config/models";
 import { getDatabase } from "@easy-agent/core/database";
 import net from "node:net";
 
@@ -38,7 +39,7 @@ async function main() {
   const config = loadConfig();
   const db = getDatabase();
 
-  const llm = new LLMClient({ providers: config.providers });
+  const llm = new LLMClient({ providers: config.providers, fallbacks: modelFallbackMap(config) });
   const sessions = new SessionManager(llm, {
     defaultModel: config.defaultModel,
   });
@@ -70,7 +71,10 @@ async function main() {
   // Week8: 图片生成工具
   tools.register(
     createImageGenTool(
-      new ImageGenerator({ baseUrl: config.providers.openai?.baseUrl }),
+      new ImageGenerator({
+        baseUrl: config.providers.openai?.baseUrl,
+        model: resolveImageGenModelId(config),
+      }),
     ),
   );
 

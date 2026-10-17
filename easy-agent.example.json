@@ -1,15 +1,35 @@
 {
   // 复制到 ~/.easy-agent/easy-agent.json 即成为全局配置
-  // 说明：API key 不建议写在这里，优先用 .env / 环境变量（OPENAI_API_KEY 等）
-  "defaultModel": "openai/qwen3.8-flash",
-  "workspaceDir": "",
+  // API key 不写在这里：用 .env / 环境变量（OPENAI_API_KEY 等）注入
+
+  // ── 模型目录（OpenClaw 方案）：key = "provider/model"，alias 给短名 ──
+  "models": {
+    "openai/qwen3.8-flash": { "alias": "qwen" },
+    "openai/deepseek-v3": { "alias": "cheap" },
+    "anthropic/claude-sonnet-4-6": { "alias": "sonnet" }
+  },
+
+  // ── 主模型 + 有序故障转移链（可写 ref 或 alias） ──
+  // 主模型调用失败时自动按 fallbacks 顺序切换；
+  // 未配置本字段时回退使用 defaultModel（向后兼容）
+  "model": {
+    "primary": "qwen",
+    "fallbacks": ["cheap"]
+  },
+
+  // "defaultModel": "openai/qwen3.8-flash",
+
   "providers": {
     "openai": {
-      // apiKey 由 OPENAI_API_KEY 环境变量注入；这里只放网关地址等非敏感项
-      "baseUrl": "https://ark.cn-beijing.volces.com/api/coding/v3"
+      // apiKey 由 OPENAI_API_KEY 注入；这里只放网关地址等非敏感项
+      "baseUrl": "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"
     }
   },
-  "visionModel": "openai/glm-5.3",
+
+  // ── 用途槽位（可选，同样支持 alias） ──
+  "visionModel": "qwen",
+  "imageGenModel": "openai/dall-e-3",
+
   "telegram": {
     "botToken": "",
     "allowedUserIds": []
