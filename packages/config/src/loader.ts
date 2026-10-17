@@ -4,6 +4,7 @@ import os from "node:os";
 import { ConfigSchema, type Config } from "./schema.js";
 import { getStateDir, getWorkspaceDir } from "./path.js";
 export function loadConfig(overrides?: Partial<Config>): Config {
+  loadEnvFile(path.join(getStateDir(), ".env"));
   const fileConfig = loadConfigFile();
   const envConfig = loadEnvOverrides();
   const merged = {
@@ -46,6 +47,36 @@ function loadConfigFile(): Record<string, unknown> {
     } catch {}
   }
   return {};
+}
+
+/**
+ * 简单 .env 解析：KEY=VALUE 注入 process.env（不覆盖已存在的变量）。
+ * 让打包后的二进制在任意目录都能读到 ~/.easy-agent/.env 里的密钥。
+ */
+function loadEnvFile(filePath: string): void {
+  let raw: string;
+  try {
+    raw = fs.readFileSync(filePath, "utf-8");
+  } catch {
+    return;
+  }
+  for (const line of raw.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const idx = trimmed.indexOf("=");
+    if (idx <= 0) continue;
+    const key = trimmed.slice(0, idx).trim();
+    let value = trimmed.slice(idx + 1).trim();
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    }
+    if (key && process.env[key] === undefined) {
+      process.env[key] = value;
+    }
+  }
 }
 
 function loadEnvOverrides(): Partial<Config> {
