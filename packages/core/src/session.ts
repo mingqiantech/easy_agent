@@ -97,6 +97,23 @@ export class SessionManager {
     const db = getDatabase();
     db.prepare("DELETE FROM sessions WHERE id = ?").run(id);
   }
+  /** 会话内切换模型（后续对话用新模型） */
+  setModel(id: string, model: string): void {
+    const db = getDatabase();
+    db.prepare("UPDATE sessions SET model = ?, updated_at = ? WHERE id = ?").run(
+      model,
+      now(),
+      id,
+    );
+  }
+  setTitle(id: string, title: string): void {
+    const db = getDatabase();
+    db.prepare("UPDATE sessions SET title = ?, updated_at = ? WHERE id = ?").run(
+      title,
+      now(),
+      id,
+    );
+  }
   addMessage(sessionId: string, message: Message): string {
     const db = getDatabase();
     const id = generateId();

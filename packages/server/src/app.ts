@@ -8,6 +8,7 @@ import type { MemorySearcher } from "@easy-agent/memory/search";
 import type { BasicMemory } from "@easy-agent/core/memory/basic";
 import { serveStatic } from "hono/bun";
 import { Observability } from "@easy-agent/core/observability";
+import { getDatabase } from "@easy-agent/core/database";
 import path from "node:path";
 import os from "node:os";
 import fs from "node:fs";
@@ -106,6 +107,124 @@ export function createApp(deps: ServerDeps): Hono {
     const s = deps.sessions.get(c.req.param("id"));
     if (!s) return c.json({ error: "not found" }, 404);
     return c.json({ session: s });
+  });
+
+  // 会话内切换模型 / 重命名
+  app.patch("/api/sessions/:id", async (c) => {
+    const id = c.req.param("id");
+    const s = deps.sessions.get(id);
+    if (!s) return c.json({ error: "not found" }, 404);
+    const body = await c.req.json();
+    if (typeof body.model === "string" && body.model) deps.sessions.setModel(id, body.model);
+    if (typeof body.title === "string") deps.sessions.setTitle(id, body.title);
+    return c.json({ session: deps.sessions.get(id) });
+  });
+
+  // 可选模型列表（配置目录 + 主链），供对话框切换器
+  app.get("/api/models", (c) => {
+    const catalog: Record<string, { alias?: string }> = deps.config.models ?? {};
+    let models = Object.entries(catalog).map(([ref, e]) => ({
+      ref,
+      alias: e.alias ?? "",
+    }));
+    if (models.length === 0) models = [{ ref: deps.config.defaultModel, alias: "" }];
+    return c.json({ models });
+  });
+
+  // 消息总结：把当前会话提炼成一条摘要写回历史（带【摘要】标记）
+  app.post("/api/sessions/:id/summarize", async (c) => {
+    const id = c.req.param("id");
+    const session = deps.sessions.get(id);
+    if (!session) return c.json({ error: "not found" }, 404);
+
+    const conv = deps.sessions
+      .getMessages(id)
+      .filter(
+        (m: any) =>
+          (m.role === "user" || m.role === "assistant") &&
+          typeof m.content === "string" &&
+          !m.content.startsWith("【摘要】"),
+      );
+    if (conv.length < 2) return c.json({ error: "消息太少，无需总结" }, 400);
+
+    const transcript = conv
+      .slice(-60)
+      .map((m: any) => `${m.role === "user" ? "用户" : "AI"}: ${String(m.content).slice(0, 500)}`)
+      .join("\n")
+      .slice(0, 12000);
+
+    const res = await deps.llm.generate({
+      model: session.model,
+      system: "你是会话摘要助手。用简洁中文提炼对话的要点、决定与待办，不超过 200 字。",
+      messages: [{ role: "user", content: `请总结以下对话：\n${transcript}` }],
+      generation: { maxTokens: 400 },
+    });
+
+    const summary = (res.content ?? "").trim();
+    deps.sessions.addMessage(id, {
+      role: "assistant",
+      content: `【摘要】${summary}`,
+    });
+    return c.json({ summary });
+  });
+
+  // Agent 拓扑：节点=agent（当前工作/活跃度），边=sub-agent 派生关系
+  app.get("/api/topology", (c) => {
+    const db = getDatabase();
+    const nowTs = Date.now();
+
+    const nodes = Object.values(deps.agents).map((a) => {
+      const agg = db
+        .prepare(
+          `SELECT COUNT(*) c, MAX(updated_at) last FROM sessions
+           WHERE agent_id = ? AND status = 'active'`,
+        )
+        .get(a.name) as any;
+      const tasks = db
+        .prepare(
+          `SELECT s.id, s.title, s.model, s.updated_at,
+                  (SELECT COUNT(*) FROM messages m WHERE m.session_id = s.id) msg_count
+           FROM sessions s
+           WHERE s.agent_id = ? AND s.status = 'active'
+           ORDER BY s.updated_at DESC LIMIT 3`,
+        )
+        .all(a.name) as any[];
+      const sub = db
+        .prepare(
+          `SELECT COUNT(*) n FROM tool_calls tc
+           JOIN sessions s ON tc.session_id = s.id
+           WHERE s.agent_id = ? AND tc.tool_name = 'sub-agent'`,
+        )
+        .get(a.name) as any;
+
+      return {
+        name: a.name,
+        model: a.model,
+        description: a.description,
+        sessions: agg?.c ?? 0,
+        lastActive: agg?.last ?? 0,
+        busy: nowTs - (agg?.last ?? 0) < 120000, // 2 分钟内有更新
+        subAgentCalls: sub?.n ?? 0,
+        currentTasks: (tasks ?? []).map((t) => ({
+          id: t.id,
+          title: t.title ?? "untitled",
+          model: t.model,
+          msgCount: t.msg_count,
+          ageSec: Math.max(0, Math.round((nowTs - t.updated_at) / 1000)),
+        })),
+      };
+    });
+
+    const edges = nodes
+      .filter((n) => n.subAgentCalls > 0)
+      .map((n) => ({ from: n.name, to: "sub-agents", weight: n.subAgentCalls }));
+
+    return c.json({
+      nodes,
+      edges,
+      hasSubAgentPool: edges.length > 0,
+      generatedAt: nowTs,
+    });
   });
 
   app.delete("/api/sessions/:id", (c) => {

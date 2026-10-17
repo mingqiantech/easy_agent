@@ -3,174 +3,314 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>My Agent</title>
+  <title>Easy Agent</title>
   <style>
     :root{
-      --bg:#f5f6f8;--bg-sidebar:#ffffff;--bg-hover:#f0f1f3;
-      --fg:#1f2329;--fg-muted:#8a8f98;
-      --border:#e2e4e8;
-      --bubble-user:#d3e3fd;--bubble-assistant:#ffffff;--bubble-tool:#f0f1f3;
-      --accent:#2563eb;--accent-soft:rgba(37,99,235,.08);
+      --bg:#eef1f6;--card:#ffffff;--hover:#f2f4f8;
+      --fg:#1c2330;--muted:#8b93a3;
+      --border:#e3e6ec;
+      --accent:#4f6df5;--accent2:#8b5cf6;--accent-soft:rgba(79,109,245,.10);
+      --user:linear-gradient(135deg,#4f6df5,#6d8bff);--assistant:#ffffff;--tool:#f1f2f5;
+      --ok:#22c55e;--warn:#f59e0b;--danger:#ef4444;
+      --shadow:0 2px 10px rgba(28,35,48,.06);
     }
     *{box-sizing:border-box;margin:0;padding:0}
-    body{font-family:system-ui;background:var(--bg);color:var(--fg);height:100vh;display:flex}
-    .sidebar{width:260px;background:var(--bg-sidebar);border-right:1px solid var(--border);display:flex;flex-direction:column}
-    .new-btn{padding:12px 16px;cursor:pointer;color:var(--accent);border-bottom:1px solid var(--border)}
+    body{font-family:system-ui;background:var(--bg);color:var(--fg);height:100vh;display:flex;overflow:hidden}
+    .sidebar{width:270px;background:var(--card);border-right:1px solid var(--border);display:flex;flex-direction:column;flex-shrink:0}
+    .brand{padding:16px;font-weight:800;font-size:16px;background:linear-gradient(135deg,var(--accent),var(--accent2));-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;border-bottom:1px solid var(--border)}
+    .agent-pick{padding:10px 12px;border-bottom:1px solid var(--border)}
+    .agent-pick select,.model-pick select{width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:10px;background:var(--bg);color:var(--fg);font-size:13px;font-family:inherit}
+    .new-btn{padding:12px 16px;cursor:pointer;color:var(--accent);border-bottom:1px solid var(--border);font-size:14px}
     .new-btn:hover{background:var(--accent-soft)}
     .session-list{flex:1;overflow-y:auto}
-    .session-item{padding:12px 16px;cursor:pointer;border-bottom:1px solid var(--border)}
-    .session-item:hover{background:var(--bg-hover)}
-    .session-item.active{background:var(--accent-soft);color:var(--accent)}
-    .session-title{font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-    .session-meta{font-size:11px;color:var(--fg-muted);margin-top:4px}
-    .main{flex:1;display:flex;flex-direction:column}
-    .messages{flex:1;overflow-y:auto;padding:20px}
-    .message{margin-bottom:16px;display:flex}
-    .message.user{justify-content:flex-end}
-    .bubble{max-width:75%;padding:12px 16px;border-radius:12px;white-space:pre-wrap;word-break:break-word;line-height:1.5}
-    .message.user .bubble{background:var(--bubble-user)}
-    .message.assistant .bubble{background:var(--bubble-assistant);border:1px solid var(--border);box-shadow:0 1px 2px rgba(0,0,0,.04)}
-    .message.tool .bubble{background:var(--bubble-tool);border:1px solid var(--border);color:var(--fg-muted);font-size:12px;font-family:monospace}
-    .input-area{padding:16px;border-top:1px solid var(--border);display:flex;gap:8px;align-items:flex-end;background:var(--bg-sidebar)}
-    .input-area textarea{flex:1;background:var(--bg);color:var(--fg);border:1px solid var(--border);border-radius:12px;padding:12px;font-size:14px;font-family:inherit;resize:none;min-height:48px;max-height:200px}
-    .input-area textarea:focus{outline:none;border-color:var(--accent)}
-    .send-btn{background:var(--accent);color:#fff;border:none;border-radius:12px;padding:12px 24px;cursor:pointer;font-size:14px;font-weight:600}
-    .send-btn:hover{opacity:.85}
+    .session-item{padding:10px 12px;cursor:pointer;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px}
+    .session-item:hover{background:var(--hover)}
+    .session-item.active{background:var(--accent-soft)}
+    .session-item.active .session-title{color:var(--accent);font-weight:600}
+    .s-main{flex:1;min-width:0}
+    .session-title{font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .session-meta{font-size:11px;color:var(--muted);margin-top:3px}
+    .del-btn{border:none;background:none;color:var(--muted);cursor:pointer;font-size:14px;padding:4px;border-radius:6px;visibility:hidden}
+    .session-item:hover .del-btn{visibility:visible}
+    .del-btn:hover{color:var(--danger);background:rgba(239,68,68,.08)}
+    .main{flex:1;display:flex;flex-direction:column;min-width:0}
+    .topbar{display:flex;align-items:center;gap:10px;padding:10px 16px;background:var(--card);border-bottom:1px solid var(--border)}
+    .tabs{display:flex;gap:6px}
+    .tab{padding:7px 16px;border-radius:999px;border:1px solid var(--border);background:var(--card);cursor:pointer;font-size:13px;color:var(--muted)}
+    .tab.active{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;border-color:transparent;font-weight:600}
+    .model-pick{margin-left:auto;display:flex;gap:8px;align-items:center}
+    .model-pick label{font-size:12px;color:var(--muted)}
+    .action-btn{padding:7px 14px;border:1px solid var(--border);border-radius:10px;background:var(--card);cursor:pointer;font-size:13px;color:var(--fg)}
+    .action-btn:hover{border-color:var(--accent);color:var(--accent)}
+    .action-btn:disabled{opacity:.4;cursor:not-allowed}
+    .view{flex:1;min-height:0;display:flex;flex-direction:column}
+    .view[hidden]{display:none}
+    .messages{flex:1;overflow-y:auto;padding:22px}
+    .message{margin-bottom:14px;display:flex;gap:10px;max-width:85%}
+    .message.user{margin-left:auto;flex-direction:row-reverse}
+    .avatar{width:30px;height:30px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:15px;flex-shrink:0;background:var(--accent-soft);color:var(--accent);font-weight:700}
+    .message.user .avatar{background:var(--user);color:#fff}
+    .bubble{padding:11px 15px;border-radius:14px;white-space:pre-wrap;word-break:break-word;line-height:1.55;font-size:14px;background:var(--assistant);border:1px solid var(--border);box-shadow:var(--shadow)}
+    .message.user .bubble{background:var(--user);color:#fff;border:none}
+    .message.toolchip .bubble{background:var(--tool);color:var(--muted);font-size:12px;font-family:monospace}
+    .message.summ{max-width:100%}
+    .message.summ .bubble{border-left:4px solid var(--accent2);background:rgba(139,92,246,.06)}
+    .ts{font-size:10px;color:var(--muted);margin-top:5px}
+    .input-area{padding:14px 16px;border-top:1px solid var(--border);display:flex;gap:8px;align-items:flex-end;background:var(--card)}
+    .input-area textarea{flex:1;background:var(--bg);color:var(--fg);border:1px solid var(--border);border-radius:14px;padding:12px 14px;font-size:14px;font-family:inherit;resize:none;min-height:46px;max-height:180px}
+    .input-area textarea:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+    .send-btn{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;border:none;border-radius:14px;padding:12px 26px;cursor:pointer;font-size:14px;font-weight:600}
+    .send-btn:hover{opacity:.9}
     .send-btn:disabled{opacity:.4;cursor:not-allowed}
-    @media(max-width:768px){.sidebar{display:none}}
-    .agent-bar{padding:10px 16px;border-bottom:1px solid var(--border);background:var(--bg-sidebar)}
-    .agent-bar select{width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--fg);font-size:13px;font-family:inherit}
-    .session-agent{font-size:10px;color:var(--accent);background:var(--accent-soft);padding:1px 6px;border-radius:8px;margin-right:6px}
+    .empty{flex:1;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:14px}
+    /* 拓扑图 */
+    .topo-wrap{flex:1;overflow:auto;padding:20px;position:relative}
+    svg text{font-family:system-ui}
+    .pulse{animation:pulse 1.6s ease-in-out infinite}
+    @keyframes pulse{0%,100%{opacity:.25;r:38}50%{opacity:.6;r:44}}
+    .topo-cards{display:flex;flex-wrap:wrap;gap:12px;padding:0 20px 20px}
+    .agent-card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:14px;width:260px;box-shadow:var(--shadow)}
+    .agent-card h4{font-size:14px;display:flex;align-items:center;gap:8px}
+    .dot{width:8px;height:8px;border-radius:50%;background:var(--muted);display:inline-block}
+    .dot.busy{background:var(--ok);box-shadow:0 0 0 0 rgba(34,197,94,.5);animation:ring 1.4s infinite}
+    @keyframes ring{0%{box-shadow:0 0 0 0 rgba(34,197,94,.5)}100%{box-shadow:0 0 0 8px rgba(34,197,94,0)}}
+    .agent-card .sub{font-size:11px;color:var(--muted);margin:4px 0 8px}
+    .task{font-size:12px;background:var(--bg);border-radius:8px;padding:6px 9px;margin-top:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .task b{color:var(--accent)}
+    @media(max-width:768px){.sidebar{position:absolute;z-index:10;height:100%;transform:translateX(-100%);transition:.2s}.sidebar.open{transform:none}}
   </style>
 </head>
 <body>
-  <div class="sidebar">
-    <div class="agent-bar">
-      <select id="agentSel" onchange="switchAgent()"></select>
-    </div>
-    <div class="new-btn" onclick="createSession()">+ New Session</div>
+  <div class="sidebar" id="sidebar">
+    <div class="brand">⚡ Easy Agent</div>
+    <div class="agent-pick"><select id="agentSel" onchange="switchAgent()"></select></div>
+    <div class="new-btn" onclick="newSession()">＋ 新会话</div>
     <div class="session-list" id="sessionList"></div>
   </div>
+
   <div class="main">
-    <div class="messages" id="messages"></div>
-    <div class="input-area">
-      <textarea id="input" rows="1" placeholder="输入消息... (Enter 发送)"
-        onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();send()}"></textarea>
-      <button class="send-btn" id="sendBtn" onclick="send()">发送</button>
+    <div class="topbar">
+      <div class="tabs">
+        <div class="tab active" id="tabChat" onclick="showView('chat')">💬 对话</div>
+        <div class="tab" id="tabTopo" onclick="showView('topo')">🕸 Agent 拓扑</div>
+      </div>
+      <div class="model-pick">
+        <label>模型</label>
+        <select id="modelSel" onchange="switchModel(this.value)"></select>
+        <button class="action-btn" onclick="summarize()" id="summBtn">📝 总结本会话</button>
+      </div>
+    </div>
+
+    <div class="view" id="chatView">
+      <div class="messages" id="messages"></div>
+      <div class="input-area">
+        <textarea id="input" rows="1" placeholder="输入消息…（Enter 发送 / Shift+Enter 换行）"
+          onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();send()}"></textarea>
+        <button class="send-btn" id="sendBtn" onclick="send()">发送</button>
+      </div>
+    </div>
+
+    <div class="view" id="topoView" hidden>
+      <div class="topo-wrap"><svg id="topoSvg" width="760" height="380"></svg></div>
+      <div class="topo-cards" id="topoCards"></div>
     </div>
   </div>
-  <script>
-    const API='';let sid=null;let agent='default';
-    const esc=t=>{const d=document.createElement('div');d.textContent=t;return d.innerHTML};
 
+  <script>
+    const API='';
+    let sid=null, agent='default', topoTimer=null, models=[];
+    const esc=t=>{const d=document.createElement('div');d.textContent=t;return d.innerHTML};
+    const hhmm=ts=>new Date(ts).toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'});
+
+    /* ── Agents ── */
     async function loadAgents(){
       try{
         const r=await fetch(`${API}/api/agents`);const{agents}=await r.json();
         const sel=document.getElementById('agentSel');
-        sel.innerHTML=agents.map(a=>`<option value="${esc(a.name)}">${esc(a.name)} — ${esc(a.description)}</option>`).join('');
+        sel.innerHTML=agents.map(a=>`<option value="${esc(a.name)}">${esc(a.name)} · ${esc(a.description)}</option>`).join('');
         sel.value=agent;
-      }catch(e){/* 旧版服务端无此接口：保持 default */}
+      }catch(e){}
     }
-
     function switchAgent(){
-      agent=document.getElementById('agentSel').value;
-      sid=null;
-      document.getElementById('messages').innerHTML='';
+      agent=document.getElementById('agentSel').value;sid=null;
+      document.getElementById('messages').innerHTML='<div class="empty">选择或创建一个会话</div>';
       loadSessions();
     }
 
+    /* ── Sessions（持久对话：自动选中最近会话，不强制每次问答新建） ── */
     async function loadSessions(){
-      const r=await fetch(`${API}/api/sessions?agent=${encodeURIComponent(agent)}`);const{sessions}=await r.json();
+      const r=await fetch(`${API}/api/sessions?agent=${encodeURIComponent(agent)}`);
+      const{sessions}=await r.json();
+      if(!sid && sessions.length>0){ sid=sessions[0].id; await loadMessages(); }
       document.getElementById('sessionList').innerHTML=sessions.map(s=>`
         <div class="session-item ${s.id===sid?'active':''}" onclick="selectSession('${s.id}')">
-          <div class="session-title">${esc(s.title||'untitled')}</div>
-          <div class="session-meta">${s.messageCount} msgs</div>
+          <div class="s-main">
+            <div class="session-title">${esc(s.title||'新会话')}</div>
+            <div class="session-meta">${s.messageCount} 条 · ${hhmm(s.updateAt)} · ${esc((s.model||'').split('/').pop())}</div>
+          </div>
+          <button class="del-btn" title="删除会话" onclick="event.stopPropagation();delSession('${s.id}')">✕</button>
         </div>`).join('');
+      if(sid) loadModelForSession();
     }
-
-    async function createSession(){
+    async function newSession(){
       const r=await fetch(`${API}/api/sessions`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({agentId:agent})});
       const{session}=await r.json();sid=session.id;
       document.getElementById('messages').innerHTML='';await loadSessions();
     }
-
     async function selectSession(id){sid=id;await loadSessions();await loadMessages();}
+    async function delSession(id){
+      if(!confirm('删除该会话及其全部消息？'))return;
+      await fetch(`${API}/api/sessions/${id}`,{method:'DELETE'});
+      if(id===sid){sid=null;document.getElementById('messages').innerHTML='<div class="empty">选择或创建一个会话</div>';}
+      await loadSessions();
+    }
+
+    /* ── 模型切换（每会话独立） ── */
+    async function loadModels(){
+      try{
+        const r=await fetch(`${API}/api/models`);models=(await r.json()).models??[];
+        document.getElementById('modelSel').innerHTML=models.map(m=>
+          `<option value="${esc(m.ref)}">${esc(m.alias? m.alias+' — ':'')}${esc(m.ref)}</option>`).join('');
+      }catch(e){}
+    }
+    async function loadModelForSession(){
+      if(!sid)return;
+      const r=await fetch(`${API}/api/sessions/${sid}`);const{session}=await r.json();
+      const sel=document.getElementById('modelSel');
+      if(session?.model){
+        if(!models.some(m=>m.ref===session.model)){
+          sel.innerHTML=`<option value="${esc(session.model)}">${esc(session.model)}</option>`+sel.innerHTML;
+        }
+        sel.value=session.model;
+      }
+    }
+    async function switchModel(ref){
+      if(!sid){alert('请先选择会话');return;}
+      await fetch(`${API}/api/sessions/${sid}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:ref})});
+    }
+
+    /* ── 消息 ── */
+    function bubbleHtml(m){
+      if(m.role==='system')return '';
+      const ts=m.createdAt?`<div class="ts">${hhmm(m.createdAt)}</div>`:'';
+      if(m.role==='tool')return `<div class="message toolchip"><div class="avatar">⚙</div><div><div class="bubble">${esc(clip(m.content))}</div>${ts}</div></div>`;
+      let text=m.content||'';let toolLine='';
+      if(m.role==='assistant'){
+        try{const p=JSON.parse(text);
+          if(p&&typeof p==='object'&&('text' in p||p.toolCalls)){
+            text=p.text||'';
+            if(p.toolCalls?.length) toolLine=`<div class="message toolchip" style="margin-top:6px"><div><div class="bubble">🔧 ${esc(p.toolCalls.map(t=>t.name).join(', '))}</div></div></div>`;
+          }
+        }catch(e){}
+      }
+      if(m.role==='assistant'&&text.startsWith('【摘要】'))
+        return `<div class="message summ"><div class="avatar">📝</div><div><div class="bubble"><b>会话摘要</b>\n${esc(text.slice(4))}</div>${ts}</div></div>`;
+      const av=m.role==='user'?'🙂':'🤖';
+      return `<div class="message ${m.role}"><div class="avatar">${av}</div><div><div class="bubble">${esc(text)}</div>${ts}</div></div>${toolLine}`;
+    }
+    const clip=s=>{s=String(s);return s.length>300?s.slice(0,300)+'…':s};
 
     async function loadMessages(){
       if(!sid)return;
       const r=await fetch(`${API}/api/sessions/${sid}/messages`);const{messages}=await r.json();
       const c=document.getElementById('messages');
-      c.innerHTML=messages.filter(m=>m.role!=='system').map(m=>`
-        <div class="message ${m.role}"><div class="bubble">${esc(typeof m.content==='string'?m.content:JSON.stringify(m.content,null,2))}</div></div>
-      `).join('');
+      const rows=messages.filter(m=>m.role!=='system').map(bubbleHtml).join('');
+      c.innerHTML=rows||'<div class="empty">开始对话吧</div>';
       c.scrollTop=c.scrollHeight;
     }
 
     async function send(){
       const input=document.getElementById('input'),text=input.value.trim();
-      if(!text||!sid)return;input.value='';
+      if(!text)return;
+      if(!sid)await newSession();
+      input.value='';
       document.getElementById('sendBtn').disabled=true;
       const c=document.getElementById('messages');
-      c.innerHTML+=`<div class="message user"><div class="bubble">${esc(text)}</div></div>`;
-      const ai=document.createElement('div');ai.className='message assistant';
-      ai.innerHTML='<div class="bubble" style="color:#888">thinking...</div>';
-      c.appendChild(ai);c.scrollTop=c.scrollHeight;
+      if(c.querySelector('.empty'))c.innerHTML='';
+      c.insertAdjacentHTML('beforeend',bubbleHtml({role:'user',content:text,createdAt:Date.now()}));
+      const thinking=document.createElement('div');
+      thinking.innerHTML=`<div class="message assistant"><div class="avatar">🤖</div><div><div class="bubble" style="color:var(--muted)">思考中…</div></div></div>`;
+      c.appendChild(thinking);c.scrollTop=c.scrollHeight;
       try{
         const r=await fetch(`${API}/api/sessions/${sid}/messages`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text})});
-        const{response}=await r.json();
-        ai.querySelector('.bubble').style.color='';ai.querySelector('.bubble').textContent=response;
-      }catch(e){ai.querySelector('.bubble').textContent='❌ '+e.message;}
+        const j=await r.json();
+        thinking.innerHTML=bubbleHtml({role:'assistant',content:j.response??('❌ '+(j.error||'请求失败')),createdAt:Date.now()});
+      }catch(e){thinking.innerHTML=bubbleHtml({role:'assistant',content:'❌ '+e.message});}
       document.getElementById('sendBtn').disabled=false;c.scrollTop=c.scrollHeight;await loadSessions();
     }
 
-    async function sendMessageStream(text) {
-      const response = await fetch(`/api/sessions/${sid}/stream`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text }),
-      });
-    
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-    
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-    
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
-    
-        for (const line of lines) {
-          if (!line.startsWith("data: ")) continue;
-          const data = JSON.parse(line.slice(6));
-    
-          switch (data.type) {
-            case "text":
-              appendToCurrentBubble(data.text);  // 逐字追加
-              break;
-            case "tool_call":
-              showToolCall(data.name, data.input);
-              break;
-            case "tool_result":
-              showToolResult(data.name, data.result);
-              break;
-            case "usage":
-              updateTokenCount(data.usage.totalTokens);
-              break;
-            case "done":
-              finalizeBubble();
-              break;
-            case "error":
-              showError(data.error);
-              break;
-          }
-        }
-      }
+    async function summarize(){
+      if(!sid){alert('请先选择会话');return;}
+      const btn=document.getElementById('summBtn');btn.disabled=true;btn.textContent='总结中…';
+      try{
+        const r=await fetch(`${API}/api/sessions/${sid}/summarize`,{method:'POST'});
+        const j=await r.json();
+        if(j.error)alert(j.error);else await loadMessages();
+      }finally{btn.disabled=false;btn.textContent='📝 总结本会话';}
     }
 
-    loadAgents().then(()=>loadSessions());
+    /* ── 拓扑视图 ── */
+    function showView(v){
+      document.getElementById('chatView').hidden=v!=='chat';
+      document.getElementById('topoView').hidden=v!=='topo';
+      document.getElementById('tabChat').classList.toggle('active',v==='chat');
+      document.getElementById('tabTopo').classList.toggle('active',v==='topo');
+      if(v==='topo'){refreshTopo();topoTimer=setInterval(refreshTopo,5000);}
+      else if(topoTimer){clearInterval(topoTimer);topoTimer=null;}
+    }
+    async function refreshTopo(){
+      try{
+        const r=await fetch(`${API}/api/topology`);const t=await r.json();
+        drawTopoSvg(t);renderTopoCards(t);
+      }catch(e){}
+    }
+    function drawTopoSvg(t){
+      const svg=document.getElementById('topoSvg');
+      const W=760,H=380,cx=W/2,cy=H/2;
+      const nodes=t.nodes??[];
+      const pos={};
+      nodes.forEach((n,i)=>{
+        const a=-Math.PI/2+i*(2*Math.PI/Math.max(nodes.length,1));
+        pos[n.name]={x:cx+Math.cos(a)*250,y:cy+Math.sin(a)*130};
+      });
+      const pool={x:cx,y:cy};
+      let html=`<defs><linearGradient id="gline" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#4f6df5"/><stop offset="1" stop-color="#8b5cf6"/></linearGradient></defs>`;
+      for(const e of t.edges??[]){
+        const p=pos[e.from];if(!p)continue;
+        html+=`<line x1="${p.x}" y1="${p.y}" x2="${pool.x}" y2="${pool.y}" stroke="url(#gline)" stroke-width="${Math.min(2+e.weight,10)}" stroke-dasharray="6 4" opacity=".55"/>`;
+        html+=`<text x="${(p.x+pool.x)/2}" y="${(p.y+pool.y)/2}" font-size="11" fill="#8b93a3" text-anchor="middle">×${e.weight}</text>`;
+      }
+      if(t.hasSubAgentPool){
+        html+=`<circle cx="${pool.x}" cy="${pool.y}" r="34" fill="var(--accent-soft)" stroke="#8b5cf6" stroke-width="2"/>`;
+        html+=`<text x="${pool.x}" y="${pool.y+4}" font-size="12" fill="#8b5cf6" text-anchor="middle" font-weight="700">子Agent</text>`;
+      }
+      for(const n of nodes){
+        const p=pos[n.name];
+        const col=n.busy?'#22c55e':'#c3c9d4';
+        html+=`<circle class="${n.busy?'pulse':''}" cx="${p.x}" cy="${p.y}" r="38" fill="${n.busy?'rgba(34,197,94,.12)':'rgba(0,0,0,.04)'}"/>`;
+        html+=`<circle cx="${p.x}" cy="${p.y}" r="30" fill="#fff" stroke="${col}" stroke-width="3" style="cursor:pointer" onclick="pickAgentByName('${esc(n.name)}')"/>`;
+        html+=`<text x="${p.x}" y="${p.y+1}" font-size="13" font-weight="700" text-anchor="middle" fill="#1c2330">${esc(n.name)}</text>`;
+        html+=`<text x="${p.x}" y="${p.y+16}" font-size="9" text-anchor="middle" fill="#8b93a3">${n.sessions} 会话</text>`;
+        html+=`<text x="${p.x}" y="${p.y+46}" font-size="10" text-anchor="middle" fill="#8b93a3">${esc((n.model||'').split('/').pop())}</text>`;
+      }
+      svg.innerHTML=html;
+    }
+    function renderTopoCards(t){
+      document.getElementById('topoCards').innerHTML=(t.nodes??[]).map(n=>`
+        <div class="agent-card">
+          <h4><span class="dot ${n.busy?'busy':''}"></span>${esc(n.name)}</h4>
+          <div class="sub">${esc(n.description)} · ${esc((n.model||'').split('/').pop())} · 派生子任务 ${n.subAgentCalls}</div>
+          ${n.currentTasks.map(tk=>`<div class="task"><b>${esc(tk.title)}</b> · ${tk.msgCount} 条 · ${tk.ageSec<60?tk.ageSec+'秒前':Math.round(tk.ageSec/60)+'分钟前'}</div>`).join('')||'<div class="task" style="color:var(--muted)">暂无活动会话</div>'}
+        </div>`).join('');
+    }
+    function pickAgentByName(name){
+      document.getElementById('agentSel').value=name;switchAgent();showView('chat');
+    }
+
+    (async function init(){
+      await loadAgents();await loadModels();await loadSessions();
+    })();
   </script>
 </body>
 </html>
