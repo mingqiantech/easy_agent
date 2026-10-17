@@ -28,3 +28,13 @@ export {
   type NotificationLevel,
 } from "./notifications/index.js";
 export { SkillManager, parseSkillFile, type Skill } from "./skill/manager.js";
+export {
+  MigrationManager,
+  type Migration,
+  type MigrationReport,
+} from "./migration/index.js";
+export {
+  localStressTest,
+  type StressOptions,
+  type StressResult,
+} from "./benchmark/stress.js";
