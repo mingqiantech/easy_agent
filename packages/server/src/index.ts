@@ -71,8 +71,20 @@ async function main() {
     config,
   });
   const port = Number(process.env.PORT ?? 4096);
-  console.log(`Gateway: http://localhost:${port}`);
-  serve({ fetch: app.fetch, port });
+  try {
+    serve({ fetch: app.fetch, port });
+    console.log(`Gateway: http://localhost:${port}`);
+  } catch (e: any) {
+    if (e?.code === "EADDRINUSE") {
+      console.error(
+        `❌ 端口 ${port} 已被占用 — 网关很可能已在运行（systemd 服务默认自启）。\n` +
+          `   确认: curl http://localhost:${port}/health\n` +
+          `   要手动跑先停服务: systemctl --user stop easy-agent-gateway`,
+      );
+      process.exit(1);
+    }
+    throw e;
+  }
 }
 
 main();

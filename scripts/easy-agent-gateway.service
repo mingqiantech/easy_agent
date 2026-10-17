@@ -1,0 +1,14 @@
+[Unit]
+Description=Easy Agent Gateway (Web + API)
+After=network-online.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/easy-agent-gateway
+WorkingDirectory=%h/.easy-agent
+Restart=always
+RestartSec=2
+Environment=PORT=4096
+
+[Install]
+WantedBy=default.target

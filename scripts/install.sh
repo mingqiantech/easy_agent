@@ -21,7 +21,8 @@ if [[ "${1:-}" == "--server" ]]; then
   bun build --compile packages/server/src/index.ts --outfile dist/easy-agent-gateway
   mkdir -p "${BIN_DIR}"
   # 正在运行的 gateway 会占用二进制，先停再拷
-  pkill -x easy-agent-gateway 2>/dev/null || true
+  # 注：comm 截断为 15 字符，easy-agent-gatewa 是实际进程名
+  pkill -x easy-agent-gatewa 2>/dev/null || true
   sleep 0.5
   cp dist/easy-agent-gateway "${BIN_DIR}/easy-agent-gateway"
   chmod +x "${BIN_DIR}/easy-agent-gateway"
