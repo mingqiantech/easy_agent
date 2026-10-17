@@ -20,12 +20,19 @@ if [[ "${1:-}" == "--server" ]]; then
   echo "🔨 构建 Gateway..."
   bun build --compile packages/server/src/index.ts --outfile dist/easy-agent-gateway
   mkdir -p "${BIN_DIR}"
-  # 正在运行的 gateway 会占用二进制，先停再拷
-  # 注：comm 截断为 15 字符，easy-agent-gatewa 是实际进程名
-  pkill -x easy-agent-gatewa 2>/dev/null || true
+  # 正在运行的 gateway 会占用二进制；systemd 服务用 systemctl 停（pkill 会被 Restart=always 拉起）
+  GW_WAS_ACTIVE=0
+  if systemctl --user is-active --quiet easy-agent-gateway 2>/dev/null; then
+    GW_WAS_ACTIVE=1
+    systemctl --user stop easy-agent-gateway
+  fi
   sleep 0.5
   cp dist/easy-agent-gateway "${BIN_DIR}/easy-agent-gateway"
   chmod +x "${BIN_DIR}/easy-agent-gateway"
+  if [[ "${GW_WAS_ACTIVE}" == "1" ]]; then
+    systemctl --user start easy-agent-gateway
+    echo "↻ systemd 服务已重启"
+  fi
   # Web 静态资源：编译后的二进制从 ~/.easy-agent/public 读取
   mkdir -p "${HOME}/.easy-agent/public"
   cp packages/server/public/* "${HOME}/.easy-agent/public/"

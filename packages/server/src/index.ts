@@ -16,6 +16,23 @@ import { MonitoringSystem } from "@easy-agent/core/monitoring/index";
 
 import { loadConfig } from "@easy-agent/config/loader";
 import { getDatabase } from "@easy-agent/core/database";
+import net from "node:net";
+
+/**
+ * 端口预检：@hono/node-server 的 listen 错误是异步抛出的，
+ * 同步 try/catch 拦不住，唯一可靠做法是先探测再启动。
+ */
+function portInUse(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const probe = net.createServer();
+    probe.once("error", (e: any) => {
+      probe.removeAllListeners();
+      resolve(e?.code === "EADDRINUSE");
+    });
+    probe.once("listening", () => probe.close(() => resolve(false)));
+    probe.listen(port);
+  });
+}
 
 async function main() {
   const config = loadConfig();
@@ -71,20 +88,17 @@ async function main() {
     config,
   });
   const port = Number(process.env.PORT ?? 4096);
-  try {
-    serve({ fetch: app.fetch, port });
-    console.log(`Gateway: http://localhost:${port}`);
-  } catch (e: any) {
-    if (e?.code === "EADDRINUSE") {
-      console.error(
-        `❌ 端口 ${port} 已被占用 — 网关很可能已在运行（systemd 服务默认自启）。\n` +
-          `   确认: curl http://localhost:${port}/health\n` +
-          `   要手动跑先停服务: systemctl --user stop easy-agent-gateway`,
-      );
-      process.exit(1);
-    }
-    throw e;
+  if (await portInUse(port)) {
+    console.error(
+      `❌ 端口 ${port} 已被占用 — 网关很可能已在运行（systemd 服务默认自启）。\n` +
+        `   确认: curl http://localhost:${port}/health\n` +
+        `   要手动跑先停服务: systemctl --user stop easy-agent-gateway`,
+    );
+    process.exit(1);
   }
+
+  serve({ fetch: app.fetch, port });
+  console.log(`Gateway: http://localhost:${port}`);
 }
 
 main();
