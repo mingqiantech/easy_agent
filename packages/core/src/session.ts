@@ -70,18 +70,18 @@ export class SessionManager {
       messageCount: countRow?.count ?? 0,
     };
   }
-  list(limit: number = 50): SessionInfo[] {
+  list(limit: number = 50, agentId?: string): SessionInfo[] {
     const db = getDatabase();
     const rows = db
       .prepare(
         `SELECT s.*,
                 (SELECT COUNT(*) FROM messages WHERE session_id = s.id) as msg_count
          FROM sessions s
-         WHERE s.status = 'active'
+         WHERE s.status = 'active' AND (? IS NULL OR s.agent_id = ?)
          ORDER BY s.updated_at DESC
          LIMIT ?`,
       )
-      .all(limit) as any[];
+      .all(agentId ?? null, agentId ?? null, limit) as any[];
     return rows.map((row) => ({
       id: row.id,
       title: row.title,

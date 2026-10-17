@@ -63,3 +63,36 @@ export function resolveImageGenModelId(config: Config): string | undefined {
   const idx = ref.indexOf("/");
   return idx !== -1 ? ref.slice(idx + 1) : ref;
 }
+
+export interface ResolvedAgent {
+  name: string;
+  model: string;
+  workspaceDir: string;
+  description: string;
+}
+
+/**
+ * 解析全部 Agent（多 Agent 支持，OpenClaw 式）：
+ * default 始终存在 = 主模型 + 全局工作区；配置里 agents.* 逐个叠加，
+ * model/workspaceDir 缺省继承 default。
+ */
+export function resolveAgents(config: Config): ResolvedAgent[] {
+  const primary = modelChain(config)[0];
+  const out: ResolvedAgent[] = [
+    {
+      name: "default",
+      model: primary,
+      workspaceDir: config.workspaceDir,
+      description: "\u9ed8\u8ba4\u52a9\u624b",
+    },
+  ];
+  for (const [name, a] of Object.entries(config.agents ?? {})) {
+    out.push({
+      name,
+      model: a.model ? resolveRef(config, a.model) : primary,
+      workspaceDir: a.workspaceDir ?? config.workspaceDir,
+      description: a.description ?? name,
+    });
+  }
+  return out;
+}

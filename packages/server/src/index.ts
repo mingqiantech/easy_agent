@@ -15,7 +15,7 @@ import { createImageGenTool } from "@easy-agent/core/tool/builtins/image-gen";
 import { MonitoringSystem } from "@easy-agent/core/monitoring/index";
 
 import { loadConfig } from "@easy-agent/config/loader";
-import { modelFallbackMap, resolveImageGenModelId } from "@easy-agent/config/models";
+import { modelFallbackMap, resolveImageGenModelId, resolveAgents } from "@easy-agent/config/models";
 import { getDatabase } from "@easy-agent/core/database";
 import net from "node:net";
 
@@ -83,6 +83,26 @@ async function main() {
   monitoring.addDefaultRules(async (msg) => console.error(msg));
   monitoring.start(60000);
 
+  // 多 Agent：每个 agent 独立模型/工作区记忆（同工作区复用同一 BasicMemory）
+  const agents: Record<string, any> = {};
+  const memCache = new Map<string, BasicMemory>();
+  for (const a of resolveAgents(config)) {
+    let mem = memCache.get(a.workspaceDir);
+    if (!mem) {
+      mem = new BasicMemory(a.workspaceDir);
+      await mem.initWorkspace();
+      memCache.set(a.workspaceDir, mem);
+    }
+    agents[a.name] = {
+      name: a.name,
+      model: a.model,
+      description: a.description,
+      workspaceDir: a.workspaceDir,
+      memory: mem,
+    };
+  }
+  console.log(`🤖 Agents: ${Object.keys(agents).join(", ")}`);
+
   const app = createApp({
     llm,
     sessions,
@@ -90,6 +110,7 @@ async function main() {
     searcher,
     memory,
     config,
+    agents,
   });
   const port = Number(process.env.PORT ?? 4096);
   if (await portInUse(port)) {

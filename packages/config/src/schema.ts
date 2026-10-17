@@ -50,6 +50,16 @@ export const ConfigSchema = z.object({
       allowedUserIds: z.array(z.string()).default([]),
     })
     .optional(),
+  /** 多 Agent 定义："名字" -> { model?, workspaceDir?, description? } */
+  agents: z
+    .record(
+      z.object({
+        description: z.string().optional(),
+        model: z.string().optional(),
+        workspaceDir: z.string().optional(),
+      }),
+    )
+    .default({}),
   /** 视觉模型（ref 或 alias）；未配置时用主模型链首位 */
   visionModel: z.string().optional(),
   /** 图片生成模型（ref 或 alias） */

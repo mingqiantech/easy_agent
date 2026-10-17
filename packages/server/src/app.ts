@@ -36,6 +36,14 @@ export function resolvePublicDir(): string {
   return candidates[1] ?? candidates[0];
 }
 
+export interface AgentRuntime {
+  name: string;
+  model: string;
+  description: string;
+  workspaceDir: string;
+  memory: BasicMemory;
+}
+
 export interface ServerDeps {
   llm: LLMClient;
   sessions: SessionManager;
@@ -43,6 +51,8 @@ export interface ServerDeps {
   searcher: MemorySearcher;
   memory: BasicMemory;
   config: any;
+  /** 多 Agent：name -> 运行时（模型/工作区/记忆） */
+  agents: Record<string, AgentRuntime>;
 }
 
 export function createApp(deps: ServerDeps): Hono {
@@ -62,16 +72,31 @@ export function createApp(deps: ServerDeps): Hono {
   const observability = new Observability();
   app.get("/health", (c) => c.json(observability.getHealthCheck()));
 
+  // 多 Agent 列表（供前端切换器）
+  app.get("/api/agents", (c) =>
+    c.json({
+      agents: Object.values(deps.agents).map((a) => ({
+        name: a.name,
+        model: a.model,
+        description: a.description,
+      })),
+    }),
+  );
+
   app.get("/api/sessions", (c) => {
     const limit = Number(c.req.query("limit") ?? 50);
-    return c.json({ sessions: deps.sessions.list(limit) });
+    const agent = c.req.query("agent") || undefined;
+    return c.json({ sessions: deps.sessions.list(limit, agent) });
   });
 
   app.post("/api/sessions", async (c) => {
     const body = await c.req.json();
-    const systemPrompt = await deps.memory.buildSystemPrompt();
+    const agent = deps.agents[body.agentId ?? "default"] ?? deps.agents["default"];
+    if (!agent) return c.json({ error: "no agents configured" }, 500);
+    const systemPrompt = await agent.memory.buildSystemPrompt();
     const session = deps.sessions.create({
-      model: body.model ?? deps.config.defaultModel,
+      agentId: agent.name,
+      model: body.model ?? agent.model,
       systemPrompt,
     });
     return c.json({ session }, 201);

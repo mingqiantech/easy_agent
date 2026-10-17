@@ -38,10 +38,16 @@
     .send-btn:hover{opacity:.85}
     .send-btn:disabled{opacity:.4;cursor:not-allowed}
     @media(max-width:768px){.sidebar{display:none}}
+    .agent-bar{padding:10px 16px;border-bottom:1px solid var(--border);background:var(--bg-sidebar)}
+    .agent-bar select{width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--fg);font-size:13px;font-family:inherit}
+    .session-agent{font-size:10px;color:var(--accent);background:var(--accent-soft);padding:1px 6px;border-radius:8px;margin-right:6px}
   </style>
 </head>
 <body>
   <div class="sidebar">
+    <div class="agent-bar">
+      <select id="agentSel" onchange="switchAgent()"></select>
+    </div>
     <div class="new-btn" onclick="createSession()">+ New Session</div>
     <div class="session-list" id="sessionList"></div>
   </div>
@@ -54,11 +60,27 @@
     </div>
   </div>
   <script>
-    const API='';let sid=null;
+    const API='';let sid=null;let agent='default';
     const esc=t=>{const d=document.createElement('div');d.textContent=t;return d.innerHTML};
 
+    async function loadAgents(){
+      try{
+        const r=await fetch(`${API}/api/agents`);const{agents}=await r.json();
+        const sel=document.getElementById('agentSel');
+        sel.innerHTML=agents.map(a=>`<option value="${esc(a.name)}">${esc(a.name)} — ${esc(a.description)}</option>`).join('');
+        sel.value=agent;
+      }catch(e){/* 旧版服务端无此接口：保持 default */}
+    }
+
+    function switchAgent(){
+      agent=document.getElementById('agentSel').value;
+      sid=null;
+      document.getElementById('messages').innerHTML='';
+      loadSessions();
+    }
+
     async function loadSessions(){
-      const r=await fetch(`${API}/api/sessions`);const{sessions}=await r.json();
+      const r=await fetch(`${API}/api/sessions?agent=${encodeURIComponent(agent)}`);const{sessions}=await r.json();
       document.getElementById('sessionList').innerHTML=sessions.map(s=>`
         <div class="session-item ${s.id===sid?'active':''}" onclick="selectSession('${s.id}')">
           <div class="session-title">${esc(s.title||'untitled')}</div>
@@ -67,7 +89,7 @@
     }
 
     async function createSession(){
-      const r=await fetch(`${API}/api/sessions`,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+      const r=await fetch(`${API}/api/sessions`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({agentId:agent})});
       const{session}=await r.json();sid=session.id;
       document.getElementById('messages').innerHTML='';await loadSessions();
     }
@@ -148,7 +170,7 @@
       }
     }
 
-    loadSessions();
+    loadAgents().then(()=>loadSessions());
   </script>
 </body>
 </html>

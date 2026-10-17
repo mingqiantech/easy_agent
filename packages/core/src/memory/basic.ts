@@ -56,6 +56,8 @@ export class BasicMemory {
    */
   async initWorkspace(): Promise<string[]> {
     const created: string[] = [];
+    // 目录不存在先建（agent 独立工作区首次启动时 writeFile 需要父目录）
+    await fs.mkdir(this.workDir, { recursive: true });
 
     const templates: Record<string, string> = {
       "MEMORY.md": "# Long-Term Memory\n\n_No memories yet._\n",
