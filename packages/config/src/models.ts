@@ -99,13 +99,16 @@ function effectiveThinking(
  */
 export function resolveAgents(config: Config): ResolvedAgent[] {
   const primary = modelChain(config)[0];
+  // default 也可被 agents 节 / agents-state.json（Web UI 持久化）覆盖
+  const dflt = (config.agents ?? {})["default"];
+  const defaultModel = dflt?.model ? resolveRef(config, dflt.model) : primary;
   const out: ResolvedAgent[] = [
     {
       name: "default",
-      model: primary,
-      workspaceDir: config.workspaceDir,
-      description: "默认助手",
-      thinking: effectiveThinking(config, primary),
+      model: defaultModel,
+      workspaceDir: dflt?.workspaceDir ?? config.workspaceDir,
+      description: dflt?.description ?? "默认助手",
+      thinking: effectiveThinking(config, defaultModel, dflt?.thinking),
     },
   ];
   for (const [name, a] of Object.entries(config.agents ?? {})) {

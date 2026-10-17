@@ -40,6 +40,11 @@ export function loadConfig(overrides?: Partial<Config>): Config {
   if (!config.stateDir) {
     config.stateDir = getStateDir();
   }
+
+  // Web UI 运行时持久化的 agent 覆盖（agents-state.json）叠加到配置文件之上，
+  // 重启后仍生效；优先级：agents-state > easy-agent.json 的 agents 节
+  applyAgentsState(config);
+
   // 工作区：未配置时默认 ~/.easy-agent/workspace（env 可覆盖）
   if (!config.workspaceDir || config.workspaceDir === ".") {
     config.workspaceDir = getWorkspaceDir();
@@ -96,7 +101,24 @@ function loadEnvFile(filePath: string): void {
 }
 
 /**
- * 字符串安全的 JSONC 注释剥离：仅去除引号外的行注释（//）与块注释，
+ * 读取 <stateDir>/agents-state.json（由 PATCH /api/agents/:name 写入），
+ * 按 agent 字段级叠加到 config.agents；文件不存在/损坏那么静默忽略。
+ * 注：default agent 的覆盖也走这里（models.ts 的 resolveAgents 会读 agents["default"]）。
+ */
+function applyAgentsState(config: Config): void {
+  try {
+    const file = path.join(config.stateDir, "agents-state.json");
+    const data = JSON.parse(stripJsonComments(fs.readFileSync(file, "utf-8")));
+    for (const [name, ov] of Object.entries<any>(data.agents ?? {})) {
+      config.agents[name] = { ...(config.agents[name] ?? {}), ...ov };
+    }
+  } catch {
+    // 无覆盖文件
+  }
+}
+
+/**
+ * 字符串安全的 JSONC 注释剥离：仅去掉引号外的行注释（//）与块注释，
  * 不会破坏 "https://..." 这类字段值。
  */
 export function stripJsonComments(text: string): string {

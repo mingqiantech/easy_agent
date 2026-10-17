@@ -7,6 +7,7 @@ const TEST_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "easy-agent-agents-test-"
 process.env.EASY_AGENT_STATE_DIR = TEST_DIR;
 
 import { resolveAgents, resolveRef } from "../src/models.js";
+import { loadConfig } from "../src/loader.js";
 import type { Config } from "../src/schema.js";
 
 const catalog = {
@@ -94,5 +95,46 @@ describe("resolveAgents（多 Agent）", () => {
     const list = resolveAgents(config);
     expect(list[0]!.thinking).toBe("off");
     expect(list[1]!.thinking).toBe("medium");
+  });
+});
+
+describe("agents-state.json 持久化覆盖（Web UI 设置思考等级）", () => {
+  // 注意：多个测试文件都会设置 EASY_AGENT_STATE_DIR（模块加载序决定最终值），
+  // 所以运行时从 env 读当前状态目录，而非模块内 TEST_DIR 常量
+  const stateFile = () =>
+    require("node:path").join(process.env.EASY_AGENT_STATE_DIR as string, "agents-state.json");
+  const fs = require("node:fs");
+
+  it("UI 写入的 thinking 叠加配置文件；default agent 也可被覆盖", () => {
+    fs.writeFileSync(
+      stateFile(),
+      JSON.stringify({ agents: { coder: { thinking: "high" }, default: { thinking: "medium" } } }),
+    );
+    const config = loadConfig({
+      models: catalog as any,
+      agents: { coder: { model: "max", thinking: "low" } } as any,
+    });
+    const list = resolveAgents(config);
+    expect(list.find((a) => a.name === "coder")!.thinking).toBe("high");
+    expect(list.find((a) => a.name === "default")!.thinking).toBe("medium");
+    fs.unlinkSync(stateFile());
+  });
+
+  it("无覆盖文件时配置文件值原样生效", () => {
+    const config = loadConfig({
+      models: catalog as any,
+      agents: { coder: { thinking: "medium" } } as any,
+    });
+    expect(resolveAgents(config).find((a) => a.name === "coder")!.thinking).toBe("medium");
+  });
+
+  it("reasoning:false 模型上覆盖的 thinking 仍自动降级为 off", () => {
+    fs.writeFileSync(stateFile(), JSON.stringify({ agents: { plain: { thinking: "high" } } }));
+    const config = loadConfig({
+      models: { ...catalog, "openai/plain-model": { alias: "pm", reasoning: false } } as any,
+      agents: { plain: { model: "pm" } } as any,
+    });
+    expect(resolveAgents(config).find((a) => a.name === "plain")!.thinking).toBe("off");
+    fs.unlinkSync(stateFile());
   });
 });

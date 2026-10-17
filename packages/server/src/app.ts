@@ -256,6 +256,46 @@ export function createApp(deps: ServerDeps): Hono {
     return c.json({ response });
   });
 
+  // Agent 运行时参数修改（思考等级）：即时生效 + 持久化到 agents-state.json，
+  // 重启网关后由 loadConfig 叠加回配置（Web UI 无需改文件即可配置）
+  app.patch("/api/agents/:name", async (c) => {
+    const name = c.req.param("name");
+    const agent = deps.agents[name];
+    if (!agent) return c.json({ error: `unknown agent: ${name}` }, 404);
+    const body = await c.req.json().catch(() => ({}) as any);
+    const levels = ["off", "low", "medium", "high"];
+    if (typeof body.thinking !== "string")
+      return c.json({ error: "thinking 必须是字符串" }, 400);
+    if (!levels.includes(body.thinking))
+      return c.json({ error: "thinking 必须是 off|low|medium|high" }, 400);
+
+    agent.thinking = body.thinking;
+    try {
+      const dir = deps.config.stateDir;
+      fs.mkdirSync(dir, { recursive: true });
+      const file = path.join(dir, "agents-state.json");
+      let data: any = {};
+      try {
+        data = JSON.parse(fs.readFileSync(file, "utf-8"));
+      } catch {}
+      data.agents = {
+        ...(data.agents ?? {}),
+        [name]: { ...(data.agents?.[name] ?? {}), thinking: body.thinking },
+      };
+      fs.writeFileSync(file, JSON.stringify(data, null, 2));
+    } catch (e: any) {
+      return c.json({ error: `设置已生效但持久化失败: ${e.message}` }, 500);
+    }
+    return c.json({
+      agent: {
+        name: agent.name,
+        model: agent.model,
+        description: agent.description,
+        thinking: agent.thinking,
+      },
+    });
+  });
+
   app.get("/api/memory/search", async (c) => {
     const q = c.req.query("q");
     if (!q) return c.json({ error: "missing q" }, 400);

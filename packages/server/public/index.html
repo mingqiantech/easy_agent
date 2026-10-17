@@ -41,6 +41,7 @@
     .tab.active{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;border-color:transparent;font-weight:600}
     .model-pick{margin-left:auto;display:flex;gap:8px;align-items:center}
     .model-pick label{font-size:12px;color:var(--muted)}
+    .model-pick select{width:auto;min-width:76px}
     .action-btn{padding:7px 14px;border:1px solid var(--border);border-radius:10px;background:var(--card);cursor:pointer;font-size:13px;color:var(--fg)}
     .action-btn:hover{border-color:var(--accent);color:var(--accent)}
     .action-btn:disabled{opacity:.4;cursor:not-allowed}
@@ -96,6 +97,10 @@
         <div class="tab" id="tabTopo" onclick="showView('topo')">🕸 Agent 拓扑</div>
       </div>
       <div class="model-pick">
+        <label>💭 思考</label>
+        <select id="thinkSel" onchange="switchThinking(this.value)">
+          <option value="off">off</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option>
+        </select>
         <label>模型</label>
         <select id="modelSel" onchange="switchModel(this.value)"></select>
         <button class="action-btn" onclick="summarize()" id="summBtn">📝 总结本会话</button>
@@ -126,15 +131,30 @@
     /* ── Agents ── */
     async function loadAgents(){
       try{
-        const r=await fetch(`${API}/api/agents`);const{agents}=await r.json();
-        const sel=document.getElementById('agentSel');
-        sel.innerHTML=agents.map(a=>`<option value="${esc(a.name)}">${esc(a.name)} · ${esc(a.description)}${a.thinking&&a.thinking!=='off'?' 💭'+esc(a.thinking):''}</option>`).join('');
-        sel.value=agent;
-      }catch(e){}
+        const r=await fetch(`${API}/api/agents`);({agents:window.__agents}=await r.json());
+      }catch(e){window.__agents=window.__agents||[]}
+      renderAgentOptions();updateThinkSel();
+    }
+    function renderAgentOptions(){
+      const sel=document.getElementById('agentSel');
+      sel.innerHTML=(window.__agents||[]).map(a=>`<option value="${esc(a.name)}">${esc(a.name)} · ${esc(a.description)}${a.thinking&&a.thinking!=='off'?' 💭'+esc(a.thinking):''}</option>`).join('');
+      sel.value=agent;
+    }
+    function updateThinkSel(){
+      const a=(window.__agents||[]).find(x=>x.name===agent);
+      document.getElementById('thinkSel').value=(a&&a.thinking)||'off';
+    }
+    async function switchThinking(lv){
+      const r=await fetch(`${API}/api/agents/${encodeURIComponent(agent)}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({thinking:lv})});
+      const j=await r.json();
+      if(j.error){alert('❌ '+j.error);updateThinkSel();return;}
+      const a=(window.__agents||[]).find(x=>x.name===agent);if(a)a.thinking=j.agent.thinking;
+      updateThinkSel();renderAgentOptions();
     }
     function switchAgent(){
       agent=document.getElementById('agentSel').value;sid=null;
       document.getElementById('messages').innerHTML='<div class="empty">选择或创建一个会话</div>';
+      updateThinkSel();
       loadSessions();
     }
 
