@@ -139,6 +139,7 @@ export async function startRepl(
         return;
       }
 
+      busy = true;
       try {
         const response = await sessions.run(sid, t, {
           toolRegistry,
@@ -156,12 +157,25 @@ export async function startRepl(
       } catch (error: any) {
         console.error(`\n❌ Error: ${error.message}`);
       }
+      busy = false;
+      if (closing) {
+        bye();
+        return;
+      }
       prompt();
     });
   };
-  rl.on("close", () => {
+
+  // 退出排空：stdin 关闭（Ctrl+D / 管道 EOF）时若仍在处理，等当前回复完成再退出
+  const bye = (): void => {
     console.log("\nBye! 👋");
     process.exit(0);
+  };
+  let closing = false;
+  let busy = false;
+  rl.on("close", () => {
+    closing = true;
+    if (!busy) bye();
   });
   prompt();
 }
