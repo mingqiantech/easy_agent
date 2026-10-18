@@ -32,6 +32,7 @@ export class CronScheduler {
         console.error(`Cron job "${job.name}" failed: ${e.message}`);
         this.cron.markRun(job.id, false);
       }
+      this.cron.advanceNext(job.id, job.schedule);
     }
   }
 }

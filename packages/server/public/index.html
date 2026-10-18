@@ -322,7 +322,14 @@
       try{
         const r=await fetch(`${API}/api/sessions/${sid}/messages`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text})});
         const j=await r.json();
-        thinking.innerHTML=bubbleHtml({role:'assistant',content:j.response??('❌ '+(j.error||'请求失败')),createdAt:Date.now()});
+        if(j.status==='queued'){
+          thinking.innerHTML=bubbleHtml({role:'assistant',content:'⏳ 已排队——当前任务进行中，这条消息会自动并入上下文（转向），稍后刷新会话可见完整回复',createdAt:Date.now()});
+          await new Promise(res=>setTimeout(res,4000));
+          thinking.innerHTML=bubbleHtml({role:'assistant',content:'⏳ 已并入当前任务，继续对话请等待本轮完成后刷新',createdAt:Date.now()});
+          loadSessions();
+        }else{
+          thinking.innerHTML=bubbleHtml({role:'assistant',content:j.response??('❌ '+(j.error||'请求失败')),createdAt:Date.now()});
+        }
       }catch(e){thinking.innerHTML=bubbleHtml({role:'assistant',content:'❌ '+e.message});}
       document.getElementById('sendBtn').disabled=false;c.scrollTop=c.scrollHeight;await loadSessions();
     }

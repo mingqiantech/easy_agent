@@ -1,7 +1,8 @@
 import { getDatabase } from "../database.js";
 import { ulid } from "ulid";
+import { execSync } from "node:child_process";
 
-export type ScheduleKind = "at" | "every" | "cron";
+export type ScheduleKind = "at" | "every" | "cron" | "watch";
 
 export interface CronJobConfig {
   name: string;
@@ -12,6 +13,9 @@ export interface CronJobConfig {
     everyMs?: number;
     expr?: string;
     tz?: string;
+    /** watch：静默检查命令，输出 JSON {fire,message?}，命中才执行 payload */
+    command?: string;
+    timeoutMs?: number;
   };
 
   payload: {
@@ -103,6 +107,58 @@ export class CronManager {
     ).run(id, success ? "success" : "failure", now, now);
   }
 
+  /**
+   * 事件 watcher 静默检查（零 LLM 成本）：跑命令、解析 stdout JSON。
+   * 输出 {fire:true,message?} 才算命中；出错/无输出/非 JSON 一律不触发。
+   */
+  runWatchCheck(schedule: {
+    command?: string;
+    timeoutMs?: number;
+  }): { fire: boolean; message?: string } | null {
+    if (!schedule.command) return null;
+    try {
+      const out = execSync(schedule.command, {
+        timeout: schedule.timeoutMs ?? 30000,
+        maxBuffer: 64 * 1024,
+        encoding: "utf-8",
+        stdio: ["ignore", "pipe", "pipe"],
+      }).trim();
+      if (!out) return null;
+      const brace = out.indexOf("{");
+      if (brace === -1) return null;
+      const parsed = JSON.parse(out.slice(brace));
+      return parsed && typeof parsed.fire === "boolean" ? parsed : null;
+    } catch (e: any) {
+      console.warn(
+        `watch 检查失败: ${String(e?.message ?? e).slice(0, 120)}`,
+      );
+      return null;
+    }
+  }
+
+  /** 运行后推进 next_run_at（every/watch 按间隔）；at 一次性任务自动禁用 */
+  advanceNext(
+    id: string,
+    schedule: CronJobConfig["schedule"],
+  ): void {
+    const db = getDatabase();
+    if (schedule.kind === "at") {
+      db
+        .prepare(
+          "UPDATE cron_jobs SET enabled = 0, next_run_at = NULL WHERE id = ?",
+        )
+        .run(id);
+      return;
+    }
+    const ms =
+      schedule.kind === "watch"
+        ? (schedule.everyMs ?? 300000)
+        : (schedule.everyMs ?? 3600000);
+    db
+      .prepare("UPDATE cron_jobs SET next_run_at = ? WHERE id = ?")
+      .run(Date.now() + ms, id);
+  }
+
   /** 注册 Dreaming 定时任务 */
   registerDreamingJobs(): void {
     const existing = this.list();
@@ -154,6 +210,8 @@ export class CronManager {
         return now + (schedule.everyMs ?? 3600000);
       case "cron":
         return now + 3600000;
+      case "watch":
+        return now + (schedule.everyMs ?? 300000);
       default:
         return now + 3600000;
     }

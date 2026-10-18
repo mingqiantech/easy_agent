@@ -8,6 +8,8 @@ import type {
   LLMResponse,
 } from "@easy-agent/schema/llm";
 import type { ToolRegistry } from "./tool/registry.js";
+import { pruneToolResults } from "./context.js";
+import { maskSecrets } from "./secrets-mask.js";
 
 export interface CreateSessionOptions {
   model?: string;
@@ -32,6 +34,8 @@ export interface SessionInfo {
 export class SessionManager {
   private llm: LLMClient;
   private defaultModel: string;
+  private running = new Set<string>();
+  private queues = new Map<string, string[]>();
   constructor(llm: LLMClient, options: { defaultModel: string }) {
     this.llm = llm;
     this.defaultModel = options.defaultModel;
@@ -134,6 +138,20 @@ export class SessionManager {
       id,
     );
   }
+  /** 会话是否正在运行（排队/转向判断） */
+  isBusy(sessionId: string): boolean {
+    return this.running.has(sessionId);
+  }
+
+  /** 把消息排入进行中会话的队列；没在跑则返回 false（调用方直接 run） */
+  queueMessage(sessionId: string, text: string): boolean {
+    if (!this.running.has(sessionId)) return false;
+    const q = this.queues.get(sessionId);
+    if (q) q.push(text);
+    else this.queues.set(sessionId, [text]);
+    return true;
+  }
+
   addMessage(sessionId: string, message: Message): string {
     const db = getDatabase();
     const id = generateId();
@@ -212,79 +230,104 @@ export class SessionManager {
     const db = getDatabase();
     const workDir = options?.workDir ?? process.cwd();
 
-    this.addMessage(sessionId, { role: "user", content: userText });
-    if (!session.title) {
-      db.prepare("UPDATE sessions SET title = ? WHERE id = ?").run(
-        userText.slice(0, 50),
-        sessionId,
-      );
-    }
-
-    const toolDefs = options?.toolRegistry?.getDefinitions();
+    this.running.add(sessionId);
     let fullResponse = "";
+    try {
+      let nextText: string | null = userText;
+      while (nextText !== null) {
+        this.addMessage(sessionId, { role: "user", content: nextText });
+        if (!session.title) {
+          const t = nextText.slice(0, 50);
+          db.prepare("UPDATE sessions SET title = ? WHERE id = ?").run(
+            t,
+            sessionId,
+          );
+          session.title = t;
+        }
 
-    for (let step = 0; step < 20; step++) {
-      await this.compactIfNeeded(sessionId);
-      const messages = this.getMessages(sessionId);
-      const response = await this.llm.generate({
-        model: session.model,
-        messages,
-        tools: toolDefs,
-        toolChoice: toolDefs?.length ? "auto" : undefined,
-        generation:
-          options?.thinking && options.thinking !== "off"
-            ? { thinking: options.thinking }
-            : undefined,
-      });
+        const toolDefs = options?.toolRegistry?.getDefinitions();
 
-      if (response.usage) {
-        db.prepare(
-          `INSERT INTO token_usage (session_id, model, prompt_tokens, completion_tokens, total_tokens, created_at)
+        for (let step = 0; step < 20; step++) {
+          // 转向（steering）：运行中新排入的消息并入当前上下文，下一步模型即可见
+          const steer = this.queues.get(sessionId);
+          while (steer?.length) {
+            this.addMessage(sessionId, { role: "user", content: steer.shift()! });
+          }
+
+          await this.compactIfNeeded(sessionId);
+          // 上下文工程：旧工具结果修剪 + 超长消息截断（仅影响发给模型的副本）
+          const messages = pruneToolResults(this.getMessages(sessionId));
+          const response = await this.llm.generate({
+            model: session.model,
+            messages,
+            tools: toolDefs,
+            toolChoice: toolDefs?.length ? "auto" : undefined,
+            generation:
+              options?.thinking && options.thinking !== "off"
+                ? { thinking: options.thinking }
+                : undefined,
+          });
+
+          if (response.usage) {
+            db.prepare(
+              `INSERT INTO token_usage (session_id, model, prompt_tokens, completion_tokens, total_tokens, created_at)
            VALUES (?, ?, ?, ?, ?, ?)`,
-        ).run(
-          sessionId,
-          session.model,
-          response.usage.promptTokens ?? 0,
-          response.usage.completionTokens ?? 0,
-          response.usage.totalTokens ?? 0,
-          now(),
-        );
+            ).run(
+              sessionId,
+              session.model,
+              response.usage.promptTokens ?? 0,
+              response.usage.completionTokens ?? 0,
+              response.usage.totalTokens ?? 0,
+              now(),
+            );
+          }
+
+          this.addMessage(sessionId, {
+            role: "assistant",
+            content: response.toolCalls?.length
+              ? JSON.stringify({
+                  text: response.content,
+                  toolCalls: response.toolCalls,
+                })
+              : response.content,
+          });
+          fullResponse += response.content ?? "";
+          options?.onText?.(response.content);
+
+          if (!response.toolCalls?.length || !options?.toolRegistry) break;
+
+          for (const tc of response.toolCalls) {
+            options.onToolCall?.(tc.name, tc.input);
+            const result = await options.toolRegistry.execute(tc.name, tc.input, {
+              sessionId,
+              agentId: session.agentId,
+              workDir,
+            });
+            options.onToolResult?.(tc.name, result.output ?? result.error);
+            // 密钥屏蔽：工具输出落库前替换已知密钥值，模型/界面/历史都不见明文
+            this.addMessage(sessionId, {
+              role: "tool",
+              content: maskSecrets(
+                JSON.stringify({
+                  toolCallId: tc.id,
+                  toolName: tc.name,
+                  result: result.output,
+                  error: result.error,
+                }),
+              ),
+            });
+          }
+        }
+
+        // 队列尾部：本轮答完后仍有排队消息 → 作为下一用户轮继续运行
+        const tail = this.queues.get(sessionId);
+        nextText = tail?.length ? (tail.shift() ?? null) : null;
+        if (nextText !== null && fullResponse) fullResponse += "\n\n";
       }
-
-      this.addMessage(sessionId, {
-        role: "assistant",
-        content: response.toolCalls?.length
-          ? JSON.stringify({
-              text: response.content,
-              toolCalls: response.toolCalls,
-            })
-          : response.content,
-      });
-      fullResponse += response.content ?? '';
-      options?.onText?.(response.content);
-
-      if (!response.toolCalls?.length || !options?.toolRegistry) break;
-
-      for (const tc of response.toolCalls) {
-        options.onToolCall?.(tc.name, tc.input);
-        const result = await options.toolRegistry.execute(tc.name, tc.input, {
-          sessionId,
-          agentId: session.agentId,
-          workDir,
-        });
-        options.onToolResult?.(tc.name, result.output ?? result.error);
-        this.addMessage(sessionId, {
-          role: "tool",
-          content: JSON.stringify({
-            toolCallId: tc.id,
-            toolName: tc.name,
-            result: result.output,
-            error: result.error,
-          }),
-        });
-      }
+      return fullResponse;
+    } finally {
+      this.running.delete(sessionId);
+      this.queues.delete(sessionId);
     }
-
-    return fullResponse;
   }
 }

@@ -23,6 +23,10 @@ import {
   deepDreaming,
 } from "@easy-agent/memory/dreaming";
 import { getDatabase } from "@easy-agent/core/database";
+import { CronManager } from "@easy-agent/core/cron/index";
+import { CronScheduler } from "@easy-agent/core/cron/scheduler";
+import { initSecretMask } from "@easy-agent/core/secrets-mask";
+import { execSync } from "node:child_process";
 import net from "node:net";
 
 /**
@@ -138,6 +142,46 @@ async function main() {
     }
   }
 
+  // 密钥屏蔽：.env 值进入对话历史/模型上下文前统一替换 ***
+  initSecretMask(config.stateDir);
+
+  // cron / 事件 watcher：watch 命中前静默检查（零 LLM 成本），命中才执行 payload
+  const cron = new CronManager();
+  const runCronTurn = async (text: string, name: string) => {
+    const agent = agents["default"] ?? Object.values(agents)[0];
+    const s = sessions.create({
+      agentId: agent?.name ?? "default",
+      model: agent?.model,
+      title: `[cron] ${name}`.slice(0, 50),
+      systemPrompt: agent
+        ? await agent.memory.buildSystemPrompt()
+        : undefined,
+    });
+    await sessions.run(s.id, text, { toolRegistry: tools });
+  };
+  const cronScheduler = new CronScheduler(cron, async (job) => {
+    if (job.schedule.kind === "watch") {
+      const hit = cron.runWatchCheck(job.schedule);
+      if (!hit?.fire) return; // 静默：未命中不产生任何 LLM 调用
+      await runCronTurn(
+        `⚡ 事件 watcher "${job.name}" 命中${hit.message ? `：${hit.message}` : ""}\n${job.payload.message ?? ""}`.trim(),
+        job.name,
+      );
+      return;
+    }
+    if (job.payload.kind === "script" && job.payload.script) {
+      execSync(job.payload.script, {
+        timeout: 30000,
+        maxBuffer: 64 * 1024,
+      });
+      return;
+    }
+    if (job.payload.kind === "agentTurn" && job.payload.message) {
+      await runCronTurn(job.payload.message, job.name);
+    }
+  });
+  cronScheduler.start();
+
   const app = createApp({
     llm,
     sessions,
@@ -147,6 +191,7 @@ async function main() {
     config,
     agents,
     runDreaming: runDreamingCycle,
+    cron,
   });
 
   // 梦境调度：每分钟查 settings.json；上次运行时间从 dreaming_state 读（重启不丢）

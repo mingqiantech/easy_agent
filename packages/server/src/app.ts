@@ -10,6 +10,7 @@ import { serveStatic } from "hono/bun";
 import { Observability } from "@easy-agent/core/observability";
 import { getDatabase } from "@easy-agent/core/database";
 import { loadSettings, saveSettings } from "./settings.js";
+import type { CronManager } from "@easy-agent/core/cron/index";
 import path from "node:path";
 import os from "node:os";
 import fs from "node:fs";
@@ -58,6 +59,8 @@ export interface ServerDeps {
   agents: Record<string, AgentRuntime>;
   /** 梦境单轮执行器（index.ts 注入：接线 + 防并发） */
   runDreaming?: () => Promise<Record<string, unknown>>;
+  /** cron/事件 watcher 管理器 */
+  cron?: CronManager;
 }
 
 export function createApp(deps: ServerDeps): Hono {
@@ -265,6 +268,14 @@ export function createApp(deps: ServerDeps): Hono {
     const id = c.req.param("id");
     const sess = deps.sessions.get(id);
     const agent = sess ? deps.agents[sess.agentId] : undefined;
+    // 排队/转向：会话有任务在跑 → 入队，运行循环会并入当前上下文
+    if (
+      typeof body.text === "string" &&
+      body.text &&
+      deps.sessions.queueMessage(id, body.text)
+    ) {
+      return c.json({ status: "queued" }, 202);
+    }
     const response = await deps.sessions.run(id, body.text, {
       toolRegistry: deps.tools,
       thinking: agent?.thinking as
@@ -426,6 +437,35 @@ export function createApp(deps: ServerDeps): Hono {
       )
       .all(since) as any[];
     return c.json({ days, totals, daily: daily.reverse(), byModel, byAgent });
+  });
+
+  // ── 定时任务 / 事件 watcher ──
+  app.get("/api/cron", (c) => c.json({ jobs: deps.cron ? deps.cron.list() : [] }));
+  app.post("/api/cron", async (c) => {
+    if (!deps.cron) return c.json({ error: "cron 不可用" }, 503);
+    const body = await c.req.json().catch(() => null as any);
+    if (!body?.schedule?.kind || !body?.payload?.kind)
+      return c.json({ error: "需要 schedule.kind 和 payload.kind" }, 400);
+    if (body.schedule.kind === "watch" && !body.schedule.command)
+      return c.json({ error: "watch 任务需要 schedule.command" }, 400);
+    try {
+      const id = deps.cron.create({
+        name: body.name ?? "job",
+        description: body.description,
+        schedule: body.schedule,
+        payload: body.payload,
+        sessionTarget: body.sessionTarget ?? "isolated",
+        enabled: body.enabled !== false,
+      });
+      return c.json({ id }, 201);
+    } catch (e: any) {
+      return c.json({ error: String(e?.message ?? e) }, 400);
+    }
+  });
+  app.delete("/api/cron/:id", (c) => {
+    if (!deps.cron) return c.json({ error: "cron 不可用" }, 503);
+    deps.cron.delete(c.req.param("id"));
+    return c.json({ ok: true });
   });
 
   app.get("/api/tools", (c) => c.json({ tools: deps.tools.getDefinitions() }));

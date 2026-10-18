@@ -38,6 +38,14 @@ describe("SessionManager", () => {
     expect(msgs[1].content).toBe("hi");
   });
 
+  it("queueMessage 需要会话正在运行（转向/排队基础）", () => {
+    const s = sessions.create({});
+    expect(sessions.isBusy(s.id)).toBe(false);
+    // 会话没在跑 → 不入队（调用方直接 run），不产生孤儿消息
+    expect(sessions.queueMessage(s.id, "插话")).toBe(false);
+    sessions.delete(s.id);
+  });
+
   it("deletes a session", () => {
     const s = sessions.create({});
     sessions.delete(s.id);

@@ -2,6 +2,7 @@ import { LLMClient } from "@easy-agent/llm/client";
 import { SessionInfo } from "@easy-agent/core/session";
 import { closeDatabase } from "@easy-agent/core/database";
 import { loadConfig } from "@easy-agent/config/loader";
+import { initSecretMask } from "@easy-agent/core/secrets-mask";
 import { modelFallbackMap } from "@easy-agent/config/models";
 import { startRepl } from "./repl.js";
 import { SessionManager } from "../../core/src";
@@ -16,6 +17,7 @@ async function main() {
   }
 
   const config = loadConfig();
+  initSecretMask(config.stateDir);
   const providerNames = Object.keys(config.providers);
   if (providerNames.length === 0) {
     console.error("❌ No API keys configured.");
