@@ -138,7 +138,7 @@
     </div>
 
     <div class="view" id="topoView" hidden>
-      <div class="topo-wrap"><svg id="topoSvg" width="760" height="380"></svg></div>
+      <div class="topo-wrap"><svg id="topoSvg" width="100%" height="380"></svg></div>
       <div class="topo-cards" id="topoCards"></div>
     </div>
 
@@ -180,16 +180,15 @@
     </div>
 
     <div class="view" id="agentsView" hidden>
-      <div class="usage-head">子代理拓扑
+      <div class="usage-head">子代理运行 · 详细列表
         <span id="saRunning" style="color:var(--muted)"></span>
         <span style="margin-left:auto;display:flex;gap:10px;align-items:center;font-size:11px">
           <span><span class="dot" style="background:#22c55e"></span> 完成</span>
           <span><span class="dot" style="background:#f59e0b"></span> 运行中</span>
           <span><span class="dot" style="background:#ef4444"></span> 失败</span>
-          <span style="color:var(--muted)">点击节点查看对话</span>
+          <span style="color:var(--muted)">点击行查看对话 · 拓扑图见「🕸 Agent 拓扑」</span>
         </span>
       </div>
-      <div class="topo-wrap" style="flex:none;padding:8px 20px"><svg id="saSvg" width="100%" height="380"></svg></div>
       <div class="card" style="margin:0 20px 20px"><h3>运行记录</h3><table class="usage-table" id="saList"></table></div>
     </div>
   </div>
@@ -380,34 +379,42 @@
     }
     function drawTopoSvg(t){
       const svg=document.getElementById('topoSvg');
-      const W=760,H=380,cx=W/2,cy=H/2;
+      const W=svg.clientWidth||860;
       const nodes=t.nodes??[];
-      const pos={};
+      if(!nodes.length){svg.innerHTML='';return;}
+      const col=Math.min(260,(W-20)/nodes.length);
+      const bh=42,gap=12,y0=112;
+      const maxKids=Math.max(0,...nodes.map(n=>(n.runs||[]).length));
+      const H=y0+Math.max(1,maxKids+1)*(bh+gap)+18;
+      let html='';
       nodes.forEach((n,i)=>{
-        const a=-Math.PI/2+i*(2*Math.PI/Math.max(nodes.length,1));
-        pos[n.name]={x:cx+Math.cos(a)*250,y:cy+Math.sin(a)*130};
+        const cx=10+col*i+col/2;
+        html+=`<circle class="${n.busy?'pulse':''}" cx="${cx}" cy="44" r="26" fill="${n.busy?'rgba(34,197,94,.12)':'rgba(0,0,0,.04)'}"/>`;
+        html+=`<circle cx="${cx}" cy="44" r="22" fill="#fff" stroke="${n.busy?'#22c55e':'#c3c9d4'}" stroke-width="3" style="cursor:pointer" onclick="pickAgentByName('${esc(n.name)}')"/>`;
+        html+=`<text x="${cx}" y="48" font-size="12" font-weight="700" text-anchor="middle" fill="#1c2330">${esc(n.name)}</text>`;
+        html+=`<text x="${cx}" y="80" font-size="9.5" text-anchor="middle" fill="#8b93a3">${n.sessions} 会话 · ${esc((n.model||'').split('/').pop())}</text>`;
+        const runs=n.runs??[];
+        if(!runs.length){
+          html+=`<text x="${cx}" y="${y0+16}" font-size="10" text-anchor="middle" fill="#c3c9d4">无子代理运行</text>`;
+          return;
+        }
+        const bw=Math.max(110,col-18);
+        runs.forEach((r,ri)=>{
+          const y=y0+ri*(bh+gap);
+          const st=SA_COLORS[r.status]||'#8b93a3';
+          html+=`<path d="M ${cx} 70 C ${cx} ${70+(y-70)*0.45}, ${cx} ${y-26}, ${cx} ${y}" fill="none" stroke="${st}" stroke-width="1.6" ${r.status==='running'?'stroke-dasharray="5 4"':''} opacity=".6"/>`;
+          const dur=r.finishedAt?Math.max(0,Math.round((r.finishedAt-r.startedAt)/1000))+'s':'进行中';
+          const clip=Math.floor(bw/11);
+          const task=(r.task||'').slice(0,clip)+((r.task||'').length>clip?'…':'');
+          html+=`<g style="cursor:pointer" onclick="openSubRun('${esc(r.childSessionId)}')">`+
+            `<title>${esc(r.task||'')} — 点击查看对话</title>`+
+            `<rect x="${cx-bw/2}" y="${y}" width="${bw}" height="${bh}" rx="9" fill="#fff" stroke="${st}" stroke-width="2"/>`+
+            (r.status==='running'?`<rect x="${cx-bw/2}" y="${y}" width="${bw}" height="${bh}" rx="9" fill="none" stroke="${st}" stroke-width="2" opacity=".5"><animate attributeName="opacity" values=".5;.1;.5" dur="1.4s" repeatCount="indefinite"/></rect>`:'')+
+            `<text x="${cx-bw/2+8}" y="${y+17}" font-size="10.5" fill="#1c2330" font-weight="600">${esc(SA_ICON[r.status]||'?')} ${esc(task)}</text>`+
+            `<text x="${cx-bw/2+8}" y="${y+32}" font-size="9" fill="#8b93a3">${r.steps}步 · ${r.toolCalls}工具 · ${fmtK(r.totalTokens)}t · ${dur}</text></g>`;
+        });
       });
-      const pool={x:cx,y:cy};
-      let html=`<defs><linearGradient id="gline" x1="0" y1="0" x2="1" y2="1">
-        <stop offset="0" stop-color="#4f6df5"/><stop offset="1" stop-color="#8b5cf6"/></linearGradient></defs>`;
-      for(const e of t.edges??[]){
-        const p=pos[e.from];if(!p)continue;
-        html+=`<line x1="${p.x}" y1="${p.y}" x2="${pool.x}" y2="${pool.y}" stroke="url(#gline)" stroke-width="${Math.min(2+e.weight,10)}" stroke-dasharray="6 4" opacity=".55"/>`;
-        html+=`<text x="${(p.x+pool.x)/2}" y="${(p.y+pool.y)/2}" font-size="11" fill="#8b93a3" text-anchor="middle">×${e.weight}</text>`;
-      }
-      if(t.hasSubAgentPool){
-        html+=`<circle cx="${pool.x}" cy="${pool.y}" r="34" fill="var(--accent-soft)" stroke="#8b5cf6" stroke-width="2"/>`;
-        html+=`<text x="${pool.x}" y="${pool.y+4}" font-size="12" fill="#8b5cf6" text-anchor="middle" font-weight="700">子Agent</text>`;
-      }
-      for(const n of nodes){
-        const p=pos[n.name];
-        const col=n.busy?'#22c55e':'#c3c9d4';
-        html+=`<circle class="${n.busy?'pulse':''}" cx="${p.x}" cy="${p.y}" r="38" fill="${n.busy?'rgba(34,197,94,.12)':'rgba(0,0,0,.04)'}"/>`;
-        html+=`<circle cx="${p.x}" cy="${p.y}" r="30" fill="#fff" stroke="${col}" stroke-width="3" style="cursor:pointer" onclick="pickAgentByName('${esc(n.name)}')"/>`;
-        html+=`<text x="${p.x}" y="${p.y+1}" font-size="13" font-weight="700" text-anchor="middle" fill="#1c2330">${esc(n.name)}</text>`;
-        html+=`<text x="${p.x}" y="${p.y+16}" font-size="9" text-anchor="middle" fill="#8b93a3">${n.sessions} 会话</text>`;
-        html+=`<text x="${p.x}" y="${p.y+46}" font-size="10" text-anchor="middle" fill="#8b93a3">${esc((n.model||'').split('/').pop())}</text>`;
-      }
+      svg.setAttribute('height',H);
       svg.innerHTML=html;
     }
     function renderTopoCards(t){
@@ -422,65 +429,29 @@
       document.getElementById('agentSel').value=name;switchAgent();showView('chat');
     }
 
-    /* ── 子代理拓扑 ── */
+    /* ── 子代理（详细列表；拓扑图在 Agent 拓扑视图） ── */
     const SA_COLORS={ok:'#22c55e',error:'#ef4444',running:'#f59e0b'};
     const SA_ICON={ok:'✓',error:'✗',running:'▶'};
     async function loadSubAgents(){
       try{
-        const j=await (await fetch(`${API}/api/subagents?limit=16`)).json();
-        drawSaGraph(j.runs||[]);renderSaList(j.runs||[]);
+        const j=await (await fetch(`${API}/api/subagents?limit=100`)).json();
+        renderSaList(j.runs||[]);
         document.getElementById('saRunning').textContent=j.running?(' · 运行中 '+j.running):'';
       }catch(e){}
     }
-    function drawSaGraph(runs){
-      const svg=document.getElementById('saSvg');
-      const W=svg.clientWidth||900,H=380;
-      if(!runs.length){svg.innerHTML='<text x="16" y="60" font-size="13" fill="#8b93a3">还没有子代理运行记录——在对话里让 agent 调用 sub-agent 工具（支持 tasks 并行）</text>';return;}
-      const parents=[...new Set(runs.map(r=>r.parent_agent||'?'))];
-      const ppos={};
-      parents.forEach((name,i)=>{ppos[name]={x:80+i*((W-160)/Math.max(parents.length-1,1)),y:46};});
-      const bw=150,bh=46,gap=14;
-      const perRow=Math.max(1,Math.floor((W-40)/(bw+gap)));
-      const cpos=runs.map((r,i)=>({x:20+(i%perRow)*(bw+gap)+ (perRow>1?((W-40)-perRow*(bw+gap)+gap)/2:0), y:150+Math.floor(i/perRow)*(bh+18)}));
-      let html='';
-      runs.forEach((r,i)=>{
-        const st=SA_COLORS[r.status]||'#8b93a3';
-        const p=ppos[r.parent_agent||'?'];
-        const c=cpos[i];
-        const mx=(p.x+c.x+bw/2)/2;
-        html+=`<path d="M ${p.x} 64 C ${p.x} 110, ${c.x+bw/2} 100, ${c.x+bw/2} ${c.y}" fill="none" stroke="${st}" stroke-width="1.6" ${r.status==='running'?'stroke-dasharray="5 4"':''} opacity=".65"/>`;
-      });
-      parents.forEach(name=>{
-        const p=ppos[name];
-        html+=`<circle cx="${p.x}" cy="46" r="17" fill="#fff" stroke="#4f6df5" stroke-width="2.5"/>`;
-        html+=`<text x="${p.x}" y="50" font-size="10" font-weight="700" text-anchor="middle" fill="#4f6df5">${esc(name.slice(0,6))}</text>`;
-      });
-      runs.forEach((r,i)=>{
-        const st=SA_COLORS[r.status]||'#8b93a3';const c=cpos[i];
-        const task=(r.task||'').slice(0,17)+((r.task||'').length>17?'…':'');
-        const dur=r.finished_at?Math.max(0,Math.round((r.finished_at-r.started_at)/1000))+'s':'进行中';
-        html+=`<g style="cursor:pointer" onclick="openSubRun('${esc(r.child_session_id)}')">
-          <title>${esc(r.task||'')}\n模型: ${esc((r.model||'').split('/').pop())} · ${r.steps} 步 · ${r.tool_calls} 工具 · ${r.total_tokens} tokens · ${dur}</title>
-          <rect x="${c.x}" y="${c.y}" width="${bw}" height="${bh}" rx="10" fill="#fff" stroke="${st}" stroke-width="2"/>
-          ${r.status==='running'?`<rect x="${c.x}" y="${c.y}" width="${bw}" height="${bh}" rx="10" fill="none" stroke="${st}" stroke-width="2" opacity=".5"><animate attributeName="opacity" values=".5;.1;.5" dur="1.4s" repeatCount="indefinite"/></rect>`:''}
-          <text x="${c.x+9}" y="${c.y+18}" font-size="11" fill="#1c2330" font-weight="600">${esc(SA_ICON[r.status]||'?')} ${esc(task)}</text>
-          <text x="${c.x+9}" y="${c.y+35}" font-size="9.5" fill="#8b93a3">${r.steps}步 · ${r.tool_calls}工具 · ${fmtK(r.total_tokens)}t · ${dur}</text></g>`;
-      });
-      svg.setAttribute('height',Math.max(H, 150+Math.ceil(runs.length/perRow)*(bh+18)));
-      svg.innerHTML=html;
-    }
     function renderSaList(runs){
       const el=document.getElementById('saList');
-      el.innerHTML='<tr><th>状态</th><th>父Agent</th><th>任务</th><th>模型</th><th>步数</th><th>工具</th><th>tokens</th><th>耗时</th></tr>'+
+      el.innerHTML='<tr><th>时间</th><th>状态</th><th>父Agent</th><th>任务</th><th>模型</th><th>步数</th><th>工具</th><th>tokens</th><th>耗时</th></tr>'+
         runs.map(r=>{
           const st=SA_COLORS[r.status]||'#8b93a3';
           const dur=r.finished_at?Math.max(0,Math.round((r.finished_at-r.started_at)/1000))+'s':Math.max(0,Math.round((Date.now()-r.started_at)/1000))+'s+';
           return `<tr style="cursor:pointer" onclick="openSubRun('${esc(r.child_session_id)}')">
+            <td>${hhmm(r.started_at)}</td>
             <td style="color:${st};font-weight:700">${SA_ICON[r.status]||'?'} ${esc(r.status)}</td>
             <td>${esc(r.parent_agent||'?')}</td>
             <td style="max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.task||'')}">${esc(r.task||'')}</td>
             <td>${esc((r.model||'').split('/').pop())}</td><td>${r.steps}</td><td>${r.tool_calls}</td><td>${fmtK(r.total_tokens)}</td><td>${dur}</td></tr>`;
-        }).join('')||'<tr><td colspan="8" style="color:var(--muted)">暂无记录</td></tr>';
+        }).join('')||'<tr><td colspan="9" style="color:var(--muted)">暂无记录——在对话里让 agent 调用 sub-agent 工具（支持 tasks 并行）</td></tr>';
     }
     async function openSubRun(id){
       sid=id;showView('chat');await loadMessages();

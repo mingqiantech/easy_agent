@@ -193,7 +193,7 @@ export function createApp(deps: ServerDeps): Hono {
     return c.json({ summary });
   });
 
-  // Agent 拓扑：节点=agent（当前工作/活跃度），边=sub-agent 派生关系
+  // Agent 拓扑总地图：agent 节点 + 其下挂的最近子代理运行（runs）
   app.get("/api/topology", (c) => {
     const db = getDatabase();
     const nowTs = Date.now();
@@ -221,6 +221,14 @@ export function createApp(deps: ServerDeps): Hono {
            WHERE s.agent_id = ? AND tc.tool_name = 'sub-agent'`,
         )
         .get(a.name) as any;
+      const runs = db
+        .prepare(
+          `SELECT child_session_id, task, model, status, steps, tool_calls,
+                  total_tokens, started_at, finished_at
+           FROM sub_agent_runs WHERE parent_agent = ?
+           ORDER BY started_at DESC LIMIT 4`,
+        )
+        .all(a.name) as any[];
 
       return {
         name: a.name,
@@ -231,6 +239,17 @@ export function createApp(deps: ServerDeps): Hono {
         lastActive: agg?.last ?? 0,
         busy: nowTs - (agg?.last ?? 0) < 120000, // 2 分钟内有更新
         subAgentCalls: sub?.n ?? 0,
+        runs: (runs ?? []).map((r) => ({
+          childSessionId: r.child_session_id,
+          task: r.task,
+          model: r.model,
+          status: r.status,
+          steps: r.steps,
+          toolCalls: r.tool_calls,
+          totalTokens: r.total_tokens,
+          startedAt: r.started_at,
+          finishedAt: r.finished_at,
+        })),
         currentTasks: (tasks ?? []).map((t) => ({
           id: t.id,
           title: t.title ?? "untitled",
