@@ -133,6 +133,24 @@ function initializeSchema(db: Database): void {
     );
     CREATE INDEX IF NOT EXISTS idx_token_usage_created ON token_usage (created_at);
 
+    -- 子 Agent 运行记录（父子关系 + 可观测）
+    CREATE TABLE IF NOT EXISTS sub_agent_runs (
+      id TEXT PRIMARY KEY,
+      parent_session_id TEXT,
+      parent_agent TEXT,
+      child_session_id TEXT NOT NULL,
+      task TEXT NOT NULL,
+      model TEXT,
+      status TEXT NOT NULL DEFAULT 'running',
+      steps INTEGER NOT NULL DEFAULT 0,
+      tool_calls INTEGER NOT NULL DEFAULT 0,
+      total_tokens INTEGER NOT NULL DEFAULT 0,
+      started_at INTEGER NOT NULL,
+      finished_at INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS idx_sub_agent_runs_started
+      ON sub_agent_runs (started_at DESC);
+
     -- 记忆条目表（向量搜索 join 用）
     CREATE TABLE IF NOT EXISTS memory_entries (
       id INTEGER PRIMARY KEY AUTOINCREMENT,

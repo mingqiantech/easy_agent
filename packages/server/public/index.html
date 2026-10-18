@@ -115,6 +115,7 @@
         <div class="tab" id="tabTopo" onclick="showView('topo')">🕸 Agent 拓扑</div>
         <div class="tab" id="tabSettings" onclick="showView('settings')">⚙️ 设置</div>
         <div class="tab" id="tabUsage" onclick="showView('usage')">📊 用量</div>
+        <div class="tab" id="tabAgents" onclick="showView('agents')">🤖 子代理</div>
       </div>
       <div class="model-pick">
         <label>💭 思考</label>
@@ -177,11 +178,25 @@
         <div class="card"><h3>按 Agent</h3><table class="usage-table" id="usageAgents"></table></div>
       </div>
     </div>
+
+    <div class="view" id="agentsView" hidden>
+      <div class="usage-head">子代理拓扑
+        <span id="saRunning" style="color:var(--muted)"></span>
+        <span style="margin-left:auto;display:flex;gap:10px;align-items:center;font-size:11px">
+          <span><span class="dot" style="background:#22c55e"></span> 完成</span>
+          <span><span class="dot" style="background:#f59e0b"></span> 运行中</span>
+          <span><span class="dot" style="background:#ef4444"></span> 失败</span>
+          <span style="color:var(--muted)">点击节点查看对话</span>
+        </span>
+      </div>
+      <div class="topo-wrap" style="flex:none;padding:8px 20px"><svg id="saSvg" width="100%" height="380"></svg></div>
+      <div class="card" style="margin:0 20px 20px"><h3>运行记录</h3><table class="usage-table" id="saList"></table></div>
+    </div>
   </div>
 
   <script>
     const API='';
-    let sid=null, agent='default', topoTimer=null, usageTimer=null, models=[];
+    let sid=null, agent='default', topoTimer=null, usageTimer=null, saTimer=null, models=[];
     const esc=t=>{const d=document.createElement('div');d.textContent=t;return d.innerHTML};
     const hhmm=ts=>new Date(ts).toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'});
 
@@ -346,14 +361,16 @@
 
     /* ── 拓扑视图 ── */
     function showView(v){
-      const map={chat:'chatView',topo:'topoView',settings:'settingsView',usage:'usageView'};
+      const map={chat:'chatView',topo:'topoView',settings:'settingsView',usage:'usageView',agents:'agentsView'};
       for(const k in map)document.getElementById(map[k]).hidden=v!==k;
-      for(const t of ['Chat','Topo','Settings','Usage'])document.getElementById('tab'+t).classList.toggle('active',v===t.toLowerCase());
+      for(const t of ['Chat','Topo','Settings','Usage','Agents'])document.getElementById('tab'+t).classList.toggle('active',v===t.toLowerCase());
       if(topoTimer){clearInterval(topoTimer);topoTimer=null;}
       if(usageTimer){clearInterval(usageTimer);usageTimer=null;}
+      if(saTimer){clearInterval(saTimer);saTimer=null;}
       if(v==='topo'){refreshTopo();topoTimer=setInterval(refreshTopo,5000);}
       if(v==='settings')loadSettingsView();
       if(v==='usage'){loadUsage();usageTimer=setInterval(loadUsage,15000);}
+      if(v==='agents'){loadSubAgents();saTimer=setInterval(loadSubAgents,5000);}
     }
     async function refreshTopo(){
       try{
@@ -403,6 +420,70 @@
     }
     function pickAgentByName(name){
       document.getElementById('agentSel').value=name;switchAgent();showView('chat');
+    }
+
+    /* ── 子代理拓扑 ── */
+    const SA_COLORS={ok:'#22c55e',error:'#ef4444',running:'#f59e0b'};
+    const SA_ICON={ok:'✓',error:'✗',running:'▶'};
+    async function loadSubAgents(){
+      try{
+        const j=await (await fetch(`${API}/api/subagents?limit=16`)).json();
+        drawSaGraph(j.runs||[]);renderSaList(j.runs||[]);
+        document.getElementById('saRunning').textContent=j.running?(' · 运行中 '+j.running):'';
+      }catch(e){}
+    }
+    function drawSaGraph(runs){
+      const svg=document.getElementById('saSvg');
+      const W=svg.clientWidth||900,H=380;
+      if(!runs.length){svg.innerHTML='<text x="16" y="60" font-size="13" fill="#8b93a3">还没有子代理运行记录——在对话里让 agent 调用 sub-agent 工具（支持 tasks 并行）</text>';return;}
+      const parents=[...new Set(runs.map(r=>r.parent_agent||'?'))];
+      const ppos={};
+      parents.forEach((name,i)=>{ppos[name]={x:80+i*((W-160)/Math.max(parents.length-1,1)),y:46};});
+      const bw=150,bh=46,gap=14;
+      const perRow=Math.max(1,Math.floor((W-40)/(bw+gap)));
+      const cpos=runs.map((r,i)=>({x:20+(i%perRow)*(bw+gap)+ (perRow>1?((W-40)-perRow*(bw+gap)+gap)/2:0), y:150+Math.floor(i/perRow)*(bh+18)}));
+      let html='';
+      runs.forEach((r,i)=>{
+        const st=SA_COLORS[r.status]||'#8b93a3';
+        const p=ppos[r.parent_agent||'?'];
+        const c=cpos[i];
+        const mx=(p.x+c.x+bw/2)/2;
+        html+=`<path d="M ${p.x} 64 C ${p.x} 110, ${c.x+bw/2} 100, ${c.x+bw/2} ${c.y}" fill="none" stroke="${st}" stroke-width="1.6" ${r.status==='running'?'stroke-dasharray="5 4"':''} opacity=".65"/>`;
+      });
+      parents.forEach(name=>{
+        const p=ppos[name];
+        html+=`<circle cx="${p.x}" cy="46" r="17" fill="#fff" stroke="#4f6df5" stroke-width="2.5"/>`;
+        html+=`<text x="${p.x}" y="50" font-size="10" font-weight="700" text-anchor="middle" fill="#4f6df5">${esc(name.slice(0,6))}</text>`;
+      });
+      runs.forEach((r,i)=>{
+        const st=SA_COLORS[r.status]||'#8b93a3';const c=cpos[i];
+        const task=(r.task||'').slice(0,17)+((r.task||'').length>17?'…':'');
+        const dur=r.finished_at?Math.max(0,Math.round((r.finished_at-r.started_at)/1000))+'s':'进行中';
+        html+=`<g style="cursor:pointer" onclick="openSubRun('${esc(r.child_session_id)}')">
+          <title>${esc(r.task||'')}\n模型: ${esc((r.model||'').split('/').pop())} · ${r.steps} 步 · ${r.tool_calls} 工具 · ${r.total_tokens} tokens · ${dur}</title>
+          <rect x="${c.x}" y="${c.y}" width="${bw}" height="${bh}" rx="10" fill="#fff" stroke="${st}" stroke-width="2"/>
+          ${r.status==='running'?`<rect x="${c.x}" y="${c.y}" width="${bw}" height="${bh}" rx="10" fill="none" stroke="${st}" stroke-width="2" opacity=".5"><animate attributeName="opacity" values=".5;.1;.5" dur="1.4s" repeatCount="indefinite"/></rect>`:''}
+          <text x="${c.x+9}" y="${c.y+18}" font-size="11" fill="#1c2330" font-weight="600">${esc(SA_ICON[r.status]||'?')} ${esc(task)}</text>
+          <text x="${c.x+9}" y="${c.y+35}" font-size="9.5" fill="#8b93a3">${r.steps}步 · ${r.tool_calls}工具 · ${fmtK(r.total_tokens)}t · ${dur}</text></g>`;
+      });
+      svg.setAttribute('height',Math.max(H, 150+Math.ceil(runs.length/perRow)*(bh+18)));
+      svg.innerHTML=html;
+    }
+    function renderSaList(runs){
+      const el=document.getElementById('saList');
+      el.innerHTML='<tr><th>状态</th><th>父Agent</th><th>任务</th><th>模型</th><th>步数</th><th>工具</th><th>tokens</th><th>耗时</th></tr>'+
+        runs.map(r=>{
+          const st=SA_COLORS[r.status]||'#8b93a3';
+          const dur=r.finished_at?Math.max(0,Math.round((r.finished_at-r.started_at)/1000))+'s':Math.max(0,Math.round((Date.now()-r.started_at)/1000))+'s+';
+          return `<tr style="cursor:pointer" onclick="openSubRun('${esc(r.child_session_id)}')">
+            <td style="color:${st};font-weight:700">${SA_ICON[r.status]||'?'} ${esc(r.status)}</td>
+            <td>${esc(r.parent_agent||'?')}</td>
+            <td style="max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.task||'')}">${esc(r.task||'')}</td>
+            <td>${esc((r.model||'').split('/').pop())}</td><td>${r.steps}</td><td>${r.tool_calls}</td><td>${fmtK(r.total_tokens)}</td><td>${dur}</td></tr>`;
+        }).join('')||'<tr><td colspan="8" style="color:var(--muted)">暂无记录</td></tr>';
+    }
+    async function openSubRun(id){
+      sid=id;showView('chat');await loadMessages();
     }
 
     /* ── 设置页 ── */

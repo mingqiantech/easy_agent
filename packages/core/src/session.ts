@@ -95,6 +95,7 @@ export class SessionManager {
                 (SELECT COUNT(*) FROM messages WHERE session_id = s.id) as msg_count
          FROM sessions s
          WHERE s.status = 'active' AND (? IS NULL OR s.agent_id = ?)
+           AND s.id NOT IN (SELECT child_session_id FROM sub_agent_runs)
          ORDER BY s.updated_at DESC
          LIMIT ?`,
       )

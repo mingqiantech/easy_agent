@@ -11,6 +11,7 @@ import { Observability } from "@easy-agent/core/observability";
 import { getDatabase } from "@easy-agent/core/database";
 import { loadSettings, saveSettings } from "./settings.js";
 import type { CronManager } from "@easy-agent/core/cron/index";
+import { listRuns, runningCount } from "@easy-agent/core/agent/runs";
 import path from "node:path";
 import os from "node:os";
 import fs from "node:fs";
@@ -466,6 +467,12 @@ export function createApp(deps: ServerDeps): Hono {
     if (!deps.cron) return c.json({ error: "cron 不可用" }, 503);
     deps.cron.delete(c.req.param("id"));
     return c.json({ ok: true });
+  });
+
+  // 子 Agent 运行记录（拓扑数据）
+  app.get("/api/subagents", (c) => {
+    const limit = Number(c.req.query("limit") ?? 50);
+    return c.json({ runs: listRuns(limit), running: runningCount() });
   });
 
   app.get("/api/tools", (c) => c.json({ tools: deps.tools.getDefinitions() }));
