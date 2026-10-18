@@ -87,6 +87,8 @@
     .set-row{display:flex;gap:10px;align-items:center;font-size:13px;margin-bottom:10px}
     .set-row select,.usage-head select{padding:6px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);font-size:13px;color:var(--fg)}
     .hint{font-size:12px;color:var(--muted);margin-top:10px;line-height:1.7}
+    .tool-chip{display:inline-block;font-size:11px;padding:2px 8px;margin:3px 6px 0 0;border-radius:999px;background:var(--accent-soft);color:var(--accent)}
+    .live-text{white-space:pre-wrap;word-break:break-word}
     .mem-ta{width:100%;height:200px;background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:10px;font:12px/1.6 ui-monospace,monospace;color:var(--fg);resize:vertical;margin-top:8px}
     .metrics{display:flex;gap:12px;flex-wrap:wrap;padding:16px 20px 0}
     .metric{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:10px 18px;box-shadow:var(--shadow);min-width:110px}
@@ -182,7 +184,7 @@
 
   <script>
     const API='';
-    let sid=null, agent='default', topoTimer=null, usageTimer=null, models=[];
+    let sid=null, agent='default', topoTimer=null, usageTimer=null, models=[];  let es=null, esSid=null, live=null;
     const esc=t=>{const d=document.createElement('div');d.textContent=t;return d.innerHTML};
     const hhmm=ts=>new Date(ts).toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'});
 
@@ -210,7 +212,7 @@
       updateThinkSel();renderAgentOptions();
     }
     function switchAgent(){
-      agent=document.getElementById('agentSel').value;sid=null;
+      agent=document.getElementById('agentSel').value;sid=null;closeEvents();
       document.getElementById('messages').innerHTML='<div class="empty">选择或创建一个会话</div>';
       updateThinkSel();
       loadSessions();
@@ -221,7 +223,7 @@
       const r=await fetch(`${API}/api/sessions?agent=${encodeURIComponent(agent)}`);
       const{sessions}=await r.json();
       const sorted=[...sessions].sort((a,b)=>(b.pinned?1:0)-(a.pinned?1:0));
-      if(!sid && sorted.length>0){ sid=sorted[0].id; await loadMessages(); }
+      if(!sid && sorted.length>0){ sid=sorted[0].id; openEvents(sid); await loadMessages(); }
       document.getElementById('sessionList').innerHTML=sorted.map(s=>`
         <div class="session-item ${s.id===sid?'active':''}" onclick="selectSession('${s.id}')">
           <div class="s-main">
@@ -236,9 +238,9 @@
     async function newSession(){
       const r=await fetch(`${API}/api/sessions`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({agentId:agent})});
       const{session}=await r.json();sid=session.id;
-      document.getElementById('messages').innerHTML='';await loadSessions();
+      document.getElementById('messages').innerHTML='';openEvents(sid);await loadSessions();
     }
-    async function selectSession(id){sid=id;await loadSessions();await loadMessages();}
+    async function selectSession(id){sid=id;openEvents(id);await loadSessions();await loadMessages();}
     async function delSession(id){
       if(!confirm('删除该会话及其全部消息？'))return;
       const j=await (await fetch(`${API}/api/sessions/${id}`,{method:'DELETE'})).json();
@@ -320,9 +322,11 @@
       const thinking=document.createElement('div');
       thinking.innerHTML=`<div class="message assistant"><div class="avatar">🤖</div><div><div class="bubble" style="color:var(--muted)">思考中…</div></div></div>`;
       c.appendChild(thinking);c.scrollTop=c.scrollHeight;
+      openEvents(sid);
       try{
         const r=await fetch(`${API}/api/sessions/${sid}/messages`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text})});
         const j=await r.json();
+        clearLive();
         if(j.status==='queued'){
           thinking.innerHTML=bubbleHtml({role:'assistant',content:'⏳ 已排队——当前任务进行中，这条消息会自动并入上下文（转向），稍后刷新会话可见完整回复',createdAt:Date.now()});
           await new Promise(res=>setTimeout(res,4000));
@@ -412,6 +416,36 @@
     }
     function pickAgentByName(name){
       document.getElementById('agentSel').value=name;switchAgent();showView('chat');
+    }
+
+    /* ── SSE 事件流：逐字渲染 + 实时工具卡片 ── */
+    function openEvents(id){
+      if(es&&esSid===id)return;
+      closeEvents(); esSid=id;
+      try{
+        es=new EventSource(`${API}/api/sessions/${id}/events`);
+        es.onmessage=(ev)=>{try{handleStreamEvent(JSON.parse(ev.data));}catch(e){}};
+      }catch(e){}
+    }
+    function closeEvents(){if(es){es.close();es=null;}esSid=null;clearLive();}
+    function clearLive(){if(live){live.remove();live=null;}}
+    function ensureLive(){
+      if(live&&document.contains(live))return live;
+      live=null;
+      const c=document.getElementById('messages');
+      if(c.querySelector('.empty'))c.innerHTML='';
+      const wrap=document.createElement('div');
+      wrap.innerHTML='<div class="message assistant"><div class="avatar">🤖</div><div><div class="bubble"><div class="live-text"></div><div class="live-chips"></div></div></div>';
+      c.appendChild(wrap.firstElementChild);
+      live=c.lastElementChild;c.scrollTop=c.scrollHeight;return live;
+    }
+    function handleStreamEvent(e){
+      if(!e||e.sessionId!==sid)return;
+      if(e.type==='run_start'){ensureLive();return;}
+      if(e.type==='text'){const l=ensureLive();l.querySelector('.live-text').textContent+=e.text||'';const c=document.getElementById('messages');c.scrollTop=c.scrollHeight;return;}
+      if(e.type==='tool_start'){ensureLive().querySelector('.live-chips').insertAdjacentHTML('beforeend',`<span class="tool-chip">⏳ ${esc(e.name)}</span>`);return;}
+      if(e.type==='tool_end'){if(!live||!document.contains(live))return;const chips=live.querySelectorAll('.tool-chip');for(let i=chips.length-1;i>=0;i--){if((chips[i].textContent||'').includes(e.name)){chips[i].innerHTML=`✅ ${esc(e.name)} <small style="color:var(--muted)">${esc((e.preview||'').slice(0,70))}</small>`;break;}}return;}
+      if(e.type==='run_end'){if(e.error&&live&&document.contains(live)){live.querySelector('.live-text').textContent+='\n❌ '+e.error;}return;}
     }
 
     /* ── 子代理着色/入口（运行记录展示已并入 Agent 拓扑图） ── */

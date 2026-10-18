@@ -213,6 +213,53 @@ export class SessionManager {
     return true;
   }
 
+  /** 流式单步：消费 llm.stream，收集文本/工具调用/usage，增量回调事件 */
+  private async stepStream(
+    request: Parameters<LLMClient["generate"]>[0],
+    onEvent: (e: { type: string; text?: string; name?: string }) => void,
+  ): Promise<LLMResponse> {
+    let content = "";
+    const toolCalls: Array<{ id: string; name: string; input: unknown }> = [];
+    const pending = new Map<string, { name: string; args: string }>();
+    let usage: LLMResponse["usage"] | undefined;
+    for await (const ev of this.llm.stream(request)) {
+      if (ev.type === "text") {
+        if (ev.text) {
+          content += ev.text;
+          onEvent({ type: "text", text: ev.text });
+        }
+      } else if (ev.type === "tool_call_start") {
+        pending.set(ev.id, { name: ev.name, args: "" });
+        onEvent({ type: "tool_start", name: ev.name });
+      } else if (ev.type === "tool_call_delta") {
+        const pt = pending.get(ev.id);
+        if (pt && ev.input) pt.args += ev.input;
+      } else if (ev.type === "tool_call_end") {
+        const pt = pending.get(ev.id);
+        if (pt) {
+          pending.delete(ev.id);
+          let input: unknown = {};
+          try {
+            input = JSON.parse(pt.args);
+          } catch {
+            input = {};
+          }
+          toolCalls.push({ id: ev.id, name: pt.name, input });
+        }
+      } else if (ev.type === "usage") {
+        usage = ev.usage;
+      } else if (ev.type === "error") {
+        throw new Error(String(ev.error ?? "LLM stream error"));
+      }
+    }
+    return {
+      content,
+      toolCalls: toolCalls.length ? toolCalls : undefined,
+      usage,
+      finishReason: toolCalls.length ? "tool_calls" : "stop",
+    } as LLMResponse;
+  }
+
   async run(
     sessionId: string,
     userText: string,
@@ -223,6 +270,7 @@ export class SessionManager {
       onText?: (text: string) => void;
       onToolCall?: (name: string, input: unknown) => void;
       onToolResult?: (name: string, result: unknown) => void;
+      onEvent?: (e: { type: string; text?: string; name?: string }) => void;
     },
   ): Promise<string> {
     const session = this.get(sessionId);
@@ -258,16 +306,19 @@ export class SessionManager {
           await this.compactIfNeeded(sessionId);
           // 上下文工程：旧工具结果修剪 + 超长消息截断（仅影响发给模型的副本）
           const messages = pruneToolResults(this.getMessages(sessionId));
-          const response = await this.llm.generate({
+          const request = {
             model: session.model,
             messages,
             tools: toolDefs,
-            toolChoice: toolDefs?.length ? "auto" : undefined,
+            toolChoice: toolDefs?.length ? ("auto" as const) : undefined,
             generation:
               options?.thinking && options.thinking !== "off"
                 ? { thinking: options.thinking }
                 : undefined,
-          });
+          };
+          const response = options?.onEvent
+            ? await this.stepStream(request, options.onEvent)
+            : await this.llm.generate(request);
 
           if (response.usage) {
             db.prepare(

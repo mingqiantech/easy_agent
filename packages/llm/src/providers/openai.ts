@@ -120,6 +120,11 @@ export class OpenAIProvider implements LLMProvider {
             name: part.toolName,
           };
           yield {
+            type: "tool_call_delta",
+            id: part.toolCallId,
+            input: JSON.stringify(part.args ?? {}),
+          };
+          yield {
             type: "tool_call_end",
             id: part.toolCallId,
           };

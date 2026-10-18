@@ -7,11 +7,14 @@ import { ToolRegistry } from "@easy-agent/core/tool/registry";
 import type { MemorySearcher } from "@easy-agent/memory/search";
 import type { BasicMemory } from "@easy-agent/core/memory/basic";
 import { serveStatic } from "hono/bun";
+import { streamSSE } from "hono/streaming";
 import { Observability } from "@easy-agent/core/observability";
 import { getDatabase } from "@easy-agent/core/database";
 import { loadSettings, saveSettings } from "./settings.js";
 import type { CronManager } from "@easy-agent/core/cron/index";
 import { listRuns, runningCount } from "@easy-agent/core/agent/runs";
+import { subscribeEvents, emitEvents } from "./bus.js";
+import { maskSecrets } from "@easy-agent/core/secrets-mask";
 import path from "node:path";
 import os from "node:os";
 import fs from "node:fs";
@@ -296,16 +299,40 @@ export function createApp(deps: ServerDeps): Hono {
     ) {
       return c.json({ status: "queued" }, 202);
     }
-    const response = await deps.sessions.run(id, body.text, {
-      toolRegistry: deps.tools,
-      thinking: agent?.thinking as
-        | "off"
-        | "low"
-        | "medium"
-        | "high"
-        | undefined,
-    });
-    return c.json({ response });
+    const bus = (e: Record<string, unknown>) =>
+      emitEvents(id, { sessionId: id, ts: Date.now(), ...e });
+    bus({ type: "run_start" });
+    try {
+      const response = await deps.sessions.run(id, body.text, {
+        toolRegistry: deps.tools,
+        thinking: agent?.thinking as
+          | "off"
+          | "low"
+          | "medium"
+          | "high"
+          | undefined,
+        onEvent: (ev) => {
+          if (ev.type === "text" && ev.text)
+            bus({ type: "text", text: maskSecrets(ev.text) });
+          else if (ev.type === "tool_start")
+            bus({ type: "tool_start", name: ev.name });
+        },
+        onToolResult: (name, result) => {
+          const str =
+            typeof result === "string" ? result : JSON.stringify(result ?? "");
+          bus({
+            type: "tool_end",
+            name,
+            preview: maskSecrets(str).slice(0, 160),
+          });
+        },
+      });
+      bus({ type: "run_end" });
+      return c.json({ response });
+    } catch (e: any) {
+      bus({ type: "run_end", error: String(e?.message ?? e).slice(0, 200) });
+      throw e;
+    }
   });
 
   // Agent 运行时参数修改（思考等级）：即时生效 + 持久化到 agents-state.json，
@@ -492,6 +519,33 @@ export function createApp(deps: ServerDeps): Hono {
   app.get("/api/subagents", (c) => {
     const limit = Number(c.req.query("limit") ?? 50);
     return c.json({ runs: listRuns(limit), running: runningCount() });
+  });
+
+  // SSE 事件流：进行中会话的逐字文本增量 / 工具执行 / 运行边界实时推送
+  app.get("/api/sessions/:id/events", (c) => {
+    const id = c.req.param("id");
+    return streamSSE(c, async (stream) => {
+      const unsub = subscribeEvents(id, (e) => {
+        stream.writeSSE({ data: JSON.stringify(e) }).catch(() => unsub());
+      });
+      await stream.writeSSE({
+        data: JSON.stringify({ type: "ready", sessionId: id }),
+      });
+      let stopped = false;
+      stream.onAbort(() => {
+        stopped = true;
+      });
+      while (!stopped) {
+        await new Promise((r) => setTimeout(r, 15000));
+        if (stopped) break;
+        try {
+          await stream.writeSSE({ data: JSON.stringify({ type: "ping" }) });
+        } catch {
+          break;
+        }
+      }
+      unsub();
+    });
   });
 
   app.get("/api/tools", (c) => c.json({ tools: deps.tools.getDefinitions() }));

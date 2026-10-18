@@ -46,6 +46,36 @@ describe("SessionManager", () => {
     sessions.delete(s.id);
   });
 
+  it("onEvent 流式路径：文本增量事件、落库与 token_usage 记录", async () => {
+    const stub: any = {
+      generate: () => {
+        throw new Error("streaming 路径不应调用 generate");
+      },
+      stream: async function* () {
+        yield { type: "text", text: "你好" };
+        yield { type: "text", text: "世界" };
+        yield {
+          type: "usage",
+          usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 },
+        };
+        yield { type: "done", finishReason: "stop" };
+      },
+    };
+    const sm = new SessionManager(stub, { defaultModel: "test/model" });
+    const s = sm.create({});
+    const events: any[] = [];
+    const out = await sm.run(s.id, "hi", {
+      onEvent: (e: any) => events.push(e),
+    });
+    expect(out).toBe("你好世界");
+    expect(events.filter((e) => e.type === "text").map((e) => e.text).join("")).toBe("你好世界");
+    expect(sm.getMessages(s.id).filter((m) => m.role === "assistant").length).toBe(1);
+    const u = getDatabase()
+      .prepare("SELECT COUNT(*) n FROM token_usage WHERE session_id=?")
+      .get(s.id) as any;
+    expect(u.n).toBe(1);
+  });
+
   it("deletes a session", () => {
     const s = sessions.create({});
     sessions.delete(s.id);

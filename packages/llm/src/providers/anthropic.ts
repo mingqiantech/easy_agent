@@ -136,12 +136,28 @@ export class AnthropicProvider implements LLMProvider {
             id: part.toolCallId,
             name: part.toolName,
           };
+          yield {
+            type: "tool_call_delta",
+            id: part.toolCallId,
+            input: JSON.stringify(part.args ?? {}),
+          };
           yield { type: "tool_call_end", id: part.toolCallId };
           break;
         case "error":
           yield { type: "error", error: String(part.error) };
           break;
       }
+    }
+    const u = await result.usage;
+    if (u) {
+      yield {
+        type: "usage",
+        usage: {
+          promptTokens: u.promptTokens,
+          completionTokens: u.completionTokens,
+          totalTokens: u.promptTokens + u.completionTokens,
+        },
+      };
     }
     yield { type: "done", finishReason: "stop" };
   }
