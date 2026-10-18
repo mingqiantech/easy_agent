@@ -42,7 +42,11 @@ export async function startRepl(
     llm,
     config.defaultModel,
   );
-  toolRegistry.register(createSubAgentTool(subAgents));
+  toolRegistry.register(
+    createSubAgentTool(subAgents, () => ({
+      default: { model: selfAgent.model, workspaceDir: workDir, memory },
+    })),
+  );
 
   // Week6: Vision 工具（图片理解）
   toolRegistry.register(

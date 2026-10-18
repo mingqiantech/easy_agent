@@ -73,7 +73,7 @@ async function main() {
     llm,
     config.defaultModel,
   );
-  tools.register(createSubAgentTool(subAgents));
+  tools.register(createSubAgentTool(subAgents, () => agents));
 
   // Week6: Vision 工具（图片理解）
   tools.register(createVisionTool(config.visionModel ?? config.defaultModel));

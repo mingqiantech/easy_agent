@@ -1,6 +1,7 @@
 import { ulid } from "ulid";
 import { getDatabase } from "../database.js";
 import { createRun, finishRun } from "./runs.js";
+import { maskSecrets } from "../secrets-mask.js";
 import type { SessionManager } from "../session.js";
 import type { ToolRegistry } from "../tool/registry.js";
 import type { LLMClient } from "@easy-agent/llm/client";
@@ -12,6 +13,9 @@ export interface SubAgentConfig {
   maxSteps?: number;
   parentSessionId?: string;
   parentAgent?: string;
+  /** 子会话归属的 agent（跨 agent 控制时=目标 agent 名） */
+  agentId?: string;
+  workDir?: string;
 }
 
 export interface SubAgentResult {
@@ -32,6 +36,7 @@ export class SubAgentManager {
   spawn(config: SubAgentConfig): { sessionId: string } {
     const session = this.sessions.create({
       model: config.model ?? this.defaultModel,
+      agentId: config.agentId ?? "sub-agent",
       systemPrompt: config.systemPrompt,
     });
 
@@ -102,7 +107,12 @@ export class SubAgentManager {
 
         this.sessions.addMessage(sessionId, {
           role: "assistant",
-          content: llmResponse.content,
+          content: llmResponse.toolCalls?.length
+            ? JSON.stringify({
+                text: llmResponse.content,
+                toolCalls: llmResponse.toolCalls,
+              })
+            : llmResponse.content,
         });
         response += llmResponse.content;
 
@@ -123,11 +133,14 @@ export class SubAgentManager {
           });
           this.sessions.addMessage(sessionId, {
             role: "tool",
-            content: JSON.stringify({
-              toolCallId: tc.id,
-              result: result.output,
-              error: result.error,
-            }),
+            content: maskSecrets(
+              JSON.stringify({
+                toolCallId: tc.id,
+                toolName: tc.name,
+                result: result.output,
+                error: result.error,
+              }),
+            ),
           });
         }
       }
