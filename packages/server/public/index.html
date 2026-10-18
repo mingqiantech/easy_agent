@@ -115,7 +115,6 @@
         <div class="tab" id="tabTopo" onclick="showView('topo')">🕸 Agent 拓扑</div>
         <div class="tab" id="tabSettings" onclick="showView('settings')">⚙️ 设置</div>
         <div class="tab" id="tabUsage" onclick="showView('usage')">📊 用量</div>
-        <div class="tab" id="tabAgents" onclick="showView('agents')">🤖 子代理</div>
       </div>
       <div class="model-pick">
         <label>💭 思考</label>
@@ -179,23 +178,11 @@
       </div>
     </div>
 
-    <div class="view" id="agentsView" hidden>
-      <div class="usage-head">子代理运行 · 详细列表
-        <span id="saRunning" style="color:var(--muted)"></span>
-        <span style="margin-left:auto;display:flex;gap:10px;align-items:center;font-size:11px">
-          <span><span class="dot" style="background:#22c55e"></span> 完成</span>
-          <span><span class="dot" style="background:#f59e0b"></span> 运行中</span>
-          <span><span class="dot" style="background:#ef4444"></span> 失败</span>
-          <span style="color:var(--muted)">点击行查看对话 · 拓扑图见「🕸 Agent 拓扑」</span>
-        </span>
-      </div>
-      <div class="card" style="margin:0 20px 20px"><h3>运行记录</h3><table class="usage-table" id="saList"></table></div>
-    </div>
   </div>
 
   <script>
     const API='';
-    let sid=null, agent='default', topoTimer=null, usageTimer=null, saTimer=null, models=[];
+    let sid=null, agent='default', topoTimer=null, usageTimer=null, models=[];
     const esc=t=>{const d=document.createElement('div');d.textContent=t;return d.innerHTML};
     const hhmm=ts=>new Date(ts).toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'});
 
@@ -360,16 +347,14 @@
 
     /* ── 拓扑视图 ── */
     function showView(v){
-      const map={chat:'chatView',topo:'topoView',settings:'settingsView',usage:'usageView',agents:'agentsView'};
+      const map={chat:'chatView',topo:'topoView',settings:'settingsView'  ,usage:'usageView'};
       for(const k in map)document.getElementById(map[k]).hidden=v!==k;
-      for(const t of ['Chat','Topo','Settings','Usage','Agents'])document.getElementById('tab'+t).classList.toggle('active',v===t.toLowerCase());
+      for(const t of ['Chat','Topo','Settings','Usage'])document.getElementById('tab'+t).classList.toggle('active',v===t.toLowerCase());
       if(topoTimer){clearInterval(topoTimer);topoTimer=null;}
       if(usageTimer){clearInterval(usageTimer);usageTimer=null;}
-      if(saTimer){clearInterval(saTimer);saTimer=null;}
       if(v==='topo'){refreshTopo();topoTimer=setInterval(refreshTopo,5000);}
       if(v==='settings')loadSettingsView();
       if(v==='usage'){loadUsage();usageTimer=setInterval(loadUsage,15000);}
-      if(v==='agents'){loadSubAgents();saTimer=setInterval(loadSubAgents,5000);}
     }
     async function refreshTopo(){
       try{
@@ -429,30 +414,9 @@
       document.getElementById('agentSel').value=name;switchAgent();showView('chat');
     }
 
-    /* ── 子代理（详细列表；拓扑图在 Agent 拓扑视图） ── */
+    /* ── 子代理着色/入口（运行记录展示已并入 Agent 拓扑图） ── */
     const SA_COLORS={ok:'#22c55e',error:'#ef4444',running:'#f59e0b'};
     const SA_ICON={ok:'✓',error:'✗',running:'▶'};
-    async function loadSubAgents(){
-      try{
-        const j=await (await fetch(`${API}/api/subagents?limit=100`)).json();
-        renderSaList(j.runs||[]);
-        document.getElementById('saRunning').textContent=j.running?(' · 运行中 '+j.running):'';
-      }catch(e){}
-    }
-    function renderSaList(runs){
-      const el=document.getElementById('saList');
-      el.innerHTML='<tr><th>时间</th><th>状态</th><th>父Agent</th><th>任务</th><th>模型</th><th>步数</th><th>工具</th><th>tokens</th><th>耗时</th></tr>'+
-        runs.map(r=>{
-          const st=SA_COLORS[r.status]||'#8b93a3';
-          const dur=r.finished_at?Math.max(0,Math.round((r.finished_at-r.started_at)/1000))+'s':Math.max(0,Math.round((Date.now()-r.started_at)/1000))+'s+';
-          return `<tr style="cursor:pointer" onclick="openSubRun('${esc(r.child_session_id)}')">
-            <td>${hhmm(r.started_at)}</td>
-            <td style="color:${st};font-weight:700">${SA_ICON[r.status]||'?'} ${esc(r.status)}</td>
-            <td>${esc(r.parent_agent||'?')}</td>
-            <td style="max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.task||'')}">${esc(r.task||'')}</td>
-            <td>${esc((r.model||'').split('/').pop())}</td><td>${r.steps}</td><td>${r.tool_calls}</td><td>${fmtK(r.total_tokens)}</td><td>${dur}</td></tr>`;
-        }).join('')||'<tr><td colspan="9" style="color:var(--muted)">暂无记录——在对话里让 agent 调用 sub-agent 工具（支持 tasks 并行）</td></tr>';
-    }
     async function openSubRun(id){
       sid=id;showView('chat');await loadMessages();
     }
