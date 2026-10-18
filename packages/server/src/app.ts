@@ -521,6 +521,14 @@ export function createApp(deps: ServerDeps): Hono {
     return c.json({ runs: listRuns(limit), running: runningCount() });
   });
 
+  // 任意步中断：abort 进行中会话的 run 循环（LLM 请求/子进程随之终止）
+  app.post("/api/sessions/:id/abort", (c) => {
+    const id = c.req.param("id");
+    const ok = deps.sessions.abort(id);
+    if (ok) emitEvents(id, { sessionId: id, ts: Date.now(), type: "aborted" });
+    return c.json({ ok });
+  });
+
   // SSE 事件流：进行中会话的逐字文本增量 / 工具执行 / 运行边界实时推送
   app.get("/api/sessions/:id/events", (c) => {
     const id = c.req.param("id");

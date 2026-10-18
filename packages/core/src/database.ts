@@ -133,6 +133,16 @@ function initializeSchema(db: Database): void {
     );
     CREATE INDEX IF NOT EXISTS idx_token_usage_created ON token_usage (created_at);
 
+    -- 排队消息持久化：转向/队列消息落库，网关重启后自动恢复续跑
+    CREATE TABLE IF NOT EXISTS pending_queue (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id TEXT NOT NULL,
+      text TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_pending_queue_session
+      ON pending_queue (session_id, created_at);
+
     -- 子 Agent 运行记录（父子关系 + 可观测）
     CREATE TABLE IF NOT EXISTS sub_agent_runs (
       id TEXT PRIMARY KEY,

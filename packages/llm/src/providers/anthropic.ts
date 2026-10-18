@@ -81,6 +81,7 @@ export class AnthropicProvider implements LLMProvider {
         messages,
         tools,
         temperature: request.generation?.temperature,
+        abortSignal: request.signal,
         maxTokens: anthropicMaxTokens(
           request.generation?.thinking,
           request.generation?.maxTokens,
@@ -119,6 +120,7 @@ export class AnthropicProvider implements LLMProvider {
       messages,
       tools,
       temperature: request.generation?.temperature,
+      abortSignal: request.signal,
       maxTokens: anthropicMaxTokens(
         request.generation?.thinking,
         request.generation?.maxTokens,

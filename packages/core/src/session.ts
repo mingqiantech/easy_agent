@@ -3,9 +3,10 @@ import { generateId, logDebug, now } from "./utils.js";
 import { needsCompaction, compactHistory } from "./compaction.js";
 import type { LLMClient } from "@easy-agent/llm/client";
 import type {
+  LLMRequest,
+  LLMResponse,
   Message,
   ToolDefinition,
-  LLMResponse,
 } from "@easy-agent/schema/llm";
 import type { ToolRegistry } from "./tool/registry.js";
 import { pruneToolResults } from "./context.js";
@@ -35,7 +36,8 @@ export class SessionManager {
   private llm: LLMClient;
   private defaultModel: string;
   private running = new Set<string>();
-  private queues = new Map<string, string[]>();
+  private queues = new Map<string, { id: number; text: string }[]>();
+  private controllers = new Map<string, AbortController>();
   constructor(llm: LLMClient, options: { defaultModel: string }) {
     this.llm = llm;
     this.defaultModel = options.defaultModel;
@@ -120,6 +122,7 @@ export class SessionManager {
       .get(id) as any;
     if (!row || row.pinned) return false;
     db.prepare("DELETE FROM sessions WHERE id = ?").run(id);
+    db.prepare("DELETE FROM pending_queue WHERE session_id = ?").run(id);
     return true;
   }
   /** 会话内切换模型（后续对话用新模型） */
@@ -144,12 +147,54 @@ export class SessionManager {
     return this.running.has(sessionId);
   }
 
-  /** 把消息排入进行中会话的队列；没在跑则返回 false（调用方直接 run） */
+  /** 把消息排入进行中会话的队列（落库持久化）；没在跑则返回 false（调用方直接 run） */
   queueMessage(sessionId: string, text: string): boolean {
     if (!this.running.has(sessionId)) return false;
+    const id = this.enqueuePending(sessionId, text);
     const q = this.queues.get(sessionId);
-    if (q) q.push(text);
-    else this.queues.set(sessionId, [text]);
+    if (q) q.push({ id, text });
+    else this.queues.set(sessionId, [{ id, text }]);
+    return true;
+  }
+
+  /** 排队消息直接落库（重启不丢），返回行 id */
+  enqueuePending(sessionId: string, text: string): number {
+    const res = getDatabase()
+      .prepare(
+        "INSERT INTO pending_queue (session_id, text, created_at) VALUES (?, ?, ?)",
+      )
+      .run(sessionId, text, now());
+    return Number(res.lastInsertRowid);
+  }
+
+  /** 取队列头并删除其持久化行 */
+  private takeQueued(sessionId: string): string | null {
+    const q = this.queues.get(sessionId);
+    if (!q?.length) return null;
+    const item = q.shift()!;
+    getDatabase()
+      .prepare("DELETE FROM pending_queue WHERE id = ?")
+      .run(item.id);
+    return item.text;
+  }
+
+  /** run 启动时载入该会话遗留的 pending 行（崩溃/重启恢复的关键） */
+  private preloadQueue(sessionId: string): void {
+    if (this.queues.has(sessionId)) return;
+    const rows = getDatabase()
+      .prepare(
+        "SELECT id, text FROM pending_queue WHERE session_id = ? ORDER BY created_at ASC",
+      )
+      .all(sessionId) as any[];
+    if (rows.length)
+      this.queues.set(sessionId, rows.map((r) => ({ id: Number(r.id), text: r.text })));
+  }
+
+  /** 任意步中断：中止进行中会话（LLM 请求与子进程随之终止），返回是否命中 */
+  abort(sessionId: string): boolean {
+    const ctrl = this.controllers.get(sessionId);
+    if (!ctrl) return false;
+    ctrl.abort();
     return true;
   }
 
@@ -213,44 +258,48 @@ export class SessionManager {
     return true;
   }
 
-  /** 流式单步：消费 llm.stream，收集文本/工具调用/usage，增量回调事件 */
+  /** 流式单步：消费 llm.stream，收集文本/工具调用/usage，增量回调事件；abort 时返回已产出部分 */
   private async stepStream(
-    request: Parameters<LLMClient["generate"]>[0],
+    request: LLMRequest,
     onEvent: (e: { type: string; text?: string; name?: string }) => void,
   ): Promise<LLMResponse> {
     let content = "";
     const toolCalls: Array<{ id: string; name: string; input: unknown }> = [];
     const pending = new Map<string, { name: string; args: string }>();
     let usage: LLMResponse["usage"] | undefined;
-    for await (const ev of this.llm.stream(request)) {
-      if (ev.type === "text") {
-        if (ev.text) {
-          content += ev.text;
-          onEvent({ type: "text", text: ev.text });
-        }
-      } else if (ev.type === "tool_call_start") {
-        pending.set(ev.id, { name: ev.name, args: "" });
-        onEvent({ type: "tool_start", name: ev.name });
-      } else if (ev.type === "tool_call_delta") {
-        const pt = pending.get(ev.id);
-        if (pt && ev.input) pt.args += ev.input;
-      } else if (ev.type === "tool_call_end") {
-        const pt = pending.get(ev.id);
-        if (pt) {
-          pending.delete(ev.id);
-          let input: unknown = {};
-          try {
-            input = JSON.parse(pt.args);
-          } catch {
-            input = {};
+    try {
+      for await (const ev of this.llm.stream(request)) {
+        if (ev.type === "text") {
+          if (ev.text) {
+            content += ev.text;
+            onEvent({ type: "text", text: ev.text });
           }
-          toolCalls.push({ id: ev.id, name: pt.name, input });
+        } else if (ev.type === "tool_call_start") {
+          pending.set(ev.id, { name: ev.name, args: "" });
+          onEvent({ type: "tool_start", name: ev.name });
+        } else if (ev.type === "tool_call_delta") {
+          const pt = pending.get(ev.id);
+          if (pt && ev.input) pt.args += ev.input;
+        } else if (ev.type === "tool_call_end") {
+          const pt = pending.get(ev.id);
+          if (pt) {
+            pending.delete(ev.id);
+            let input: unknown = {};
+            try {
+              input = JSON.parse(pt.args);
+            } catch {
+              input = {};
+            }
+            toolCalls.push({ id: ev.id, name: pt.name, input });
+          }
+        } else if (ev.type === "usage") {
+          usage = ev.usage;
+        } else if (ev.type === "error") {
+          throw new Error(String(ev.error ?? "LLM stream error"));
         }
-      } else if (ev.type === "usage") {
-        usage = ev.usage;
-      } else if (ev.type === "error") {
-        throw new Error(String(ev.error ?? "LLM stream error"));
       }
+    } catch (e: any) {
+      if (!request.signal?.aborted) throw e;
     }
     return {
       content,
@@ -262,7 +311,7 @@ export class SessionManager {
 
   async run(
     sessionId: string,
-    userText: string,
+    userText: string | null,
     options?: {
       toolRegistry?: ToolRegistry;
       workDir?: string;
@@ -274,51 +323,73 @@ export class SessionManager {
     },
   ): Promise<string> {
     const session = this.get(sessionId);
-    if (!session) throw new Error(`Session not found:${sessionId}`);
+    if (!session) throw new Error(`Session not found：${sessionId}`);
 
     const db = getDatabase();
     const workDir = options?.workDir ?? process.cwd();
 
     this.running.add(sessionId);
+    const ctrl = new AbortController();
+    this.controllers.set(sessionId, ctrl);
     let fullResponse = "";
     try {
-      let nextText: string | null = userText;
+      this.preloadQueue(sessionId);
+      // userText 为 null 的恢复轮：以遗留队列头一条启动（否则循环空转）
+      let nextText: string | null = userText ?? this.takeQueued(sessionId);
       while (nextText !== null) {
-        this.addMessage(sessionId, { role: "user", content: nextText });
-        if (!session.title) {
-          const t = nextText.slice(0, 50);
-          db.prepare("UPDATE sessions SET title = ? WHERE id = ?").run(
-            t,
-            sessionId,
-          );
-          session.title = t;
+        if (nextText) {
+          this.addMessage(sessionId, { role: "user", content: nextText });
+          if (!session.title) {
+            const t = nextText.slice(0, 50);
+            db.prepare("UPDATE sessions SET title = ? WHERE id = ?").run(
+              t,
+              sessionId,
+            );
+            session.title = t;
+          }
         }
 
         const toolDefs = options?.toolRegistry?.getDefinitions();
+        let turnAborted = false;
+        let savedAssistant = false;
 
         for (let step = 0; step < 20; step++) {
-          // 转向（steering）：运行中新排入的消息并入当前上下文，下一步模型即可见
-          const steer = this.queues.get(sessionId);
-          while (steer?.length) {
-            this.addMessage(sessionId, { role: "user", content: steer.shift()! });
+          if (ctrl.signal.aborted) {
+            turnAborted = true;
+            break;
+          }
+
+          // 转向（steering）：运行中新排入（含重启恢复）的消息并入当前上下文
+          let q: string | null;
+          while ((q = this.takeQueued(sessionId)) !== null) {
+            this.addMessage(sessionId, { role: "user", content: q });
           }
 
           await this.compactIfNeeded(sessionId);
-          // 上下文工程：旧工具结果修剪 + 超长消息截断（仅影响发给模型的副本）
           const messages = pruneToolResults(this.getMessages(sessionId));
-          const request = {
+          const request: LLMRequest = {
             model: session.model,
             messages,
             tools: toolDefs,
-            toolChoice: toolDefs?.length ? ("auto" as const) : undefined,
+            toolChoice: toolDefs?.length ? "auto" : undefined,
             generation:
               options?.thinking && options.thinking !== "off"
                 ? { thinking: options.thinking }
                 : undefined,
+            signal: ctrl.signal,
           };
-          const response = options?.onEvent
-            ? await this.stepStream(request, options.onEvent)
-            : await this.llm.generate(request);
+          let response: LLMResponse;
+          try {
+            response = options?.onEvent
+              ? await this.stepStream(request, options.onEvent)
+              : await this.llm.generate(request);
+          } catch (e: any) {
+            if (ctrl.signal.aborted) {
+              turnAborted = true;
+              break;
+            }
+            throw e;
+          }
 
           if (response.usage) {
             db.prepare(
@@ -334,15 +405,18 @@ export class SessionManager {
             );
           }
 
-          this.addMessage(sessionId, {
-            role: "assistant",
-            content: response.toolCalls?.length
-              ? JSON.stringify({
-                  text: response.content,
-                  toolCalls: response.toolCalls,
-                })
-              : response.content,
-          });
+          if (!ctrl.signal.aborted || (response.content ?? "") !== "") {
+            this.addMessage(sessionId, {
+              role: "assistant",
+              content: response.toolCalls?.length
+                ? JSON.stringify({
+                    text: response.content,
+                    toolCalls: response.toolCalls,
+                  })
+                : response.content,
+            });
+            savedAssistant = true;
+          }
           fullResponse += response.content ?? "";
           options?.onText?.(response.content);
 
@@ -354,6 +428,7 @@ export class SessionManager {
               sessionId,
               agentId: session.agentId,
               workDir,
+              abortSignal: ctrl.signal,
             });
             options.onToolResult?.(tc.name, result.output ?? result.error);
             // 密钥屏蔽：工具输出落库前替换已知密钥值，模型/界面/历史都不见明文
@@ -369,17 +444,31 @@ export class SessionManager {
               ),
             });
           }
+          if (ctrl.signal.aborted) {
+            turnAborted = true;
+            break;
+          }
+        }
+
+        if (turnAborted || ctrl.signal.aborted) {
+          if (!savedAssistant)
+            this.addMessage(sessionId, {
+              role: "assistant",
+              content: "⏹ 已中断",
+            });
+          break; // 不再消费队列尾部：剩余排队消息保留在库中下次续跑
         }
 
         // 队列尾部：本轮答完后仍有排队消息 → 作为下一用户轮继续运行
-        const tail = this.queues.get(sessionId);
-        nextText = tail?.length ? (tail.shift() ?? null) : null;
+        const tail = this.takeQueued(sessionId);
+        nextText = tail;
         if (nextText !== null && fullResponse) fullResponse += "\n\n";
       }
       return fullResponse;
     } finally {
       this.running.delete(sessionId);
       this.queues.delete(sessionId);
+      this.controllers.delete(sessionId);
     }
   }
 }

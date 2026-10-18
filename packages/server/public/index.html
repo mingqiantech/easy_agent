@@ -310,12 +310,14 @@
       c.scrollTop=c.scrollHeight;
     }
 
+    function setSendMode(run){const b=document.getElementById('sendBtn');if(run){b.textContent='\u25a0 \u505c\u6b62';b.onclick=abortRun;}else{b.textContent='\u53d1\u9001';b.onclick=send;}b.disabled=false;b.title='';}
+    async function abortRun(){const b=document.getElementById('sendBtn');b.disabled=true;b.title='\u4e2d\u65ad\u4e2d\u2026';try{await fetch(`${API}/api/sessions/${sid}/abort`,{method:'POST'});}catch(e){b.disabled=false;}}
     async function send(){
       const input=document.getElementById('input'),text=input.value.trim();
       if(!text)return;
       if(!sid)await newSession();
       input.value='';
-      document.getElementById('sendBtn').disabled=true;
+      setSendMode(true);
       const c=document.getElementById('messages');
       if(c.querySelector('.empty'))c.innerHTML='';
       c.insertAdjacentHTML('beforeend',bubbleHtml({role:'user',content:text,createdAt:Date.now()}));
@@ -336,7 +338,7 @@
           thinking.innerHTML=bubbleHtml({role:'assistant',content:j.response??('❌ '+(j.error||'请求失败')),createdAt:Date.now()});
         }
       }catch(e){thinking.innerHTML=bubbleHtml({role:'assistant',content:'❌ '+e.message});}
-      document.getElementById('sendBtn').disabled=false;c.scrollTop=c.scrollHeight;await loadSessions();
+      setSendMode(false);c.scrollTop=c.scrollHeight;await loadSessions();
     }
 
     async function summarize(){
@@ -445,7 +447,8 @@
       if(e.type==='text'){const l=ensureLive();l.querySelector('.live-text').textContent+=e.text||'';const c=document.getElementById('messages');c.scrollTop=c.scrollHeight;return;}
       if(e.type==='tool_start'){ensureLive().querySelector('.live-chips').insertAdjacentHTML('beforeend',`<span class="tool-chip">⏳ ${esc(e.name)}</span>`);return;}
       if(e.type==='tool_end'){if(!live||!document.contains(live))return;const chips=live.querySelectorAll('.tool-chip');for(let i=chips.length-1;i>=0;i--){if((chips[i].textContent||'').includes(e.name)){chips[i].innerHTML=`✅ ${esc(e.name)} <small style="color:var(--muted)">${esc((e.preview||'').slice(0,70))}</small>`;break;}}return;}
-      if(e.type==='run_end'){if(e.error&&live&&document.contains(live)){live.querySelector('.live-text').textContent+='\n❌ '+e.error;}return;}
+      if(e.type==='run_end'){setSendMode(false);if(e.error&&live&&document.contains(live)){live.querySelector('.live-text').textContent+='\n❌ '+e.error;}return;}
+      if(e.type==='aborted'){const l=ensureLive();l.querySelector('.live-text').textContent+='\n⏹ 已中断';return;}
     }
 
     /* ── 子代理着色/入口（运行记录展示已并入 Agent 拓扑图） ── */

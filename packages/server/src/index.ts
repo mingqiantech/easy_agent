@@ -182,6 +182,39 @@ async function main() {
   });
   cronScheduler.start();
 
+  // 会话持久化恢复：重启/崩溃时未消费的排队消息自动续跑（不开新会话）
+  setTimeout(() => {
+    const sids = db
+      .prepare("SELECT DISTINCT session_id FROM pending_queue")
+      .all() as any[];
+    for (const { session_id: ssid } of sids) {
+      const sess = sessions.get(ssid);
+      if (!sess) {
+        db.prepare("DELETE FROM pending_queue WHERE session_id = ?").run(ssid);
+        continue;
+      }
+      if (sessions.isBusy(ssid)) continue;
+      const ag = agents[sess.agentId] ?? agents["default"];
+      const n = (
+        db
+          .prepare(
+            "SELECT COUNT(*) c FROM pending_queue WHERE session_id = ?",
+          )
+          .get(ssid) as any
+      ).c;
+      console.log(`♻️ 恢复会话 ${ssid.slice(0, 8)} 的 ${n} 条排队消息`);
+      sessions
+        .run(ssid, null, {
+          toolRegistry: tools,
+          workDir: ag?.workspaceDir,
+          thinking: ag?.thinking as any,
+        })
+        .catch((e: any) =>
+          console.warn("♻️ 恢复失败:", String(e?.message).slice(0, 120)),
+        );
+    }
+  }, 1500);
+
   const app = createApp({
     llm,
     sessions,

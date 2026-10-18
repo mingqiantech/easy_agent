@@ -70,6 +70,7 @@ export class OpenAIProvider implements LLMProvider {
         messages,
         tools,
         temperature: request.generation?.temperature,
+        abortSignal: request.signal,
         maxTokens: request.generation?.maxTokens,
         providerOptions: openaiThinkingOptions(request.generation?.thinking),
       });
@@ -105,6 +106,7 @@ export class OpenAIProvider implements LLMProvider {
       messages,
       tools,
       temperature: request.generation?.temperature,
+      abortSignal: request.signal,
       maxTokens: request.generation?.maxTokens,
       providerOptions: openaiThinkingOptions(request.generation?.thinking),
     });

@@ -41,6 +41,15 @@ export const bashTool: Tool = {
         killed = true;
         child.kill("SIGTERM");
       }, timeoutMs);
+      // 任意步中断：abort 信号到达即终止子进程
+      const onAbort = () => {
+        killed = true;
+        child.kill("SIGTERM");
+      };
+      if (ctx.abortSignal) {
+        if (ctx.abortSignal.aborted) onAbort();
+        else ctx.abortSignal.addEventListener("abort", onAbort, { once: true });
+      }
       child.stdout.on("data", (d: Buffer) => {
         if (stdout.length < MAX_OUTPUT) stdout += d;
         else truncated = true;
@@ -51,6 +60,7 @@ export const bashTool: Tool = {
       child.on("close", (code) => {
         clearTimeout(timer);
         const r: any = {
+          aborted: killed && !!ctx.abortSignal?.aborted,
           exitCode: code ?? -1,
           stdout: stdout.trim(),
           stderr: stderr.trim(),

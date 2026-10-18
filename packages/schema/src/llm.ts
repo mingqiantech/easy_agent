@@ -30,6 +30,8 @@ export const LLMRequest = z.object({
   tools: z.array(ToolDefinition).optional(),
   toolChoice: z.enum(["none", "auto", "manual"]).optional(),
   generation: GenerationOptions.optional(),
+  /** 中断信号：透传给 provider（ai-sdk abortSignal），任意步终止请求 */
+  signal: z.custom<AbortSignal>().optional(),
 });
 export type LLMRequest = z.infer<typeof LLMRequest>;
 

@@ -73,6 +73,7 @@ export class OpenRouterProvider implements LLMProvider {
         content: m.content,
       })),
       temperature: request.generation?.temperature,
+      abortSignal: request.signal,
       maxTokens: request.generation?.maxTokens,
     });
     return {
@@ -93,6 +94,7 @@ export class OpenRouterProvider implements LLMProvider {
 
   async *stream(request: LLMRequest): AsyncGenerator<LLMStreamEvent> {
     const result = streamText({
+      abortSignal: request.signal,
       model: this.client(request.model),
       system: request.system,
       messages: request.messages.map((m) => ({

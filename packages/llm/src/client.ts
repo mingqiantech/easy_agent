@@ -33,6 +33,7 @@ export class LLMClient {
       try {
         return await this.generateOnce({ ...request, model: ref });
       } catch (e: any) {
+        if (request.signal?.aborted) throw e; // 用户中断不触发故障转移
         lastError = e;
         const next = chain[chain.indexOf(ref) + 1];
         console.warn(
@@ -56,6 +57,7 @@ export class LLMClient {
         }
         return;
       } catch (e: any) {
+        if (request.signal?.aborted) throw e; // 用户中断不重试
         // 已经吐出内容后不重试（避免重复输出），直接向上抛
         if (yielded) throw e;
         lastError = e;
