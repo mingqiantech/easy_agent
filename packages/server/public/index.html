@@ -96,6 +96,12 @@
     .message.toolchip .clipped::after{background:linear-gradient(to bottom,transparent,var(--tool))}
     .expand-btn{display:inline-block;margin-top:6px;font-size:12px;color:var(--accent);cursor:pointer;user-select:none;border:1px solid var(--border);border-radius:8px;padding:2px 10px;background:var(--card)}
     .expand-btn:hover{background:var(--hover)}
+    /* 工具调用结果分组折叠 */
+    .toolgroup{margin-bottom:14px}
+    .toolgroup-head{display:inline-flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);cursor:pointer;user-select:none;padding:4px 10px;border:1px solid var(--border);border-radius:10px;background:var(--card)}
+    .toolgroup-head:hover{background:var(--hover)}
+    .toolgroup-body{margin-top:6px}
+    .toolgroup.collapsed .toolgroup-body{display:none}
     .mem-ta{width:100%;height:200px;background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:10px;font:12px/1.6 ui-monospace,monospace;color:var(--fg);resize:vertical;margin-top:8px}
     .metrics{display:flex;gap:12px;flex-wrap:wrap;padding:16px 20px 0}
     .metric{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:10px 18px;box-shadow:var(--shadow);min-width:110px}
@@ -311,6 +317,36 @@
       return `<div class="message ${m.role}"><div class="avatar">${av}</div><div><div class="bubble">${inner}</div>${ts}</div></div>${toolLine}`;
     }
     const clip=s=>{s=String(s);return s.length>300?s.slice(0,300)+'…':s};
+    /* 连续的 ⚙ 工具结果分组成可折叠块（默认收起，点头展开） */
+    function groupToolMessages(){
+      const c=document.getElementById('messages');
+      let el=c.firstElementChild;
+      while(el){
+        if(el.classList&&el.classList.contains('toolchip')){
+          const run=[el];
+          let n=el.nextElementSibling;
+          while(n&&n.classList&&n.classList.contains('toolchip')){run.push(n);n=n.nextElementSibling;}
+          if(run.length>=2){
+            const names=run.map(m=>{
+              const b=m.querySelector('.bubble');const s=b?b.textContent.trim():'';
+              if(s.startsWith('⚙')){try{return JSON.parse(m.querySelector('.clippable').textContent).toolName||'?';}catch{return 'tool';}}
+              return s.replace(/^🔧\s*/,'').split(/[,\s]/)[0]||'tool';
+            });
+            const grp=document.createElement('div');
+            grp.className='toolgroup collapsed';
+            const head=document.createElement('div');
+            head.className='toolgroup-head';
+            head.innerHTML=`⚙ 工具调用 ×${run.length} <small>${esc(names.join('、').slice(0,60))}</small> <span class="tg-arrow">▸</span>`;
+            const body=document.createElement('div');body.className='toolgroup-body';
+            run[0].parentNode.insertBefore(grp,run[0]);
+            run.forEach(m=>body.appendChild(m));
+            grp.appendChild(head);grp.appendChild(body);
+            head.onclick=()=>{const on=grp.classList.toggle('collapsed');head.querySelector('.tg-arrow').textContent=on?'▸':'▾';};
+            el=grp;
+          } else el=el.nextElementSibling;
+        } else el=el.nextElementSibling;
+      }
+    }
     /* 长文本溢出检测：内容高过 ~420px 就折叠 + 渐变遮罩 + 展开/收起按钮 */
     function applyCollapse(){
       document.querySelectorAll('#messages .clippable').forEach(el=>{
@@ -331,6 +367,7 @@
       const c=document.getElementById('messages');
       const rows=messages.filter(m=>m.role!=='system').map(bubbleHtml).join('');
       c.innerHTML=rows||'<div class="empty">开始对话吧</div>';
+      groupToolMessages();
       applyCollapse();
       c.scrollTop=c.scrollHeight;
     }
