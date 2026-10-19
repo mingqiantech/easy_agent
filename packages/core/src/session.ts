@@ -465,7 +465,9 @@ export class SessionManager {
             );
           }
 
-          if (!ctrl.signal.aborted || (response.content ?? "") !== "") {
+          const hasPayload =
+            (response.content ?? "") !== "" || !!response.toolCalls?.length;
+          if (hasPayload && (!ctrl.signal.aborted || (response.content ?? "") !== "")) {
             this.addMessage(sessionId, {
               role: "assistant",
               content: response.toolCalls?.length
