@@ -97,7 +97,10 @@
     .md hr{border:none;border-top:1px solid var(--border);margin:10px 0}
     .md ul{margin:6px 0;padding-left:20px}
     .md li{margin:2px 0}
-    .md code{font-family:monospace;font-size:12px;background:var(--tool);border-radius:4px;padding:1px 5px}
+    .md code{font-family:monospace;font-size:12.5px;background:rgba(91,122,140,.14);color:#33505e;border:1px solid rgba(91,122,140,.25);border-radius:5px;padding:1px 6px;white-space:normal;word-break:break-all}
+    .md blockquote{margin:6px 0;padding:4px 12px;border-left:3px solid var(--accent2);color:var(--fg);background:var(--hover);border-radius:0 8px 8px 0}
+    .md ol{margin:6px 0;padding-left:22px}
+    .md ol li{margin:2px 0}
     .md table{border-collapse:collapse;margin:8px 0;font-size:13px;display:block;overflow-x:auto;max-width:100%}
     .md th,.md td{border:1px solid var(--border);padding:5px 10px;text-align:left;white-space:nowrap}
     .md th{background:var(--hover);font-weight:600}
@@ -333,19 +336,22 @@
     /* 轻量 Markdown 渲染（无依赖）：标题/hr/列表/表格/加粗/行内码；全角｜归一为半角 */
     function mdInline(s){
       s=esc(s);
-      s=s.replace(/`([^`]+)`/g,'<code>$1</code>');
+      // 先处理双反引号 `x`，再处理单反引号；最后清理落单的反引号避免满屏乱码
+      s=s.replace(/``([^`]+)``/g,'<code>$1</code>');
+      s=s.replace(/`([^`\n]+)`/g,'<code>$1</code>');
+      s=s.replace(/`/g,'');
       s=s.replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>');
       return s;
     }
     function mdToHtml(src){
       const lines=String(src).replace(/｜/g,'|').split('\n');
-      let out='',i=0,inList=false;
-      const closeList=()=>{if(inList){out+='</ul>';inList=false;}};
+      let out='',i=0,inUl=false,inOl=false;
+      const closeLists=()=>{if(inUl){out+='</ul>';inUl=false;}if(inOl){out+='</ol>';inOl=false;}};
       while(i<lines.length){
         const ln=lines[i];
         // 表格：当前行含 | 且下一行是分隔行
         if(ln.trim().startsWith('|')&&i+1<lines.length&&/^\|[\s:|-]+\|?\s*$/.test(lines[i+1].trim())){
-          closeList();
+          closeLists();
           const rows=[];
           let j=i;
           while(j<lines.length&&lines[j].trim().startsWith('|')){rows.push(lines[j].trim());j++;}
@@ -359,17 +365,19 @@
           out+='</table>';i=j;continue;
         }
         const t=ln.trim();
-        if(/^#{1,6}\s/.test(t)){closeList();const lv=Math.min(t.match(/^#+/)[0].length,4);out+=`<h${lv+3}>${mdInline(t.replace(/^#+\s*/,''))}</h${lv+3}>`;i++;continue;}
-        if(/^-{3,}$|\*{3,}$/.test(t)){closeList();out+='<hr>';i++;continue;}
-        if(/^[-•*]\s+/.test(t)){if(!inList){out+='<ul>';inList=true;}out+=`<li>${mdInline(t.replace(/^[-•*]\s+/,''))}</li>`;i++;continue;}
-        if(t===''){closeList();i++;continue;}
-        closeList();
-        // 普通段落：连续非空行合并，段内软换行用空格连接（避免表格外断行过碎）
+        if(/^#{1,6}\s/.test(t)){closeLists();const lv=Math.min(t.match(/^#+/)[0].length,4);out+=`<h${lv+3}>${mdInline(t.replace(/^#+\s*/,''))}</h${lv+3}>`;i++;continue;}
+        if(/^-{3,}$|\*{3,}$/.test(t)){closeLists();out+='<hr>';i++;continue;}
+        if(/^[-•*]\s+/.test(t)){if(!inUl){out+='<ul>';inUl=true;}if(inOl){out+='</ol>';inOl=false;}out+=`<li>${mdInline(t.replace(/^[-•*]\s+/,''))}</li>`;i++;continue;}
+        if(/^\d+[.、]\s*/.test(t)){if(!inOl){out+='<ol>';inOl=true;}if(inUl){out+='</ul>';inUl=false;}out+=`<li>${mdInline(t.replace(/^\d+[.、]\s*/,''))}</li>`;i++;continue;}
+        if(/^>\s?/.test(t)){closeLists();out+=`<blockquote>${mdInline(t.replace(/^>\s?/,''))}</blockquote>`;i++;continue;}
+        if(t===''){closeLists();i++;continue;}
+        closeLists();
+        // 普通段落：保留原始换行（<br>），命令/路径类内容合并成一行会彻底没法读
         let para=[t];i++;
-        while(i<lines.length&&lines[i].trim()!==''&&!/^[-•*#|]\s*/.test(lines[i].trim())&&!/^-{3,}$/.test(lines[i].trim())){para.push(lines[i].trim());i++;}
-        out+=`<p>${mdInline(para.join(' '))}</p>`;
+        while(i<lines.length&&lines[i].trim()!==''&&!/^[-•*#|>]/.test(lines[i].trim())&&!/^\d+[.、]\s/.test(lines[i].trim())&&!/^-{3,}$/.test(lines[i].trim())){para.push(lines[i].trim());i++;}
+        out+=`<p>${para.map(p=>mdInline(p)).join('<br>')}</p>`;
       }
-      closeList();
+      closeLists();
       return out;
     }
     /* 连续的 ⚙ 工具结果分组成可折叠块（默认收起，点头展开） */
