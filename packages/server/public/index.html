@@ -324,22 +324,27 @@
       if(c.querySelector('.empty'))c.innerHTML='';
       c.insertAdjacentHTML('beforeend',bubbleHtml({role:'user',content:text,createdAt:Date.now()}));
       const thinking=document.createElement('div');
+      thinking.id='thinkingSlot';
       thinking.innerHTML=`<div class="message assistant"><div class="avatar">🤖</div><div><div class="bubble" style="color:var(--muted)">思考中…</div></div></div>`;
       c.appendChild(thinking);c.scrollTop=c.scrollHeight;
       openEvents(sid);
       try{
         const r=await fetch(`${API}/api/sessions/${sid}/messages`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text})});
         const j=await r.json();
-        clearLive();
         if(j.status==='queued'){
+          clearLive();
           thinking.innerHTML=bubbleHtml({role:'assistant',content:'⏳ 已排队——当前任务进行中，这条消息会自动并入上下文（转向），稍后刷新会话可见完整回复',createdAt:Date.now()});
           await new Promise(res=>setTimeout(res,4000));
           thinking.innerHTML=bubbleHtml({role:'assistant',content:'⏳ 已并入当前任务，继续对话请等待本轮完成后刷新',createdAt:Date.now()});
           loadSessions();
+        }else if(j.error){
+          clearLive();
+          thinking.innerHTML=bubbleHtml({role:'assistant',content:'❌ '+j.error,createdAt:Date.now()});
         }else{
-          thinking.innerHTML=bubbleHtml({role:'assistant',content:j.response??('❌ '+(j.error||'请求失败')),createdAt:Date.now()});
+          // 成功：走淡出衔接（finalizeRun 幂等，SSE run_end 先到则不重复）
+          await finalizeRun();
         }
-      }catch(e){thinking.innerHTML=bubbleHtml({role:'assistant',content:'❌ '+e.message});}
+      }catch(e){clearLive();thinking.innerHTML=bubbleHtml({role:'assistant',content:'❌ '+e.message});}
       setSendMode(false);c.scrollTop=c.scrollHeight;await loadSessions();
     }
 
@@ -422,17 +427,61 @@
       document.getElementById('agentSel').value=name;switchAgent();showView('chat');
     }
 
-    /* ── SSE 事件流：逐字渲染 + 实时工具卡片 ── */
+    /* ── SSE 事件流：逐字渲染 + 实时工具卡片；断线自动重连，重连后补齐历史 ── */
+    let esRetryTimer=null, esRetryDelay=1000, esLostOnce=false;
     function openEvents(id){
-      if(es&&esSid===id)return;
+      if(es&&esSid===id&&(es.readyState===EventSource.OPEN||es.readyState===EventSource.CONNECTING))return;
       closeEvents(); esSid=id;
+      connectEvents(id);
+    }
+    function connectEvents(id){
+      if(esSid!==id)return;
       try{
         es=new EventSource(`${API}/api/sessions/${id}/events`);
         es.onmessage=(ev)=>{try{handleStreamEvent(JSON.parse(ev.data));}catch(e){}};
+        es.onopen=()=>{
+          esRetryDelay=1000;
+          if(esLostOnce){ esLostOnce=false; loadMessages(); loadSessions(); } // 重连成功：补齐断线期间错过的内容
+        };
+        es.onerror=()=>{
+          esLostOnce=true; // 不管原生重试还是手动重连，恢复后都补齐历史
+          // 浏览器原生会自动重试（CONNECTING）；若被永久关闭则手动退避重连
+          if(es&&es.readyState===EventSource.CLOSED){
+            es=null; esLostOnce=true;
+            if(esSid===id) esRetryTimer=setTimeout(()=>connectEvents(id), esRetryDelay);
+            esRetryDelay=Math.min(esRetryDelay*2,10000);
+          }
+        };
       }catch(e){}
     }
-    function closeEvents(){if(es){es.close();es=null;}esSid=null;clearLive();}
+    function closeEvents(){
+      if(esRetryTimer){clearTimeout(esRetryTimer);esRetryTimer=null;}
+      esRetryDelay=1000; esLostOnce=false;
+      if(es){es.close();es=null;} esSid=null;clearLive();finalizeP=null;
+    }
     function clearLive(){if(live){live.remove();live=null;}}
+    /* live 气泡 → 全量历史平滑衔接：淡出旧泡同时渲染 DB 内容，避免刷新闪一下 */
+    let finalizeP=null;
+    function fadeRemoveLive(){
+      return new Promise(res=>{
+        if(!live||!document.contains(live)){live=null;return res();}
+        const l=live;live=null;
+        l.style.transition='opacity .35s ease';
+        requestAnimationFrame(()=>{l.style.opacity='0';});
+        setTimeout(()=>{l.remove();res();},380);
+      });
+    }
+    function finalizeRun(){
+      if(finalizeP)return finalizeP;
+      finalizeP=(async()=>{
+        await fadeRemoveLive();
+        const th=document.getElementById('thinkingSlot');
+        await loadMessages();               // 新内容在淡出期间已渲染到位
+        if(th)th.remove();
+        await loadSessions();
+      })().finally(()=>{finalizeP=null;});
+      return finalizeP;
+    }
     function ensureLive(){
       if(live&&document.contains(live))return live;
       live=null;
@@ -449,7 +498,7 @@
       if(e.type==='text'){const l=ensureLive();l.querySelector('.live-text').textContent+=e.text||'';const c=document.getElementById('messages');c.scrollTop=c.scrollHeight;return;}
       if(e.type==='tool_start'){ensureLive().querySelector('.live-chips').insertAdjacentHTML('beforeend',`<span class="tool-chip">⏳ ${esc(e.name)}</span>`);return;}
       if(e.type==='tool_end'){if(!live||!document.contains(live))return;const chips=live.querySelectorAll('.tool-chip');for(let i=chips.length-1;i>=0;i--){if((chips[i].textContent||'').includes(e.name)){chips[i].innerHTML=`✅ ${esc(e.name)} <small style="color:var(--muted)">${esc((e.preview||'').slice(0,70))}</small>`;break;}}return;}
-      if(e.type==='run_end'){setSendMode(false);if(e.error&&live&&document.contains(live)){live.querySelector('.live-text').textContent+='\n❌ '+e.error;}return;}
+      if(e.type==='run_end'){setSendMode(false);if(e.error&&live&&document.contains(live)){live.querySelector('.live-text').textContent+='\n❌ '+e.error;}finalizeRun();return;}
       if(e.type==='aborted'){const l=ensureLive();l.querySelector('.live-text').textContent+='\n⏹ 已中断';return;}
     }
 
