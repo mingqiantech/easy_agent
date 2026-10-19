@@ -84,6 +84,10 @@ export const ConfigSchema = z.object({
     .default({}),
   /** 视觉模型（ref 或 alias）；未配置时用主模型链首位 */
   visionModel: z.string().optional(),
+  /** 工具裁剪：disable 列表里的内置工具不注册（如 ["image-gen","sub_agent"]） */
+  tools: z
+    .object({ disable: z.array(z.string()).default([]) })
+    .default({ disable: [] }),
   /** 图片生成模型（ref 或 alias） */
   imageGenModel: z.string().optional(),
 });

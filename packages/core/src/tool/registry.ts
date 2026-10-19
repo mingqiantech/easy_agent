@@ -12,6 +12,7 @@ import { extractTool } from "./builtins/extract.js";
 import { lsTool } from "./builtins/ls.js";
 import { websearchTool } from "./builtins/websearch.js";
 import { todoTool } from "./builtins/todo.js";
+import { zodToJsonSchema } from "./schema-utils.js";
 
 const BUILTINS = [
   readTool,
@@ -89,5 +90,25 @@ export class ToolRegistry {
         return { output: null, error: `Invalid input: ${e.message}` };
       return { output: null, error: e.message };
     }
+  }
+
+  /** 生成可读工具清单 markdown（供 TOOLS.md 自动落盘） */
+  toMarkdown(): string {
+    const lines = [
+      "# TOOLS.md - 工具清单（自动生成，勿手改）",
+      "",
+      `> 由 ToolRegistry 在网关启动时生成，共 ${this.tools.size} 个工具。`,
+      "",
+    ];
+    for (const t of this.list()) {
+      lines.push(`## ${t.name}`, "", t.description, "");
+      try {
+        const schema = zodToJsonSchema(t.inputSchema as any);
+        lines.push("```json", JSON.stringify(schema, null, 2), "```", "");
+      } catch {
+        /* schema 转不动就只列名字+描述 */
+      }
+    }
+    return lines.join("\n");
   }
 }

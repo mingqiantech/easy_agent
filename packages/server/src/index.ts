@@ -1,4 +1,6 @@
 import { serve } from "@hono/node-server";
+import fs from "node:fs/promises";
+import path from "node:path";
 import { createApp } from "./app.js";
 import { LLMClient } from "@easy-agent/llm/client";
 import { SessionManager } from "@easy-agent/core/session";
@@ -94,6 +96,9 @@ async function main() {
     ),
   );
 
+  // 工具裁剪：配置 tools.disable=[...] 注销对应工具（对所有 agent 生效）
+  for (const name of config.tools?.disable ?? []) tools.unregister(name);
+
   // Week8: 监控告警（默认规则：库过大/错误率飙升）
   const monitoring = new MonitoringSystem();
   monitoring.addDefaultRules(async (msg) => console.error(msg));
@@ -106,7 +111,15 @@ async function main() {
     let mem = memCache.get(a.workspaceDir);
     if (!mem) {
       mem = new BasicMemory(a.workspaceDir);
-      await mem.initWorkspace();
+      const fresh = await mem.initWorkspace();
+      // TOOLS.md 自动生成：工具清单落盘到工作区（供 agent/用户阅读）
+      await fs.writeFile(
+        path.join(a.workspaceDir, "TOOLS.md"),
+        tools.toMarkdown(),
+        "utf-8",
+      ).catch(() => {});
+      if (fresh.length)
+        console.log(`📁 工作区 ${a.workspaceDir} 初始化: ${fresh.join(", ")}`);
       memCache.set(a.workspaceDir, mem);
     }
     agents[a.name] = {

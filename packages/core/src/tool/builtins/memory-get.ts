@@ -4,15 +4,28 @@ import path from "node:path";
 import type { Tool, ToolContext } from "../types.js";
 export const memoryGetTool: Tool = {
   name: "memory_get",
-  description: "从记忆文件读取内容。支持 MEMORY.md, USER.md, memory/*.md。",
+  description:
+    "从记忆/人格文件读取内容。支持 MEMORY.md, USER.md, SOUL.md, IDENTITY.md, AGENTS.md, TOOLS.md, BOOTSTRAP.md, memory/*.md。",
   inputSchema: z.object({
-    path: z.string().describe("MEMORY.md / USER.md / memory/*.md"),
+    path: z
+      .string()
+      .describe(
+        "MEMORY.md / USER.md / SOUL.md / IDENTITY.md / AGENTS.md / TOOLS.md / BOOTSTRAP.md / memory/*.md",
+      ),
     from: z.number().optional(),
     lines: z.number().optional(),
   }),
 
   async execute(input: any, ctx: ToolContext) {
-    const allowed = ["MEMORY.md", "USER.md", "SOUL.md", "IDENTITY.md"];
+    const allowed = [
+      "MEMORY.md",
+      "USER.md",
+      "SOUL.md",
+      "IDENTITY.md",
+      "AGENTS.md",
+      "TOOLS.md",
+      "BOOTSTRAP.md",
+    ];
     if (!allowed.includes(input.path) && !input.path.startsWith("memory/"))
       return { error: `Denied. Allowed: ${allowed.join(", ")}, memory/*.md` };
     try {
