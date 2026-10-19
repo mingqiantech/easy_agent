@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll } from "bun:test";
+import { describe, it, expect, beforeAll, afterAll } from "bun:test";
 import { getDatabase } from "../src/database.js";
 import { SessionManager } from "../src/session.js";
 import { now } from "../src/utils.js";
@@ -12,6 +12,12 @@ describe("recoverInterruptedTurns（重启续跑被中断任务）", () => {
     db = getDatabase(":memory:");
     const fakeLlm: any = { generate: async () => ({ content: "ok" }) };
     sessions = new SessionManager(fakeLlm, { defaultModel: "test/model" });
+  });
+
+  afterAll(() => {
+    // 清理残留，避免污染其他共用单例 DB 的测试（它们断言全局 pending 计数）
+    db.exec("DELETE FROM pending_queue");
+    db.exec("DELETE FROM active_turns");
   });
 
   function seedInterruptedTurn(sessionId: string, resumeCount = 0) {
