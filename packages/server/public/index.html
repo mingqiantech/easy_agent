@@ -403,7 +403,7 @@
         while(i<lines.length&&lines[i].trim()!==''&&!/^[-•*#|>`]/.test(lines[i].trim())&&!/^\d+[.、]\s/.test(lines[i].trim())&&!/^-{3,}$/.test(lines[i].trim())){para.push(lines[i].trim());i++;}
         const joined=para.map(p=>mdInline(p)).join('<br>');
         // ①② 圈号开头的“小标题行”：加背景条增强存在感（之前灰淡看不清）
-        out=/^[\u2460-\u2469]/.test(para[0])?`<div class="circ">${joined}</div>`:`<p>${joined}</p>`;
+        out+=/^[\u2460-\u2469]/.test(para[0])?`<div class="circ">${joined}</div>`:`<p>${joined}</p>`;
       }
       closeLists();
       return out;
