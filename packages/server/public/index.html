@@ -54,14 +54,14 @@
     .message.user{margin-left:auto;flex-direction:row-reverse}
     .avatar{width:30px;height:30px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:15px;flex-shrink:0;background:var(--accent-soft);color:var(--accent);font-weight:700}
     .message.user .avatar{background:var(--user);color:#fff}
-    .bubble{padding:11px 15px;border-radius:14px;white-space:pre-wrap;word-break:break-word;line-height:1.55;font-size:14px;background:var(--assistant);border:1px solid var(--border);box-shadow:var(--shadow)}
+    .bubble{padding:11px 15px;border-radius:14px;white-space:pre-wrap;word-break:break-word;line-height:1.6;font-size:15px;background:var(--assistant);border:1px solid var(--border);box-shadow:var(--shadow)}
     .message.user .bubble{background:var(--user);color:#fff;border:none}
     .message.toolchip .bubble{background:var(--tool);color:var(--muted);font-size:12px;font-family:monospace}
     .message.summ{max-width:100%}
     .message.summ .bubble{border-left:4px solid var(--accent2);background:rgba(139,92,246,.06)}
     .ts{font-size:10px;color:var(--muted);margin-top:5px}
     .input-area{padding:14px 16px;border-top:1px solid var(--border);display:flex;gap:8px;align-items:flex-end;background:var(--card)}
-    .input-area textarea{flex:1;background:var(--bg);color:var(--fg);border:1px solid var(--border);border-radius:14px;padding:12px 14px;font-size:14px;font-family:inherit;resize:none;min-height:46px;max-height:180px}
+    .input-area textarea{flex:1;background:var(--bg);color:var(--fg);border:1px solid var(--border);border-radius:14px;padding:12px 14px;font-size:15px;font-family:inherit;resize:none;min-height:46px;max-height:180px}
     .input-area textarea:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
     .send-btn{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;border:none;border-radius:14px;padding:12px 26px;cursor:pointer;font-size:14px;font-weight:600}
     .send-btn:hover{opacity:.9}
@@ -97,20 +97,20 @@
     .md hr{border:none;border-top:1px solid var(--border);margin:10px 0}
     .md ul{margin:6px 0;padding-left:20px}
     .md li{margin:2px 0}
-    .md code{font-family:monospace;font-size:12.5px;background:rgba(91,122,140,.13);color:#33505e;border:none;border-radius:5px;padding:2px 6px;white-space:normal}
+    .md code{font-family:monospace;font-size:14px;background:rgba(91,122,140,.13);color:#33505e;border:none;border-radius:5px;padding:2px 6px;white-space:normal}
     .md p code+.md p code{margin-left:4px}
     .md blockquote{margin:6px 0;padding:4px 12px;border-left:3px solid var(--accent2);color:var(--fg);background:var(--hover);border-radius:0 8px 8px 0}
-    .md pre{margin:8px 0;padding:10px 12px;background:#2f3640;color:#d8dee9;border-radius:10px;overflow-x:auto;font-size:12.5px;line-height:1.5;position:relative}
+    .md pre{margin:8px 0;padding:10px 12px;background:#2f3640;color:#d8dee9;border-radius:10px;overflow-x:auto;font-size:14px;line-height:1.55;position:relative}
     .md pre code{background:none;border:none;color:inherit;padding:0;font-size:inherit;white-space:pre;word-break:normal}
     .md pre[data-lang]::before{content:attr(data-lang);position:absolute;top:5px;left:12px;font-size:10px;color:#8b95a5;letter-spacing:.5px}
     .md pre{padding-top:24px}
     .copy-btn{position:absolute;top:4px;right:6px;font-size:11px;color:#aab4c2;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.15);border-radius:6px;padding:2px 9px;cursor:pointer;user-select:none}
     .copy-btn:hover{background:rgba(255,255,255,.16);color:#fff}
     .copy-btn.copied{color:#9fd3a8;border-color:rgba(159,211,168,.4)}
-    .md .circ{margin:6px 0;font-size:13px;color:#4a5462;background:var(--accent-soft);border-radius:8px;padding:5px 10px}
+    .md .circ{margin:6px 0;font-size:15px;color:#3d4653;background:var(--accent-soft);border-radius:8px;padding:5px 10px}
     .md ol{margin:6px 0;padding-left:22px}
     .md ol li{margin:2px 0}
-    .md table{border-collapse:collapse;margin:8px 0;font-size:13px;display:block;overflow-x:auto;max-width:100%}
+    .md table{border-collapse:collapse;margin:8px 0;font-size:14px;display:block;overflow-x:auto;max-width:100%}
     .md th,.md td{border:1px solid var(--border);padding:5px 10px;text-align:left;white-space:nowrap}
     .md th{background:var(--hover);font-weight:600}
     .md tr:nth-child(even) td{background:rgba(91,122,140,.04)}
@@ -224,6 +224,13 @@
   <script>
     const API='';
     let sid=null, agent='default', topoTimer=null, usageTimer=null, models=[];  let es=null, esSid=null, live=null;
+    let curView='chat';
+    /* URL 状态：#agent=x&sid=y&view=chat —— 刷新/收藏后回到原界面 */
+    function syncHash(){
+      const h=new URLSearchParams();
+      h.set('agent',agent);h.set('view',curView);if(sid)h.set('sid',sid);
+      history.replaceState(null,'','#'+h.toString());
+    }
     const esc=t=>{const d=document.createElement('div');d.textContent=t;return d.innerHTML};
     const hhmm=ts=>new Date(ts).toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'});
 
@@ -253,7 +260,7 @@
     function switchAgent(){
       agent=document.getElementById('agentSel').value;sid=null;closeEvents();
       document.getElementById('messages').innerHTML='<div class="empty">选择或创建一个会话</div>';
-      updateThinkSel();
+      updateThinkSel();syncHash();
       loadSessions();
     }
 
@@ -262,7 +269,8 @@
       const r=await fetch(`${API}/api/sessions?agent=${encodeURIComponent(agent)}`);
       const{sessions}=await r.json();
       const sorted=[...sessions].sort((a,b)=>(b.pinned?1:0)-(a.pinned?1:0));
-      if(!sid && sorted.length>0){ sid=sorted[0].id; openEvents(sid); await loadMessages(); }
+      if(sid&&!sorted.some(s=>s.id===sid)){sid=null;closeEvents();} // 失效 sid（如 hash 恢复但会话已删）
+      if(!sid && sorted.length>0){ sid=sorted[0].id; openEvents(sid); await loadMessages(); syncHash(); }
       document.getElementById('sessionList').innerHTML=sorted.map(s=>`
         <div class="session-item ${s.id===sid?'active':''}" onclick="selectSession('${s.id}')">
           <div class="s-main">
@@ -276,15 +284,15 @@
     }
     async function newSession(){
       const r=await fetch(`${API}/api/sessions`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({agentId:agent})});
-      const{session}=await r.json();sid=session.id;
+      const{session}=await r.json();sid=session.id;syncHash();
       document.getElementById('messages').innerHTML='';openEvents(sid);await loadSessions();
     }
-    async function selectSession(id){sid=id;openEvents(id);await loadSessions();await loadMessages();}
+    async function selectSession(id){sid=id;openEvents(id);syncHash();await loadSessions();await loadMessages();}
     async function delSession(id){
       if(!confirm('删除该会话及其全部消息？'))return;
       const j=await (await fetch(`${API}/api/sessions/${id}`,{method:'DELETE'})).json();
       if(j.error){alert('❌ '+j.error);return;}
-      if(id===sid){sid=null;document.getElementById('messages').innerHTML='<div class="empty">选择或创建一个会话</div>';}
+      if(id===sid){sid=null;syncHash();document.getElementById('messages').innerHTML='<div class="empty">选择或创建一个会话</div>';}
       await loadSessions();
     }
     async function renameSession(id){
@@ -527,6 +535,7 @@
 
     /* ── 拓扑视图 ── */
     function showView(v){
+      curView=v;syncHash();
       const map={chat:'chatView',topo:'topoView',settings:'settingsView'  ,usage:'usageView'};
       for(const k in map)document.getElementById(map[k]).hidden=v!==k;
       for(const t of ['Chat','Topo','Settings','Usage'])document.getElementById('tab'+t).classList.toggle('active',v===t.toLowerCase());
@@ -746,7 +755,14 @@
     }
 
     (async function init(){
+      // 从 URL hash 恢复界面（agent / 会话 / 视图）
+      const hp=new URLSearchParams(location.hash.slice(1));
+      if(hp.get('agent'))agent=hp.get('agent');
+      if(hp.get('sid'))sid=hp.get('sid');
+      const v=hp.get('view');if(v&&v!=='chat')curView=v;
       await loadAgents();await loadModels();await loadSessions();
+      if(sid){openEvents(sid);await loadMessages();}
+      if(curView!=='chat')showView(curView);
     })();
   </script>
 </body>
