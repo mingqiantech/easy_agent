@@ -99,6 +99,9 @@
     .md li{margin:2px 0}
     .md code{font-family:monospace;font-size:12.5px;background:rgba(91,122,140,.14);color:#33505e;border:1px solid rgba(91,122,140,.25);border-radius:5px;padding:1px 6px;white-space:normal;word-break:break-all}
     .md blockquote{margin:6px 0;padding:4px 12px;border-left:3px solid var(--accent2);color:var(--fg);background:var(--hover);border-radius:0 8px 8px 0}
+    .md pre{margin:8px 0;padding:10px 12px;background:#2f3640;color:#d8dee9;border-radius:10px;overflow-x:auto;font-size:12.5px;line-height:1.5;position:relative}
+    .md pre code{background:none;border:none;color:inherit;padding:0;font-size:inherit;word-break:normal}
+    .md pre[data-lang]::before{content:attr(data-lang);position:absolute;top:4px;right:10px;font-size:10px;color:#8b95a5;letter-spacing:.5px}
     .md ol{margin:6px 0;padding-left:22px}
     .md ol li{margin:2px 0}
     .md table{border-collapse:collapse;margin:8px 0;font-size:13px;display:block;overflow-x:auto;max-width:100%}
@@ -349,6 +352,17 @@
       const closeLists=()=>{if(inUl){out+='</ul>';inUl=false;}if(inOl){out+='</ol>';inOl=false;}};
       while(i<lines.length){
         const ln=lines[i];
+        // 围栏代码块 ```lang ... ```：原文整块保留，不转 markdown
+        const fence=/^```\s*([A-Za-z0-9_+-]*)\s*$/.exec(ln.trim());
+        if(fence){
+          closeLists();
+          const lang=fence[1]||'';const buf=[];
+          i++;
+          while(i<lines.length&&!/^```\s*$/.test(lines[i].trim())){buf.push(lines[i]);i++;}
+          i++; // 跳过收尾 ```
+          out+=`<pre${lang?` data-lang="${esc(lang)}"`:''}><code>${esc(buf.join('\n'))}</code></pre>`;
+          continue;
+        }
         // 表格：当前行含 | 且下一行是分隔行
         if(ln.trim().startsWith('|')&&i+1<lines.length&&/^\|[\s:|-]+\|?\s*$/.test(lines[i+1].trim())){
           closeLists();
@@ -374,7 +388,7 @@
         closeLists();
         // 普通段落：保留原始换行（<br>），命令/路径类内容合并成一行会彻底没法读
         let para=[t];i++;
-        while(i<lines.length&&lines[i].trim()!==''&&!/^[-•*#|>]/.test(lines[i].trim())&&!/^\d+[.、]\s/.test(lines[i].trim())&&!/^-{3,}$/.test(lines[i].trim())){para.push(lines[i].trim());i++;}
+        while(i<lines.length&&lines[i].trim()!==''&&!/^[-•*#|>`]/.test(lines[i].trim())&&!/^\d+[.、]\s/.test(lines[i].trim())&&!/^-{3,}$/.test(lines[i].trim())){para.push(lines[i].trim());i++;}
         out+=`<p>${para.map(p=>mdInline(p)).join('<br>')}</p>`;
       }
       closeLists();
