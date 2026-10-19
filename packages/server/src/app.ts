@@ -283,7 +283,8 @@ export function createApp(deps: ServerDeps): Hono {
   });
 
   app.get("/api/sessions/:id/messages", (c) => {
-    return c.json({ messages: deps.sessions.getMessages(c.req.param("id")) });
+    // 全量历史（含压缩归档）；LLM 上下文仍走 getMessages（仅活跃窗口）
+    return c.json({ messages: deps.sessions.getFullMessages(c.req.param("id")) });
   });
 
   app.post("/api/sessions/:id/messages", async (c) => {

@@ -50,6 +50,20 @@ function initializeSchema(db: Database): void {
     CREATE INDEX IF NOT EXISTS idx_messages_session
       ON messages(session_id, created_at ASC);
 
+    -- 消息归档表（上下文压缩时旧消息移入这里，LLM 上下文不含，UI 全量展示）
+    CREATE TABLE IF NOT EXISTS messages_archive (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      role TEXT NOT NULL,
+      content TEXT NOT NULL,
+      metadata TEXT DEFAULT '{}',
+      created_at INTEGER NOT NULL,
+      archived_at INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_messages_archive_session
+      ON messages_archive(session_id, created_at ASC);
+
     -- 短期记忆表（Dreaming 晋升来源）
     CREATE TABLE IF NOT EXISTS short_term_memory (
       id TEXT PRIMARY KEY,

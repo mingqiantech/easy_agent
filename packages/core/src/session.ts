@@ -227,9 +227,31 @@ export class SessionManager {
     }));
   }
 
+  /** 全量历史（含压缩归档消息），供 UI 展示；LLM 上下文仍用 getMessages */
+  getFullMessages(sessionId: string): Message[] {
+    const db = getDatabase();
+    const rows = db
+      .prepare(
+        `SELECT * FROM (
+           SELECT id, role, content, created_at, 0 AS archived FROM messages WHERE session_id = ?
+           UNION ALL
+           SELECT id, role, content, created_at, 1 AS archived FROM messages_archive WHERE session_id = ?
+         ) ORDER BY created_at ASC`,
+      )
+      .all(sessionId, sessionId) as any[];
+    return rows.map((row) => ({
+      role: row.role,
+      content: row.content,
+      id: row.id,
+      createdAt: row.created_at,
+      archived: !!row.archived,
+    }));
+  }
+
   /**
    * Week5 Step 2：长对话自动压缩。
    * 超过阈值时用 LLM 将旧消息摘要为一条系统消息，保留最近消息。
+   * 被摘要折叠的旧消息不再删除，而是移入 messages_archive（UI 仍可见）。
    */
   async compactIfNeeded(sessionId: string): Promise<boolean> {
     const messages = this.getMessages(sessionId);
@@ -239,22 +261,60 @@ export class SessionManager {
     if (!session) return false;
 
     console.log("📦 Compacting history...");
+    const db = getDatabase();
     const result = await compactHistory(this.llm, session.model, messages);
 
-    const db = getDatabase();
-    db.prepare(
-      "DELETE FROM messages WHERE session_id = ? AND role != 'system'",
-    ).run(sessionId);
-
-    const summary = result.compacted.find(
-      (m) => m.role === "system" && m.content.includes("[对话摘要]"),
+    // 保留段（未折叠的最近消息，按原 id 识别）原地不动；被折叠的旧消息归档
+    const keepIds = new Set(
+      result.compacted
+        .filter((m) => m.role !== "system")
+        .map((m: any) => m.id)
+        .filter(Boolean),
     );
-    if (summary) this.addMessage(sessionId, summary);
-    result.compacted
-      .filter((m) => m.role !== "system" && m !== summary)
-      .forEach((m) => this.addMessage(sessionId, m));
+    const toArchive = (messages as any[]).filter(
+      (m) => m.role !== "system" && m.id && !keepIds.has(m.id),
+    );
+    const summary = result.compacted.findLast(
+      (m) => m.role === "system" && m.content.includes("[对话摘要]"),
+    ); // findLast：取本次新生成的摘要（systemMsgs 在前，可能含历史摘要）
+    const ts = now();
+    const keptTimestamps = [...keepIds].length
+      ? (messages as any[])
+          .filter((m) => m.id && keepIds.has(m.id))
+          .map((m) => m.createdAt ?? ts)
+      : [];
+    // 摘要插在保留段之前，保证 LLM 上下文顺序：…旧系统消息 → 摘要 → 最近消息
+    const summaryTs = keptTimestamps.length
+      ? Math.max(0, Math.min(...keptTimestamps) - 1)
+      : ts;
 
-    console.log(`   Compacted ${result.removed} messages into summary`);
+    db.transaction(() => {
+      if (toArchive.length) {
+        const ins = db.prepare(
+          `INSERT OR REPLACE INTO messages_archive
+           (id, session_id, role, content, metadata, created_at, archived_at)
+           VALUES (?, ?, ?, ?, '{}', ?, ?)`,
+        );
+        const del = db.prepare("DELETE FROM messages WHERE id = ?");
+        for (const m of toArchive) {
+          ins.run(m.id, sessionId, m.role, m.content, m.createdAt ?? ts, ts);
+          del.run(m.id);
+        }
+      }
+      if (summary) {
+        const exists = (this.getMessages(sessionId) as any[]).some(
+          (m) => m.role === "system" && m.content === summary.content,
+        );
+        if (!exists) {
+          db.prepare(
+            `INSERT INTO messages (id, session_id, role, content, created_at)
+             VALUES (?, ?, ?, ?, ?)`,
+          ).run(generateId(), sessionId, summary.role, summary.content, summaryTs);
+        }
+      }
+    })();
+
+    console.log(`   Compacted ${toArchive.length} messages into summary`);
     return true;
   }
 
