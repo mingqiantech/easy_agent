@@ -248,6 +248,42 @@ export class SessionManager {
     }));
   }
 
+  /** 服务启动时扫描被中断的轮次，注入续跑消息到 pending_queue；返回恢复的会话数 */
+  recoverInterruptedTurns(maxResume = 2): number {
+    const db = getDatabase();
+    const rows = db
+      .prepare("SELECT * FROM active_turns ORDER BY last_step_at ASC")
+      .all() as any[];
+    let recovered = 0;
+    for (const row of rows) {
+      const sess = this.get(row.session_id);
+      if (!sess) {
+        db.prepare("DELETE FROM active_turns WHERE session_id = ?").run(row.session_id);
+        continue;
+      }
+      if (this.isBusy(row.session_id)) continue;
+      if (row.resume_count >= maxResume) {
+        db.prepare("DELETE FROM active_turns WHERE session_id = ?").run(row.session_id);
+        this.addMessage(sess.id, {
+          role: "assistant",
+          content: `⚠️ 检测到之前的任务多次中途中断（已尝试 ${row.resume_count} 次），暂停自动恢复。发送任意消息可继续。`,
+        });
+        continue;
+      }
+      // 保留台账行并递增计数（若续跑前再次崩溃，下一轮重启能看到次数）；run() 成功后 finally 统一步删除
+      db.prepare(
+        "UPDATE active_turns SET resume_count = resume_count + 1 WHERE session_id = ?",
+      ).run(row.session_id);
+      this.addMessage(sess.id, {
+        role: "assistant",
+        content: `♻️ 检测到服务重启打断了运行中的任务（已完成 ${row.steps_done} 步），正在自动续跑（第 ${row.resume_count + 1} 次尝试）...`,
+      });
+      this.enqueuePending(sess.id, "【系统恢复】上一轮任务因服务重启被中断。请根据对话中已有的进度继续完成之前的任务，不要重复已完成的步骤；先简要说明在做什么再继续。若任务实际已完成，确认后收尾即可。");
+      recovered++;
+    }
+    return recovered;
+  }
+
   /**
    * Week5 Step 2：长对话自动压缩。
    * 超过阈值时用 LLM 将旧消息摘要为一条系统消息，保留最近消息。
@@ -389,6 +425,13 @@ export class SessionManager {
     const workDir = options?.workDir ?? process.cwd();
 
     this.running.add(sessionId);
+    // 轮次台账：崩溃时 finally 不执行，残留行供重启后恢复
+    db.prepare(
+      `INSERT INTO active_turns (session_id, started_at, last_step_at, steps_done, resume_count)
+       VALUES (?, ?, ?, 0, COALESCE((SELECT resume_count FROM active_turns WHERE session_id = ?), 0))
+       ON CONFLICT(session_id) DO UPDATE SET started_at = excluded.started_at,
+         last_step_at = excluded.last_step_at, steps_done = 0`,
+    ).run(sessionId, now(), now(), sessionId);
     const ctrl = new AbortController();
     this.controllers.set(sessionId, ctrl);
     let fullResponse = "";
@@ -414,6 +457,9 @@ export class SessionManager {
         let savedAssistant = false;
 
         for (let step = 0; step < 20; step++) {
+          db.prepare(
+            "UPDATE active_turns SET last_step_at = ?, steps_done = ? WHERE session_id = ?",
+          ).run(now(), step, sessionId);
           if (ctrl.signal.aborted) {
             turnAborted = true;
             break;
@@ -528,6 +574,7 @@ export class SessionManager {
       }
       return fullResponse;
     } finally {
+      db.prepare("DELETE FROM active_turns WHERE session_id = ?").run(sessionId);
       this.running.delete(sessionId);
       this.queues.delete(sessionId);
       this.controllers.delete(sessionId);

@@ -184,6 +184,9 @@ async function main() {
 
   // 会话持久化恢复：重启/崩溃时未消费的排队消息自动续跑（不开新会话）
   setTimeout(() => {
+    // 先扫描被中断的轮次（active_turns 残留行），注入续跑消息入队
+    const n = sessions.recoverInterruptedTurns();
+    if (n > 0) console.log(`♻️ 发现 ${n} 个被重启中断的任务，已入队续跑`);
     const sids = db
       .prepare("SELECT DISTINCT session_id FROM pending_queue")
       .all() as any[];

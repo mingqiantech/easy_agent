@@ -64,6 +64,16 @@ function initializeSchema(db: Database): void {
     CREATE INDEX IF NOT EXISTS idx_messages_archive_session
       ON messages_archive(session_id, created_at ASC);
 
+    -- 运行中轮次台账：轮开始写入、每步 checkpoint、正常结束删除；
+    -- 进程崩溃/重启时 finally 不执行 → 残留行即“被中断任务”，启动时扫描续跑
+    CREATE TABLE IF NOT EXISTS active_turns (
+      session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+      started_at INTEGER NOT NULL,
+      last_step_at INTEGER NOT NULL,
+      steps_done INTEGER NOT NULL DEFAULT 0,
+      resume_count INTEGER NOT NULL DEFAULT 0
+    );
+
     -- 短期记忆表（Dreaming 晋升来源）
     CREATE TABLE IF NOT EXISTS short_term_memory (
       id TEXT PRIMARY KEY,
