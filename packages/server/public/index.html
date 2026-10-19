@@ -296,6 +296,8 @@
       }
       if(m.role==='assistant'&&text.startsWith('【摘要】'))
         return `<div class="message summ"><div class="avatar">📝</div><div><div class="bubble"><b>会话摘要</b>\n${esc(text.slice(4))}</div>${ts}</div></div>`;
+      // 纯工具轮（无文本）：只渲染工具 chip，不留空白气泡
+      if(m.role==='assistant'&&!text.trim()) return toolLine;
       const av=m.role==='user'?'🙂':'🤖';
       return `<div class="message ${m.role}"><div class="avatar">${av}</div><div><div class="bubble">${esc(text)}</div>${ts}</div></div>${toolLine}`;
     }
