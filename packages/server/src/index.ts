@@ -7,6 +7,7 @@ import { BasicMemory } from "@easy-agent/core/memory/basic";
 import { MemorySearcher } from "@easy-agent/memory/search";
 import { ShortTermMemory } from "@easy-agent/memory/short-term";
 import { createMemorySearchTool } from "@easy-agent/memory/tool";
+import { createWebsearchTool } from "@easy-agent/core/tool/builtins/websearch";
 import { SubAgentManager } from "@easy-agent/core/agent/sub-agent";
 import { createSubAgentTool } from "@easy-agent/core/agent/sub-agent-tool";
 import { createVisionTool } from "@easy-agent/core/tool/builtins/vision";
@@ -65,6 +66,11 @@ async function main() {
 
   // memory_search 注册进工具表，agent 对话可用
   tools.register(createMemorySearchTool(searcher));
+
+  // websearch：按配置选后端（Tavily/Brave/Bocha key，无 key 回退 Bing 抓取），覆盖内置默认实例
+  tools.register(
+    createWebsearchTool((config as any).websearch ?? {}),
+  );
 
   // Week5 Step 3：子 Agent 工具
   const subAgents = new SubAgentManager(

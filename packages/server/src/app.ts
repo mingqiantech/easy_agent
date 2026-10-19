@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { resolveRef } from "@easy-agent/config/models";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import type { LLMClient } from "@easy-agent/llm/client";
@@ -123,9 +124,11 @@ export function createApp(deps: ServerDeps): Hono {
     const agent = deps.agents[body.agentId ?? "default"] ?? deps.agents["default"];
     if (!agent) return c.json({ error: "no agents configured" }, 500);
     const systemPrompt = await agent.memory.buildSystemPrompt();
+    const rawModel = body.model ?? agent.model;
     const session = deps.sessions.create({
       agentId: agent.name,
-      model: body.model ?? agent.model,
+      // alias（如 "local"/"flash"）解析为 canonical provider/model ref
+      model: rawModel ? resolveRef(deps.config, rawModel) : undefined,
       systemPrompt,
     });
     return c.json({ session }, 201);

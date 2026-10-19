@@ -43,8 +43,17 @@ export const ConfigSchema = z.object({
   /** 主模型选择（优先于 defaultModel）；ref 或 alias，支持 fallbacks 链 */
   model: ModelSelectionSchema.optional(),
   providers: z
-    .record(z.object({ apiKey: z.string(), baseUrl: z.string().optional(), api: z.string().optional() }))
+    .record(z.object({ apiKey: z.string().optional(), baseUrl: z.string().optional(), api: z.string().optional() }))
     .default({}),
+  /** 网页搜索：填了哪个 key 用哪个 API（auto 优先级 tavily>brave>bocha），都没填回退 Bing 抓取 */
+  websearch: z
+    .object({
+      provider: z.enum(["auto", "tavily", "brave", "bocha", "bing"]).default("auto"),
+      tavilyApiKey: z.string().optional(),
+      braveApiKey: z.string().optional(),
+      bochaApiKey: z.string().optional(),
+    })
+    .default({ provider: "auto" }),
   stateDir: z.string().default(""),
   workspaceDir: z.string().default("."),
   // Week 6: 渠道配置（可选）

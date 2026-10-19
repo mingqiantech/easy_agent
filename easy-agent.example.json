@@ -39,5 +39,16 @@
   },
 
   "visionModel": "flash",
-  "imageGenModel": "openai/dall-e-3"
+  "imageGenModel": "openai/dall-e-3",
+
+  // ── 网页搜索后端（可选）──
+  // provider: auto | tavily | brave | bocha | bing
+  //   auto = 按 tavily > brave > bocha 顺序取第一个已填 key 的 API；都没填则用 Bing 抓取（免密钥）
+  //   指定 provider 但该 key 缺失/API 失败时，也会自动回退 Bing 抓取
+  "websearch": {
+    "provider": "auto",
+    "tavilyApiKey": "${TAVILY_API_KEY}",
+    "braveApiKey": "${BRAVE_API_KEY}",
+    "bochaApiKey": "${BOCHA_API_KEY}"
+  }
 }

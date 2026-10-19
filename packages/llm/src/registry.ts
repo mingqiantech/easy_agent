@@ -5,7 +5,7 @@ import { OllamaProvider } from "./providers/ollama.js";
 import { OpenRouterProvider } from "./providers/openrouter.js";
 
 export interface ProviderConfig {
-  apiKey: string;
+  apiKey?: string;
   baseUrl?: string;
   /** 工厂类型名（默认用 provider 自身名）；支持 "qwencloud-token-plan": {api:"openai"} 自定义别名 */
   api?: string;
@@ -13,10 +13,11 @@ export interface ProviderConfig {
 type ProviderConstructor = (config: ProviderConfig) => LLMProvider;
 
 const factories: Record<string, ProviderConstructor> = {
-  openai: (config) => new OpenAIProvider(config),
-  anthropic: (config) => new AnthropicProvider(config),  google: (config) => new GoogleProvider(config),
+  openai: (config) => new OpenAIProvider({ ...config, apiKey: config.apiKey ?? "" }),
+  anthropic: (config) => new AnthropicProvider({ ...config, apiKey: config.apiKey ?? "" }),
+  google: (config) => new GoogleProvider({ ...config, apiKey: config.apiKey ?? "" }),
   ollama: (config) => new OllamaProvider({ baseUrl: config.baseUrl }),
-  openrouter: (config) => new OpenRouterProvider(config),
+  openrouter: (config) => new OpenRouterProvider({ ...config, apiKey: config.apiKey ?? "" }),
 };
 
 const instances = new Map<string, LLMProvider>();
@@ -28,7 +29,7 @@ export function registerProvider(
 }
 
 export function getProvider(name: string, config: ProviderConfig): LLMProvider {
-  const cacheKey = `${name}:${config.apiKey.slice(0, 8)}`;
+  const cacheKey = `${name}:${config.apiKey?.slice(0, 8) ?? "nokey"}`;
   if (instances.has(cacheKey)) {
     return instances.get(cacheKey)!;
   }
