@@ -89,6 +89,13 @@
     .hint{font-size:12px;color:var(--muted);margin-top:10px;line-height:1.7}
     .tool-chip{display:inline-block;font-size:11px;padding:2px 8px;margin:3px 6px 0 0;border-radius:999px;background:var(--accent-soft);color:var(--accent)}
     .live-text{white-space:pre-wrap;word-break:break-word}
+    /* 长文本折叠：超过高度自动收起来，渐变遮罩 + 展开全部 */
+    .bubble.long{cursor:default}
+    .clipped{position:relative;max-height:340px;overflow:hidden}
+    .clipped::after{content:'';position:absolute;left:0;right:0;bottom:0;height:64px;background:linear-gradient(to bottom,transparent,var(--assistant))}
+    .message.toolchip .clipped::after{background:linear-gradient(to bottom,transparent,var(--tool))}
+    .expand-btn{display:inline-block;margin-top:6px;font-size:12px;color:var(--accent);cursor:pointer;user-select:none;border:1px solid var(--border);border-radius:8px;padding:2px 10px;background:var(--card)}
+    .expand-btn:hover{background:var(--hover)}
     .mem-ta{width:100%;height:200px;background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:10px;font:12px/1.6 ui-monospace,monospace;color:var(--fg);resize:vertical;margin-top:8px}
     .metrics{display:flex;gap:12px;flex-wrap:wrap;padding:16px 20px 0}
     .metric{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:10px 18px;box-shadow:var(--shadow);min-width:110px}
@@ -132,7 +139,8 @@
     <div class="view" id="chatView">
       <div class="messages" id="messages"></div>
       <div class="input-area">
-        <textarea id="input" rows="1" placeholder="输入消息…（Enter 发送 / Shift+Enter 换行）"
+        <textarea id="input" rows="1" placeholder="输入消息…（Enter 发送 / Shift+Enter 换行）" style="height:46px;overflow-y:auto"
+          oninput="this.style.height='46px';this.style.height=Math.min(this.scrollHeight,180)+'px'"
           onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();send()}"></textarea>
         <button class="send-btn" id="sendBtn" onclick="send()">发送</button>
       </div>
@@ -284,7 +292,7 @@
     function bubbleHtml(m){
       if(m.role==='system')return '';
       const ts=m.createdAt?`<div class="ts">${hhmm(m.createdAt)}</div>`:'';
-      if(m.role==='tool')return `<div class="message toolchip"><div class="avatar">⚙</div><div><div class="bubble">${esc(clip(m.content))}</div>${ts}</div></div>`;
+      if(m.role==='tool')return `<div class="message toolchip"><div class="avatar">⚙</div><div><div class="bubble"><div class="clippable">${esc(m.content)}</div></div>${ts}</div></div>`;
       let text=m.content||'';let toolLine='';
       if(m.role==='assistant'){
         try{const p=JSON.parse(text);
@@ -299,9 +307,23 @@
       // 纯工具轮（无文本）：只渲染工具 chip，不留空白气泡
       if(m.role==='assistant'&&!text.trim()) return toolLine;
       const av=m.role==='user'?'🙂':'🤖';
-      return `<div class="message ${m.role}"><div class="avatar">${av}</div><div><div class="bubble">${esc(text)}</div>${ts}</div></div>${toolLine}`;
+      const inner=m.role==='assistant'?`<div class="clippable">${esc(text)}</div>`:esc(text);
+      return `<div class="message ${m.role}"><div class="avatar">${av}</div><div><div class="bubble">${inner}</div>${ts}</div></div>${toolLine}`;
     }
     const clip=s=>{s=String(s);return s.length>300?s.slice(0,300)+'…':s};
+    /* 长文本溢出检测：内容高过 ~420px 就折叠 + 渐变遮罩 + 展开/收起按钮 */
+    function applyCollapse(){
+      document.querySelectorAll('#messages .clippable').forEach(el=>{
+        if(el.dataset.clChecked)return;
+        el.dataset.clChecked='1';
+        if(el.scrollHeight<=420)return;
+        el.classList.add('clipped');
+        const btn=document.createElement('span');
+        btn.className='expand-btn';btn.textContent='展开全部 ▾';
+        btn.onclick=()=>{const on=el.classList.toggle('clipped');btn.textContent=on?'展开全部 ▾':'收起 ▴';};
+        el.parentNode.insertBefore(btn,el.nextSibling);
+      });
+    }
 
     async function loadMessages(){
       if(!sid)return;
@@ -309,6 +331,7 @@
       const c=document.getElementById('messages');
       const rows=messages.filter(m=>m.role!=='system').map(bubbleHtml).join('');
       c.innerHTML=rows||'<div class="empty">开始对话吧</div>';
+      applyCollapse();
       c.scrollTop=c.scrollHeight;
     }
 
@@ -318,7 +341,7 @@
       const input=document.getElementById('input'),text=input.value.trim();
       if(!text)return;
       if(!sid)await newSession();
-      input.value='';
+      input.value='';input.style.height='46px';
       setSendMode(true);
       const c=document.getElementById('messages');
       if(c.querySelector('.empty'))c.innerHTML='';
