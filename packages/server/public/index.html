@@ -97,11 +97,17 @@
     .md hr{border:none;border-top:1px solid var(--border);margin:10px 0}
     .md ul{margin:6px 0;padding-left:20px}
     .md li{margin:2px 0}
-    .md code{font-family:monospace;font-size:12.5px;background:rgba(91,122,140,.14);color:#33505e;border:1px solid rgba(91,122,140,.25);border-radius:5px;padding:1px 6px;white-space:normal;word-break:break-all}
+    .md code{font-family:monospace;font-size:12.5px;background:rgba(91,122,140,.13);color:#33505e;border:none;border-radius:5px;padding:2px 6px;white-space:normal}
+    .md p code+.md p code{margin-left:4px}
     .md blockquote{margin:6px 0;padding:4px 12px;border-left:3px solid var(--accent2);color:var(--fg);background:var(--hover);border-radius:0 8px 8px 0}
     .md pre{margin:8px 0;padding:10px 12px;background:#2f3640;color:#d8dee9;border-radius:10px;overflow-x:auto;font-size:12.5px;line-height:1.5;position:relative}
     .md pre code{background:none;border:none;color:inherit;padding:0;font-size:inherit;word-break:normal}
-    .md pre[data-lang]::before{content:attr(data-lang);position:absolute;top:4px;right:10px;font-size:10px;color:#8b95a5;letter-spacing:.5px}
+    .md pre[data-lang]::before{content:attr(data-lang);position:absolute;top:5px;left:12px;font-size:10px;color:#8b95a5;letter-spacing:.5px}
+    .md pre{padding-top:24px}
+    .copy-btn{position:absolute;top:4px;right:6px;font-size:11px;color:#aab4c2;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.15);border-radius:6px;padding:2px 9px;cursor:pointer;user-select:none}
+    .copy-btn:hover{background:rgba(255,255,255,.16);color:#fff}
+    .copy-btn.copied{color:#9fd3a8;border-color:rgba(159,211,168,.4)}
+    .md .circ{margin:6px 0;font-size:13px;color:#4a5462;background:var(--accent-soft);border-radius:8px;padding:5px 10px}
     .md ol{margin:6px 0;padding-left:22px}
     .md ol li{margin:2px 0}
     .md table{border-collapse:collapse;margin:8px 0;font-size:13px;display:block;overflow-x:auto;max-width:100%}
@@ -360,7 +366,7 @@
           i++;
           while(i<lines.length&&!/^```\s*$/.test(lines[i].trim())){buf.push(lines[i]);i++;}
           i++; // 跳过收尾 ```
-          out+=`<pre${lang?` data-lang="${esc(lang)}"`:''}><code>${esc(buf.join('\n'))}</code></pre>`;
+          out+=`<pre${lang?` data-lang="${esc(lang)}"`:''}><span class="copy-btn" role="button">复制</span><code>${esc(buf.join('\n'))}</code></pre>`;
           continue;
         }
         // 表格：当前行含 | 且下一行是分隔行
@@ -389,11 +395,29 @@
         // 普通段落：保留原始换行（<br>），命令/路径类内容合并成一行会彻底没法读
         let para=[t];i++;
         while(i<lines.length&&lines[i].trim()!==''&&!/^[-•*#|>`]/.test(lines[i].trim())&&!/^\d+[.、]\s/.test(lines[i].trim())&&!/^-{3,}$/.test(lines[i].trim())){para.push(lines[i].trim());i++;}
-        out+=`<p>${para.map(p=>mdInline(p)).join('<br>')}</p>`;
+        const joined=para.map(p=>mdInline(p)).join('<br>');
+        // ①② 圈号开头的“小标题行”：加背景条增强存在感（之前灰淡看不清）
+        out=/^[\u2460-\u2469]/.test(para[0])?`<div class="circ">${joined}</div>`:`<p>${joined}</p>`;
       }
       closeLists();
       return out;
     }
+    /* 代码块复制按钮（事件委托） */
+    document.getElementById('messages').addEventListener('click',(ev)=>{
+      const btn=ev.target.closest('.copy-btn');if(!btn)return;
+      const pre=btn.closest('pre');const code=pre&&pre.querySelector('code');if(!code)return;
+      const text=code.innerText;
+      (navigator.clipboard?navigator.clipboard.writeText(text):Promise.reject()).then(()=>{
+        btn.textContent='已复制 ✓';btn.classList.add('copied');
+      }).catch(()=>{
+        // 非 https/旧引擎兜底：隐藏 textarea + execCommand
+        const ta=document.createElement('textarea');ta.value=text;ta.style.position='fixed';ta.style.opacity='0';
+        document.body.appendChild(ta);ta.select();
+        try{document.execCommand('copy');btn.textContent='已复制 ✓';btn.classList.add('copied');}catch(e){btn.textContent='复制失败';}
+        ta.remove();
+      });
+      setTimeout(()=>{btn.textContent='复制';btn.classList.remove('copied');},1600);
+    });
     /* 连续的 ⚙ 工具结果分组成可折叠块（默认收起，点头展开） */
     function groupToolMessages(){
       const c=document.getElementById('messages');
