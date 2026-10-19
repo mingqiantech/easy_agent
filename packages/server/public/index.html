@@ -89,6 +89,19 @@
     .hint{font-size:12px;color:var(--muted);margin-top:10px;line-height:1.7}
     .tool-chip{display:inline-block;font-size:11px;padding:2px 8px;margin:3px 6px 0 0;border-radius:999px;background:var(--accent-soft);color:var(--accent)}
     .live-text{white-space:pre-wrap;word-break:break-word}
+    /* Markdown 渲染样式 */
+    .md{white-space:normal}
+    .md h4,.md h5{margin:10px 0 6px;font-size:14px;color:var(--fg)}
+    .md h4:first-child,.md h5:first-child{margin-top:0}
+    .md p{margin:6px 0}
+    .md hr{border:none;border-top:1px solid var(--border);margin:10px 0}
+    .md ul{margin:6px 0;padding-left:20px}
+    .md li{margin:2px 0}
+    .md code{font-family:monospace;font-size:12px;background:var(--tool);border-radius:4px;padding:1px 5px}
+    .md table{border-collapse:collapse;margin:8px 0;font-size:13px;display:block;overflow-x:auto;max-width:100%}
+    .md th,.md td{border:1px solid var(--border);padding:5px 10px;text-align:left;white-space:nowrap}
+    .md th{background:var(--hover);font-weight:600}
+    .md tr:nth-child(even) td{background:rgba(91,122,140,.04)}
     /* 长文本折叠：超过高度自动收起来，渐变遮罩 + 展开全部 */
     .bubble.long{cursor:default}
     .clipped{position:relative;max-height:340px;overflow:hidden}
@@ -313,10 +326,52 @@
       // 纯工具轮（无文本）：只渲染工具 chip，不留空白气泡
       if(m.role==='assistant'&&!text.trim()) return toolLine;
       const av=m.role==='user'?'🙂':'🤖';
-      const inner=m.role==='assistant'?`<div class="clippable">${esc(text)}</div>`:esc(text);
+      const inner=m.role==='assistant'?`<div class="clippable md">${mdToHtml(text)}</div>`:esc(text);
       return `<div class="message ${m.role}"><div class="avatar">${av}</div><div><div class="bubble">${inner}</div>${ts}</div></div>${toolLine}`;
     }
     const clip=s=>{s=String(s);return s.length>300?s.slice(0,300)+'…':s};
+    /* 轻量 Markdown 渲染（无依赖）：标题/hr/列表/表格/加粗/行内码；全角｜归一为半角 */
+    function mdInline(s){
+      s=esc(s);
+      s=s.replace(/`([^`]+)`/g,'<code>$1</code>');
+      s=s.replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>');
+      return s;
+    }
+    function mdToHtml(src){
+      const lines=String(src).replace(/｜/g,'|').split('\n');
+      let out='',i=0,inList=false;
+      const closeList=()=>{if(inList){out+='</ul>';inList=false;}};
+      while(i<lines.length){
+        const ln=lines[i];
+        // 表格：当前行含 | 且下一行是分隔行
+        if(ln.trim().startsWith('|')&&i+1<lines.length&&/^\|[\s:|-]+\|?\s*$/.test(lines[i+1].trim())){
+          closeList();
+          const rows=[];
+          let j=i;
+          while(j<lines.length&&lines[j].trim().startsWith('|')){rows.push(lines[j].trim());j++;}
+          out+='<table>';
+          rows.forEach((r,ri)=>{
+            if(ri===1)return; // 分隔行
+            const cells=r.replace(/^\|/,'').replace(/\|\s*$/,'').split('|');
+            const tag=ri===0?'th':'td';
+            out+='<tr>'+cells.map(c=>`<${tag}>${mdInline(c.trim())}</${tag}>`).join('')+'</tr>';
+          });
+          out+='</table>';i=j;continue;
+        }
+        const t=ln.trim();
+        if(/^#{1,6}\s/.test(t)){closeList();const lv=Math.min(t.match(/^#+/)[0].length,4);out+=`<h${lv+3}>${mdInline(t.replace(/^#+\s*/,''))}</h${lv+3}>`;i++;continue;}
+        if(/^-{3,}$|\*{3,}$/.test(t)){closeList();out+='<hr>';i++;continue;}
+        if(/^[-•*]\s+/.test(t)){if(!inList){out+='<ul>';inList=true;}out+=`<li>${mdInline(t.replace(/^[-•*]\s+/,''))}</li>`;i++;continue;}
+        if(t===''){closeList();i++;continue;}
+        closeList();
+        // 普通段落：连续非空行合并，段内软换行用空格连接（避免表格外断行过碎）
+        let para=[t];i++;
+        while(i<lines.length&&lines[i].trim()!==''&&!/^[-•*#|]\s*/.test(lines[i].trim())&&!/^-{3,}$/.test(lines[i].trim())){para.push(lines[i].trim());i++;}
+        out+=`<p>${mdInline(para.join(' '))}</p>`;
+      }
+      closeList();
+      return out;
+    }
     /* 连续的 ⚙ 工具结果分组成可折叠块（默认收起，点头展开） */
     function groupToolMessages(){
       const c=document.getElementById('messages');
