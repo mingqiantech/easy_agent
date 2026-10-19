@@ -73,6 +73,11 @@ export function createApp(deps: ServerDeps): Hono {
   app.use("*", cors());
   app.use("*", logger());
 
+  // UI 单文件迭代快，no-cache 避免改动被浏览器强缓存吞掉（仍支持 ETag/304 协商缓存）
+  app.use("/static/*", async (c, next) => {
+    c.header("Cache-Control", "no-cache");
+    await next();
+  });
   app.use(
     "/static/*",
     serveStatic({
