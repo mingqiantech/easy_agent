@@ -57,9 +57,9 @@ export class NotificationManager {
   list(userId: string, unreadOnly = false, limit = 50): Notification[] {
     const sql = unreadOnly
       ? `SELECT * FROM notifications WHERE user_id = ? AND read = 0
-         ORDER BY created_at DESC LIMIT ?`
+         ORDER BY created_at DESC, rowid DESC LIMIT ?`
       : `SELECT * FROM notifications WHERE user_id = ?
-         ORDER BY created_at DESC LIMIT ?`;
+         ORDER BY created_at DESC, rowid DESC LIMIT ?`;
 
     return (getDatabase().prepare(sql).all(userId, limit) as any[]).map((r: any) => ({
       id: r.id,

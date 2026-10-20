@@ -95,11 +95,12 @@ describe("Week9: NotificationManager", () => {
 
   it("stores and lists notifications", async () => {
     await notifications.notify(userId, "PR Reviewed", "2 findings on #42", { level: "warning" });
+    await new Promise((r) => setTimeout(r, 3)); // 拉开 created_at，防同毫秒平局
     await notifications.notify(userId, "Backup done", "136KB", { level: "info" });
 
     const list = notifications.list(userId);
     expect(list.length).toBe(2);
-    expect(list[0].level).toBe("warning"); // 最新在前
+    expect(list[0].level).toBe("info"); // 最新在前：info 是后插入的
     expect(notifications.unreadCount(userId)).toBe(2);
   });
 
