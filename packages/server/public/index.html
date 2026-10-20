@@ -132,8 +132,7 @@
 .md pre .tok-key{color:#7fb4ea}
 /* 侧栏搜索：结果列表替换会话列表 */
 .search-in{width:100%;box-sizing:border-box;padding:7px 26px 7px 10px;border:1px solid var(--border);border-radius:9px;background:var(--bg);font-size:13px;color:var(--fg)}
-.search-box{position:relative;padding:8px 10px 4px;display:none}
-.search-box.on{display:block}
+.search-box{position:relative;padding:8px 10px 4px;border-bottom:1px solid var(--border)}
 .search-x{position:absolute;right:16px;top:14px;cursor:pointer;color:var(--muted);font-size:14px;line-height:1;padding:2px 4px}
 .search-x:hover{color:var(--fg)}
 .search-results{flex:1;overflow-y:auto;padding:6px 0 12px}
@@ -612,7 +611,6 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
 
     /* ── 全文搜索（侧栏内）：输入即搜历史消息，结果替换会话列表；点结果跳回原文闪烁定位 ── */
     function startSearch(){
-      document.getElementById('searchBox').classList.add('on');
       document.getElementById('sessionList').hidden=true;
       const box=document.getElementById('searchResults');box.hidden=false;
       if(!box.dataset.init){box.dataset.init='1';box.innerHTML='<div class="search-hint">输入关键词搜全部会话（含压缩归档），点结果直达原文。</div>';}
@@ -621,7 +619,7 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
       document.getElementById('searchResults').hidden=true;
       document.getElementById('sessionList').hidden=false;
       document.getElementById('searchInput').value='';
-      document.getElementById('searchBox').classList.remove('on');
+      document.getElementById('searchInput').blur();
     }
     function markTerm(t,q){
       const i=t.toLowerCase().indexOf(q.toLowerCase());
