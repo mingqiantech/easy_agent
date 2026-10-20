@@ -21,6 +21,21 @@ function getDefaultDbPath(): string {
     path.join(require("node:os").homedir(), ".easy-agent");
   return path.join(stateDir, "agent.db");
 }
+
+/**
+ * 独立数据库实例（不走单例）：供测试/多库场景使用。
+ * bun test 文件并发共享 getDatabase 单例，全局 DELETE 会互刷数据——用这个隔离。
+ */
+export function freshDatabase(dbPath: string): Database {
+  fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+  const db = new Database(dbPath);
+  db.exec("PRAGMA journal_mode = WAL");
+  db.exec("PRAGMA synchronous = NORMAL");
+  db.exec("PRAGMA foreign_keys = ON");
+  db.exec("PRAGMA busy_timeout = 5000");
+  initializeSchema(db);
+  return db;
+}
 function initializeSchema(db: Database): void {
   db.exec(`
     --会话表
@@ -200,6 +215,12 @@ function initializeSchema(db: Database): void {
     CREATE TABLE IF NOT EXISTS memory_vec (
       id INTEGER PRIMARY KEY REFERENCES memory_entries(id) ON DELETE CASCADE,
       embedding BLOB NOT NULL
+    );
+
+    -- 通用元数据（如 embedding 指纹，用于 provider/模型变更检测）
+    CREATE TABLE IF NOT EXISTS meta (
+      key TEXT PRIMARY KEY,
+      value TEXT
     );
 
     -- Week7: 用户表

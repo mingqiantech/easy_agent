@@ -116,9 +116,15 @@ export async function lightDreaming(
   return { processed: msgs.length, extracted };
 }
 
+/**
+ * REM：两道工序（对齐 OpenClaw light→REM 职责）
+ * 1) 晋升候选筛选（原逻辑）
+ * 2) 主题反思：LLM 跨条目归纳反复出现的主题；相关条目记强化信号（unique_queries/recall_days），
+ *    同一主题 7 天内重复出现 → 作为重要条目进晋升通道；首次只见 short-term 不写 MEMORY.md。
+ */
 export async function remDreaming(
   deps: DreamingDeps,
-): Promise<{ candidates: number }> {
+): Promise<{ candidates: number; themes: string[] }> {
   const now = Date.now();
   const entries = deps.shortTerm.getActive();
   const scored = entries.map((e) => ({ ...e, score: calcScore(e, now) }));
@@ -129,13 +135,88 @@ export async function remDreaming(
       e.uniqueQueries >= PROMOTION.minUniqueQueries,
   );
 
+  // ── 主题反思 ──
+  const themes: string[] = [];
+  if (entries.length >= 4) {
+    let history: Array<{ name: string; first: number; last: number; count: number }> = [];
+    try {
+      const row = deps.db
+        .prepare("SELECT state FROM dreaming_state WHERE phase='rem'")
+        .get() as any;
+      history = JSON.parse(row?.state ?? "{}")?.themes ?? [];
+    } catch {}
+
+    try {
+      const list = entries.slice(0, 60).map((e) => `- ${e.text}`).join("\n");
+      const out = await deps.llmGenerate(
+        `归纳以下记忆条目中反复出现的主题（最多 3 个）。\n输出每行格式：主题名|一句话结论\n只输出主题行，没有明显主题时只输出：无\n\n${list}`,
+      );
+      const today = new Date().toISOString().slice(0, 10);
+      for (const raw of out.split("\n")) {
+        const line = raw.trim().replace(/^[•\-*+\d.、\s]+/, "").trim();
+        if (!line || line === "无" || !line.includes("|")) continue;
+        const [nameRaw, conclusionRaw] = line.split("|", 2);
+        const name = (nameRaw ?? "").trim().replace(/^【|】$/g, "").slice(0, 24);
+        const conclusion = (conclusionRaw ?? "").trim().slice(0, 120);
+        if (!name || !conclusion) continue;
+        themes.push(name);
+
+        // 强化信号：提及该主题的活跃条目 unique_queries+1（晋升评分里的多样性因子）
+        const nt = new Set(tokenize(name));
+        const boost = deps.db.prepare(
+          `UPDATE short_term_memory SET
+             unique_queries = unique_queries + 1,
+             recall_days = CASE WHEN recall_days NOT LIKE ? THEN json_insert(recall_days,'$[#]',?) ELSE recall_days END
+           WHERE id = ?`,
+        );
+        for (const e of entries) {
+          const et = tokenize(e.text.toLowerCase());
+          const overlap = et.filter((t) => nt.has(t)).length;
+          if (overlap >= 2) boost.run(`%${today}%`, today, e.id);
+        }
+
+        // 重复主题（7 天内再现）→ 重要条目进晋升；首次 → 只存短期观察
+        const prior = history.find((h) => h.name === name && now - h.last < 7 * DAY_MS);
+        if (prior) {
+          prior.count++; prior.last = now;
+          deps.shortTerm.addImportant(`主题积累（第${prior.count}次）：${name} — ${conclusion}`, `rem:theme:${name}`);
+        } else {
+          history.push({ name, first: now, last: now, count: 1 });
+          deps.shortTerm.add(`主题：${name} — ${conclusion}`, `rem:theme:${name}`);
+        }
+      }
+    } catch {
+      // LLM 失败不影响候选统计
+    }
+    history = history.slice(-24); // 主题历史有界
+    deps.db
+      .prepare(
+        `INSERT OR REPLACE INTO dreaming_state (phase, last_run_at, state, updated_at) VALUES ('rem', ?, ?, ?)`,
+      )
+      .run(
+        now,
+        JSON.stringify({ candidateCount: candidates.length, themes: history }),
+        now,
+      );
+    return { candidates: candidates.length, themes };
+  }
+
   deps.db
     .prepare(
       `INSERT OR REPLACE INTO dreaming_state (phase, last_run_at, state, updated_at) VALUES ('rem', ?, ?, ?)`,
     )
     .run(now, JSON.stringify({ candidateCount: candidates.length }), now);
 
-  return { candidates: candidates.length };
+  return { candidates: candidates.length, themes };
+}
+
+/** 本地轻量切词（避免 memory→core 依赖方向问题）：拉丁词 + CJK 相邻二字 */
+function tokenize(s: string): string[] {
+  const out: string[] = [];
+  for (const w of s.split(/[^\p{L}\p{N}_-]+/u)) if (w.length > 1 && !/[\u4e00-\u9fff]/.test(w)) out.push(w);
+  for (const run of s.match(/[\u4e00-\u9fff]+/g) ?? [])
+    for (let i = 0; i + 1 < run.length; i++) out.push(run.slice(i, i + 2));
+  return out;
 }
 
 export async function deepDreaming(

@@ -95,10 +95,19 @@ async function main() {
   } else {
     embedding = new SimpleEmbeddingProvider();
   }
-  const memIndex = new IncrementalIndex(db, embedding);
+  const memIndex = new IncrementalIndex(
+    db,
+    embedding,
+    embCfg.provider === "ollama" || embCfg.provider === "openai" ? 1024 : 256,
+    embCfg.provider === "ollama"
+      ? `ollama:${embCfg.model ?? "nomic-embed-text"}`
+      : embCfg.provider === "openai"
+        ? `openai:${embCfg.model ?? "text-embedding-3-small"}`
+        : "simple",
+  );
   const hybrid =
     msCfg.hybrid?.enabled !== false
-      ? new HybridSearch(searcher, embedding, workspaceDir)
+      ? new HybridSearch(searcher, embedding, workspaceDir, memIndex.fts)
       : undefined;
 
   // 索引集与 MemorySearcher 的 corpus 对齐：工作区 md + memory/ + .dreams/session-corpus
@@ -134,7 +143,8 @@ async function main() {
       for (const f of targets) {
         if (!(await fs.stat(f).then(() => true, () => false))) continue;
         const src = f.includes(".dreams") ? "session" as const : "memory" as const;
-        chunks += await memIndex.indexFile(f, src);
+        const rel = path.relative(workspaceDir, f);
+        chunks += await memIndex.indexFile(f, src, rel);
         files++;
       }
     } finally {

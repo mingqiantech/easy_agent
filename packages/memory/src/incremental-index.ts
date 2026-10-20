@@ -1,16 +1,43 @@
 import { Database } from "bun:sqlite";
 import type { EmbeddingProvider } from "./embedding.js";
+import { FtsIndex } from "./fts.js";
 
 export class IncrementalIndex {
   private dim: number;
+  readonly fts: FtsIndex;
 
   constructor(
     private db: Database,
     private embedding: EmbeddingProvider,
     dim: number = 1536,
+    /** embedding 指纹（如 "ollama:bge-m3"）；变更时全量重建向量+FTS */
+    private providerTag: string = "simple",
   ) {
     this.dim = dim;
+    this.fts = new FtsIndex(db);
     this.initTable();
+    this.ensureFingerprint();
+  }
+
+  /**
+   * provider/模型切换检测：旧向量维度与新模型不符会全部作废（OpenClaw 同策略）。
+   * 指纹存 meta.embedding_fingerprint，不符 → 清空重建。
+   */
+  private ensureFingerprint(): void {
+    const cur = this.db
+      .prepare("SELECT value FROM meta WHERE key='embedding_fingerprint'")
+      .get() as any;
+    if (cur?.value === this.providerTag) return;
+    this.db.prepare("DELETE FROM memory_vec").run();
+    this.db.prepare("DELETE FROM memory_entries").run();
+    this.fts.clearAll();
+    this.db
+      .prepare(
+        "INSERT OR REPLACE INTO meta (key, value) VALUES ('embedding_fingerprint', ?)",
+      )
+      .run(this.providerTag);
+    if (cur?.value)
+      console.log(`🧠 embedding 指纹变更 ${cur.value} → ${this.providerTag}，索引已清空待重建`);
   }
 
   private initTable(): void {
@@ -32,26 +59,33 @@ export class IncrementalIndex {
   async indexFile(
     filePath: string,
     source: "memory" | "session" | "wiki",
+    /** FTS path 列存的展示路径（缺省用 filePath 本身） */
+    displayPath?: string,
   ): Promise<number> {
     const content = await Bun.file(filePath).text();
     const hash = await this.hash(content);
 
-    // 检查是否已索引且内容未变
+    // 检查已索引且内容未变
     const existing = this.db
       .prepare(
-        "SELECT id, content_hash FROM memory_entries WHERE file_path = ?",
+        "SELECT content_hash FROM memory_entries WHERE file_path = ? LIMIT 1",
       )
       .get(filePath) as any;
 
     if (existing?.content_hash === hash) return 0;
 
     if (existing) {
+      // 多块文件：清齐该文件所有 vec/fts 行（原单 id 删除会漏孤儿向量）
+      const ids = (this.db
+        .prepare("SELECT id FROM memory_entries WHERE file_path = ?")
+        .all(filePath) as any[]).map((r) => Number(r.id));
+      this.db
+        .prepare("DELETE FROM memory_vec WHERE id IN (SELECT id FROM memory_entries WHERE file_path = ?)")
+        .run(filePath);
       this.db
         .prepare("DELETE FROM memory_entries WHERE file_path = ?")
         .run(filePath);
-      try {
-        this.db.prepare("DELETE FROM memory_vec WHERE id = ?").run(existing.id);
-      } catch {}
+      this.fts.removeIds(ids);
     }
     // 分块
     const chunks = this.chunk(content, 500);
@@ -70,15 +104,17 @@ export class IncrementalIndex {
     );
 
     const insertAll = this.db.transaction(() => {
+      const ftsItems: Array<{ id: number; excerpt: string }> = [];
       for (let i = 0; i < chunks.length; i++) {
         const r = insertEntry.run(source, filePath, chunks[i], hash, now, now);
+        const id = Number(r.lastInsertRowid);
         try {
-          insertVec.run(
-            Number(r.lastInsertRowid),
-            Buffer.from(embeddings[i].buffer),
-          );
+          insertVec.run(id, Buffer.from(embeddings[i].buffer));
         } catch {}
+        ftsItems.push({ id, excerpt: chunks[i]! });
       }
+      // FTS BM25 通道（与向量同批块）
+      this.fts.indexChunks(displayPath ?? filePath, ftsItems);
     });
     insertAll();
 
@@ -116,6 +152,7 @@ export class IncrementalIndex {
     try {
       this.db.prepare("DELETE FROM memory_vec").run();
     } catch {}
+    this.fts.clearAll();
     return this.indexDirectory(dir, source);
   }
 

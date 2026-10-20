@@ -1,5 +1,7 @@
 import type { EmbeddingProvider } from "./embedding.js";
+import path from "node:path";
 import type { MemorySearcher, SearchHit } from "./search.js";
+import type { FtsIndex } from "./fts.js";
 
 export interface HybridHit {
   path: string;
@@ -31,6 +33,7 @@ export class HybridSearch {
     private embedding?: EmbeddingProvider,
     /** 命中路径归一化用（相对工作区），与文本通道一致 */
     private workDir?: string,
+    private fts?: FtsIndex,
   ) {}
 
   async search(
@@ -41,12 +44,36 @@ export class HybridSearch {
     const vw = options.vectorWeight ?? 0.7;
     const tw = options.textWeight ?? 0.3;
 
-    // 1. 全文通道
-    const textResult = await this.textSearcher.search(query, {
-      maxResults: limit * 3,
-      corpus: options.source === "session" ? "sessions" : "memory",
-    });
-    const textHits: SearchHit[] = textResult.hits ?? [];
+    // 1. 关键词通道：FTS5 BM25 优先（索引存在时），退回文件行扫描
+    const src = options.source === "session" ? "session" : "memory";
+    let textHits: SearchHit[] = [];
+    if (this.fts?.ok) {
+      textHits = this.fts
+        .search(query, { limit: limit * 3, source: src })
+        .map((h) => ({
+          path: h.path,
+          excerpt: h.excerpt,
+          score: h.score,
+          source: src as SearchHit["source"],
+        }));
+      // BM25 命中同样喂 Dreaming recall 统计（与文件扫描通道行为对齐）
+      if (textHits.length && this.textSearcher.onHit) {
+        for (const h of textHits.slice(0, limit)) {
+          try {
+            this.textSearcher.onHit(
+              this.workDir ? path.join(this.workDir, h.path) : h.path,
+            );
+          } catch {}
+        }
+      }
+    }
+    if (!textHits.length) {
+      const textResult = await this.textSearcher.search(query, {
+        maxResults: limit * 3,
+        corpus: options.source === "session" ? "sessions" : "memory",
+      });
+      textHits = textResult.hits ?? [];
+    }
 
     // 2. 向量通道（可选）
     let vectorHits: Array<{ key: string; score: number; excerpt: string; path: string }> = [];
@@ -55,7 +82,7 @@ export class HybridSearch {
         vectorHits = await this.vectorSearch(
           query,
           limit * 3,
-          options.source === "session" ? "session" : "memory",
+          src,
         );
       } catch {
         vectorHits = [];
@@ -75,7 +102,7 @@ export class HybridSearch {
       byKey.set(keyOf(rel, h.excerpt), {
         path: rel,
         excerpt: h.excerpt,
-        source: options.source === "session" ? "session" : "memory",
+        source: src,
         vectorScore: h.score,
         textScore: 0,
         combinedScore: 0,
