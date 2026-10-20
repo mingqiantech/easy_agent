@@ -79,7 +79,7 @@ export class FtsIndex {
   search(
     query: string,
     opts: { limit?: number; source?: string } = {},
-  ): FtsHit[] {
+  ): Array<FtsHit & { ts?: number }> {
     if (!this.available) return [];
     const tokens = tokenizeQuery(query);
     if (!tokens.length) return [];
@@ -89,7 +89,7 @@ export class FtsIndex {
       const rows = (opts.source
         ? this.db
             .prepare(
-              `SELECT f.path AS path, f.excerpt AS excerpt, -bm25(memory_fts) AS score
+              `SELECT f.path AS path, f.excerpt AS excerpt, -bm25(memory_fts) AS score, e.updated_at AS ts
                FROM memory_fts f JOIN memory_entries e ON e.id = f.rowid
                WHERE memory_fts MATCH ? AND e.source = ?
                ORDER BY score DESC LIMIT ?`,
@@ -108,6 +108,7 @@ export class FtsIndex {
       return rows.map((r) => ({
         path: String(r.path),
         excerpt: String(r.excerpt),
+        ts: Number(r.ts) || undefined,
         score: Math.min(1, Math.max(0.05, Number(r.score) / max)), // 顶部归一，保相对序
       }));
     } catch {

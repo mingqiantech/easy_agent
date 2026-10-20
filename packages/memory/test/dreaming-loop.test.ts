@@ -46,6 +46,7 @@ describe("Dreaming 闭环：lightDreaming 提取 → 晋升", () => {
       },
       readMemory: async () => memoryContent,
       writeMemory: async (c: string) => { memoryContent = c; },
+      maskSecret: (t: string) => t,
     };
 
     const r1 = await lightDreaming(deps);
@@ -79,6 +80,7 @@ describe("Dreaming 闭环：lightDreaming 提取 → 晋升", () => {
       llmGenerate: async () => "用户偏好：TS 工程优先用 bun。",
       readMemory: async () => memoryContent,
       writeMemory: async (c: string) => { memoryContent = c; },
+      maskSecret: (t: string) => t,
     };
     const r = await deepDreaming(deps);
     expect(r.promoted).toBe(1); // 只有 [重要] 预热条目达标
@@ -101,6 +103,7 @@ describe("Dreaming 闭环：lightDreaming 提取 → 晋升", () => {
       llmGenerate: async () => { throw new Error("402 payment required"); },
       readMemory: async () => "",
       writeMemory: async () => {},
+      maskSecret: (t: string) => t,
     };
     await expect(lightDreaming(deps)).rejects.toThrow("402");
     // 游标没动：新消息下个周期还能被取到

@@ -58,6 +58,7 @@
       "baseUrl": "http://172.18.32.1:11434"
     },
     "hybrid": { "enabled": true, "vectorWeight": 0.7, "textWeight": 0.3 },
-    "reindexIntervalMinutes": 10
+    "reindexIntervalMinutes": 10,
+    "rerank": { "mmr": true, "lambda": 0.7, "halfLifeDays": 0 }
   }
 }

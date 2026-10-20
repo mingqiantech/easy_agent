@@ -67,6 +67,8 @@ export interface ServerDeps {
   runDreaming?: () => Promise<Record<string, unknown>>;
   /** 备份管理器（设置页备份卡片 + 定时调度共用） */
   backup?: BackupManager;
+  /** 检索管道状态（检索拓扑图数据源；index.ts 注入，每次请求现取） */
+  getRetrievalStats?: () => Record<string, unknown>;
   /** cron/事件 watcher 管理器 */
   cron?: CronManager;
 }
@@ -679,6 +681,12 @@ export function createApp(deps: ServerDeps): Hono {
   });
 
   app.get("/api/tools", (c) => c.json({ tools: deps.tools.getDefinitions() }));
+
+  // 检索管道状态（拓扑图）：embedding/FTS/vec/精排配置 + 各层实时数据
+  app.get("/api/retrieval", (c) => {
+    if (!deps.getRetrievalStats) return c.json({ error: "retrieval stats unavailable" }, 503);
+    return c.json(deps.getRetrievalStats());
+  });
 
   return app;
 }

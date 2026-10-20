@@ -2,8 +2,11 @@ import type { EmbeddingProvider } from "./embedding.js";
 import path from "node:path";
 import type { Database } from "bun:sqlite";
 import type { MemorySearcher, SearchHit } from "./search.js";
+import { tokenizeQuery } from "./search.js";
 import type { FtsIndex } from "./fts.js";
 import type { VecIndex } from "./vec.js";
+
+const DAY_MS = 86400000;
 
 export interface HybridHit {
   path: string;
@@ -12,6 +15,8 @@ export interface HybridHit {
   vectorScore: number;
   textScore: number;
   combinedScore: number;
+  /** 条目时间戳（索引更新时间），时间衰减用；未知不衰减 */
+  ts?: number;
 }
 
 export interface HybridSearchOptions {
@@ -23,11 +28,20 @@ export interface HybridSearchOptions {
   source?: "memory" | "session";
 }
 
+/** 精排配置（config.memorySearch.rerank）：对齐 OpenClaw 的 MMR/时间衰减层 */
+export interface RerankConfig {
+  /** MMR 去冗余，默认开；λ=相关度占比，1-λ=多样性惩罚 */
+  mmr?: boolean;
+  lambda?: number; // 默认 0.7
+  /** 时间衰减半衰期（天）；0 或缺省 = 关 */
+  halfLifeDays?: number;
+}
+
 /**
  * 混合搜索（Week 11）
  *
  * 向量相似度捕捉语义（"汽车"≈"车辆"），全文匹配保证精确词命中，
- * 两路结果融合加权排序。向量不可用时自动退化为纯文本。
+ * 两路结果融合加权，再经时间衰减 + MMR 去冗余精排。向量不可用时自动退化为纯文本。
  */
 export class HybridSearch {
   constructor(
@@ -39,6 +53,7 @@ export class HybridSearch {
     private vec?: VecIndex,
     /** 索引所在库；缺省 getDatabase 单例（生产同库，测试必须显式传入） */
     private database?: Database,
+    private rerank: RerankConfig = {},
   ) {}
 
   async search(
@@ -51,7 +66,7 @@ export class HybridSearch {
 
     // 1. 关键词通道：FTS5 BM25 优先（索引存在时），退回文件行扫描
     const src = options.source === "session" ? "session" : "memory";
-    let textHits: SearchHit[] = [];
+    let textHits: Array<SearchHit & { ts?: number }> = [];
     if (this.fts?.ok) {
       textHits = this.fts
         .search(query, { limit: limit * 3, source: src })
@@ -59,6 +74,7 @@ export class HybridSearch {
           path: h.path,
           excerpt: h.excerpt,
           score: h.score,
+          ts: h.ts,
           source: src as SearchHit["source"],
         }));
       // BM25 命中同样喂 Dreaming recall 统计（与文件扫描通道行为对齐）
@@ -81,7 +97,7 @@ export class HybridSearch {
     }
 
     // 2. 向量通道（可选）
-    let vectorHits: Array<{ key: string; score: number; excerpt: string; path: string }> = [];
+    let vectorHits: Array<{ key: string; score: number; excerpt: string; path: string; ts?: number }> = [];
     if (this.embedding) {
       try {
         vectorHits = await this.vectorSearch(
@@ -111,6 +127,7 @@ export class HybridSearch {
         vectorScore: h.score,
         textScore: 0,
         combinedScore: 0,
+        ts: h.ts,
       });
     }
     for (const h of textHits) {
@@ -126,16 +143,64 @@ export class HybridSearch {
           vectorScore: 0,
           textScore: h.score,
           combinedScore: 0,
+          ts: h.ts,
         });
     }
 
     const combined = Array.from(byKey.values()).map((h) => ({
       ...h,
-      combinedScore: h.vectorScore * vw + h.textScore * tw,
+      combinedScore: this.applyDecay(h.vectorScore * vw + h.textScore * tw, h.ts),
     }));
 
     combined.sort((a, b) => b.combinedScore - a.combinedScore);
-    return { hits: combined.slice(0, limit), mode };
+    const hits =
+      this.rerank.mmr !== false
+        ? this.mmrSelect(combined, limit, this.rerank.lambda ?? 0.7)
+        : combined.slice(0, limit);
+    return { hits, mode };
+  }
+
+  /** 指数时间衰减：ts 未知不衰减；半衰期天（config.memorySearch.rerank.halfLifeDays） */
+  private applyDecay(score: number, ts?: number): number {
+    const hl = this.rerank.halfLifeDays ?? 0;
+    if (!hl || !ts) return score;
+    const days = Math.max(0, (Date.now() - ts) / DAY_MS);
+    return score * Math.exp((-0.693 * days) / hl);
+  }
+
+  /** MMR 贪心选择：λ×相关度 - (1-λ)×与已选集最大相似度（bigram Jaccard） */
+  private mmrSelect(pool: HybridHit[], limit: number, lambda: number): HybridHit[] {
+    if (pool.length <= limit) return pool.slice();
+    const tokCache = new Map<HybridHit, Set<string>>();
+    const toks = (h: HybridHit) => {
+      let s = tokCache.get(h);
+      if (!s) {
+        s = new Set(tokenizeQuery(h.excerpt));
+        tokCache.set(h, s);
+      }
+      return s;
+    };
+    const sim = (a: HybridHit, b: HybridHit) => {
+      const A = toks(a), B = toks(b);
+      if (!A.size || !B.size) return 0;
+      let inter = 0;
+      for (const t of A) if (B.has(t)) inter++;
+      return inter / (A.size + B.size - inter);
+    };
+    const candidates = pool.slice(0, Math.max(limit * 4, 12)); // 只在头部候选内重排
+    const selected: HybridHit[] = [candidates.shift()!];
+    while (selected.length < limit && candidates.length) {
+      let bestIdx = 0, bestVal = -Infinity;
+      for (let i = 0; i < candidates.length; i++) {
+        const c = candidates[i]!;
+        let maxSim = 0;
+        for (const s of selected) maxSim = Math.max(maxSim, sim(c, s));
+        const val = lambda * c.combinedScore - (1 - lambda) * maxSim;
+        if (val > bestVal) { bestVal = val; bestIdx = i; }
+      }
+      selected.push(candidates.splice(bestIdx, 1)[0]!);
+    }
+    return selected;
   }
 
   /**
@@ -153,13 +218,13 @@ export class HybridSearch {
       const knn = this.vec.search(queryVec, limit, source);
       if (knn && knn.length) {
         const getInfo = db.prepare(
-          "SELECT file_path AS path, excerpt FROM memory_entries WHERE id = ?",
+          "SELECT file_path AS path, excerpt, updated_at AS ts FROM memory_entries WHERE id = ?",
         );
-        const out: Array<{ key: string; score: number; excerpt: string; path: string }> = [];
+        const out: Array<{ key: string; score: number; excerpt: string; path: string; ts?: number }> = [];
         for (const r of knn) {
           const info = getInfo.get(r.id) as any;
           if (!info) continue;
-          out.push({ key: String(r.id), score: r.score, excerpt: info.excerpt, path: info.path });
+          out.push({ key: String(r.id), score: r.score, excerpt: info.excerpt, path: info.path, ts: Number(info.ts) || undefined });
         }
         if (out.length) return out;
       }
@@ -168,18 +233,18 @@ export class HybridSearch {
     // 退回：暴力扫 memory_vec BLOB（小数据量或扩展不可用）
     const rows = db
       .prepare(
-        `SELECT e.id, e.file_path AS path, e.excerpt AS excerpt, v.embedding AS blob
+        `SELECT e.id, e.file_path AS path, e.excerpt AS excerpt, e.updated_at AS ts, v.embedding AS blob
          FROM memory_entries e JOIN memory_vec v ON v.id = e.id
          WHERE e.source = ?`,
       )
       .all(source ?? "memory") as any[];
 
-    const scored: Array<{ key: string; score: number; excerpt: string; path: string }> = [];
+    const scored: Array<{ key: string; score: number; excerpt: string; path: string; ts?: number }> = [];
     for (const r of rows) {
       const vec = new Float32Array(r.blob.buffer, r.blob.byteOffset, r.blob.byteLength / 4);
       // 维度不一致（换过 embedding 模型）→ 跳过，交给重索引修复
       if (vec.length !== queryVec.length) continue;
-      scored.push({ key: String(r.id), score: cosine(queryVec, vec), excerpt: r.excerpt, path: r.path });
+      scored.push({ key: String(r.id), score: cosine(queryVec, vec), excerpt: r.excerpt, path: r.path, ts: Number(r.ts) || undefined });
     }
     scored.sort((a, b) => b.score - a.score);
     return scored.slice(0, limit);

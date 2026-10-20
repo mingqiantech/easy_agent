@@ -106,6 +106,7 @@ describe("REM 主题反思", () => {
       llmGenerate: llm,
       readMemory: async () => "",
       writeMemory: async () => {},
+    maskSecret: (t: string) => t,
     };
   }
 

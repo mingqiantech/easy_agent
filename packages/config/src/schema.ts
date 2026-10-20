@@ -75,12 +75,22 @@ export const ConfigSchema = z.object({
           textWeight: z.number().min(0).max(1).default(0.3),
         })
         .default({ enabled: true, vectorWeight: 0.7, textWeight: 0.3 }),
+      /** 精排：MMR 去冗余 + 时间衰减（对齐 OpenClaw rerank 层） */
+      rerank: z
+        .object({
+          mmr: z.boolean().default(true),
+          lambda: z.number().min(0).max(1).default(0.7),
+          /** 半衰期天数；0=关 */
+          halfLifeDays: z.number().min(0).default(0),
+        })
+        .default({ mmr: true, lambda: 0.7, halfLifeDays: 0 }),
       /** 重索引周期（分钟）：内容 hash 未变时近乎零成本 */
       reindexIntervalMinutes: z.number().int().min(1).default(10),
     })
     .default({
       embedding: { provider: "simple" },
       hybrid: { enabled: true, vectorWeight: 0.7, textWeight: 0.3 },
+      rerank: { mmr: true, lambda: 0.7, halfLifeDays: 0 },
       reindexIntervalMinutes: 10,
     }),
   stateDir: z.string().default(""),

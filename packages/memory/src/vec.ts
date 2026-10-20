@@ -19,6 +19,11 @@ export class VecIndex {
     return this._db;
   }
 
+  /** 当前 vec0 表维度（0=未建）；检索拓扑展示用 */
+  get dims(): number {
+    return this.tableDims;
+  }
+
   /** 扩展是否可用（不含表是否已建） */
   get available(): boolean {
     if (!this.tried) this.tryLoad();

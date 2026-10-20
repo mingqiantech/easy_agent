@@ -137,6 +137,16 @@
 .search-x:hover{color:var(--fg)}
 .search-results{flex:1;overflow-y:auto;padding:6px 0 12px}
 .search-hint{padding:6px 12px;font-size:12px;color:var(--muted)}
+/* 检索拓扑图 */
+.rtg{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:10px;font-size:12px}
+.rtg-node{border:1.5px solid var(--border);border-radius:10px;padding:6px 10px;background:var(--card);min-width:96px}
+.rtg-node b{display:block;font-size:12.5px}
+.rtg-node small{color:var(--muted);font-size:10.5px;line-height:1.45;display:block}
+.rtg-node.on{border-color:#5f9470;background:rgba(95,148,112,.08)}
+.rtg-node.off{opacity:.5}
+.rtg-node.warn{border-color:#c0985a;background:rgba(192,152,90,.08)}
+.rtg-arrow{color:var(--muted);font-size:15px;padding:0 2px}
+.rtg-branch{display:flex;flex-direction:column;gap:6px;border:1px dashed var(--border);border-radius:12px;padding:8px}
 .search-item{margin:0 10px 8px;background:var(--card);border:1px solid var(--border);border-radius:10px;padding:8px 10px;cursor:pointer}
 .search-item:hover{background:var(--hover)}
 .si-title{font-size:12px;font-weight:600;margin-bottom:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -236,6 +246,11 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
           <button class="action-btn" onclick="backupNow()" id="bkNowBtn">▶ 立即备份一次</button>
           <button class="action-btn" onclick="saveSettings()" style="margin-left:8px">💾 保存设置</button>
           <div class="hint" id="bkList"></div>
+        </div>
+        <div class="card" style="grid-column:1/-1">
+          <h3>🔎 检索拓扑 Retrieval Pipeline</h3>
+          <div class="hint" style="margin-top:0">混合检索全链路实时状态（关键词 BM25 + 向量 KNN → 融合 → 精排 → 记忆强化闭环）。绿=在用，灰=未启用/兜底。</div>
+          <div class="rtg" id="rtgGraph"></div>
         </div>
         <div class="card" id="memCard" style="display:none"><!-- 长期记忆编辑器：按 elf 要求不在 Web UI 展示；后端 GET/PUT /api/memory/content 保留 -->
           <h3>🧠 长期记忆 MEMORY.md</h3>
@@ -727,7 +742,7 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
       if(topoTimer){clearInterval(topoTimer);topoTimer=null;}
       if(usageTimer){clearInterval(usageTimer);usageTimer=null;}
       if(v==='topo'){refreshTopo();topoTimer=setInterval(refreshTopo,5000);}
-      if(v==='settings'){loadSettingsView();loadBackups();}
+      if(v==='settings'){loadSettingsView();loadBackups();loadRetrieval();}
       if(v==='usage'){loadUsage();usageTimer=setInterval(loadUsage,15000);}
     }
     async function refreshTopo(){
@@ -910,6 +925,46 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
       const j=await r.json();
       document.getElementById('setMsg').textContent=j.error?'❌ '+j.error:'✓ 设置已保存，调度器一分钟内生效';
       if(!j.error)loadBackups();
+    }
+
+    /* ── 检索拓扑图：管道实时状态 ── */
+    async function loadRetrieval(){
+      try{
+        const j=await (await fetch(`${API}/api/retrieval`)).json();
+        if(j.error)return;
+        document.getElementById('rtgGraph').innerHTML=renderRetrievalGraph(j);
+      }catch(e){}
+    }
+    function renderRetrievalGraph(d){
+      const N=(cls,title,sub)=>`<div class="rtg-node ${cls}"><b>${title}</b><small>${sub}</small></div>`;
+      const A='<span class="rtg-arrow">→</span>';
+      const mem=(d.entries??[]).find(e=>e.source==='memory')??{chunks:0,files:0};
+      const ses=(d.entries??[]).find(e=>e.source==='session')??{chunks:0,files:0};
+      const ftsOn=d.channels?.fts?.available&&d.channels.fts.rows>0;
+      const vecOn=d.channels?.vec?.accelerated;
+      const extOn=d.channels?.vec?.extension;
+      const hybOn=d.hybridCfg?.enabled!==false;
+      const mmrOn=d.rerankCfg?.mmr!==false;
+      const decayOn=(d.rerankCfg?.halfLifeDays??0)>0;
+      const agoS=ts=>{if(!ts)return '从未';const s=(Date.now()-ts)/1000;return s<90?'刚刚':s<3600?Math.round(s/60)+'分钟前':s<86400?Math.round(s/3600)+'小时前':Math.round(s/86400)+'天前'};
+      return [
+        N('on','🔍 查询','用户/agent 发起'),A,
+        N('on','✂️ 切词','bigram+拉丁'),
+        '<div class="rtg-branch">'+
+          N(ftsOn?'on':'off','FTS5 BM25',ftsOn?d.channels.fts.rows+' 行已索引':'未建→行扫描兜底')+A+N(ftsOn?'on':'off','关键词通道','语义❌精确✅')+
+          '<div style="height:4px"></div>'+
+          N(hybOn?'on':'off','🧬 嵌入',d.embedding?.provider+' '+(d.embedding?.model??'-')+(d.channels?.vec?.dims?' · '+d.channels.vec.dims+'维':''))+A+
+          N(extOn?(vecOn?'on':'warn'):'off','向量检索',extOn?(vecOn?'sqlite-vec KNN':'BLOB 暴力扫（兜底）'):'扩展未加载·兜底扫')+
+          ' <small style="color:var(--muted)">块：记忆 '+mem.chunks+'/会话 '+ses.chunks+' · 重索引 '+d.reindexIntervalMinutes+'分钟</small>'+
+        '</div>',A,
+        N(hybOn?'on':'off','⚖️ 融合',(d.hybridCfg?.vectorWeight??0.7)+'×语义 + '+(d.hybridCfg?.textWeight??0.3)+'×BM25')+A,
+        N(mmrOn||decayOn?'on':'off','🎯 精排',(mmrOn?'MMR λ='+d.rerankCfg.lambda:'')+(mmrOn&&decayOn?' · ':'')+(decayOn?'衰减 '+d.rerankCfg.halfLifeDays+'天半衰期':(mmrOn?'':'未启用')))+A,
+        N('on','📤 TopK','命中+excerpt')+A,
+        N('on','📈 recall 强化','onHit→短期记忆')+A,
+        N('on','🗂 短期记忆','活跃 '+d.shortTerm.active+' · 晋升 '+d.shortTerm.promoted+' · 遗忘 '+d.shortTerm.forgotten)+A,
+        N(d.dreaming?.deepAt?'on':'off','🌙 Dreaming','浅眠 '+agoS(d.dreaming?.lightAt)+'<br>REM '+agoS(d.dreaming?.remAt)+' · 深眠 '+agoS(d.dreaming?.deepAt))+A,
+        N(d.memoryMdBytes?'on':'off','🧠 MEMORY.md',(d.memoryMdBytes/1024).toFixed(1)+'KB → 注入 system prompt'),
+      ].join('');
     }
 
     /* ── 备份：列表/开关/立即备份/恢复 ── */

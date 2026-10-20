@@ -19,6 +19,12 @@ export interface DreamingDeps {
   llmGenerate: (prompt: string) => Promise<string>;
   readMemory: () => Promise<string>;
   writeMemory: (content: string) => Promise<void>;
+  /**
+   * 密钥掩码函数（必传）：所有送 LLM 的文本先过它。
+   * 用依赖注入而非直接 import core 的 maskSecrets 单例：
+   * bun 对 workspace 包在测试/源码两种上下文可能解析出双实例，单例状态会分叉导致掩码失效。
+   */
+  maskSecret: (text: string) => string;
 }
 
 /** 轻眠提取提示词：只提值得长记的事，[重要] 前缀的条目直接进晋升候选。
@@ -86,7 +92,8 @@ export async function lightDreaming(
     }
     if (!text || text.startsWith("【摘要】") || text.startsWith("【系统恢复】")) continue;
     if (text.length < 12 || text.length > 600) continue;
-    snippets.push(`[${m.role}] ${text.slice(0, 400)}`);
+    // 脱敏：送给 LLM 前再掩一次（落库主路径已掩，防旧数据/旁路写入）
+    snippets.push(`[${m.role}] ${deps.maskSecret(text).slice(0, 400)}`);
   }
 
   if (!snippets.length) {
@@ -215,7 +222,7 @@ export async function remDreaming(
     } catch {}
 
     try {
-      const list = entries.slice(0, 60).map((e) => `- ${e.text}`).join("\n");
+      const list = entries.slice(0, 60).map((e) => `- ${deps.maskSecret(e.text)}`).join("\n");
       const out = await deps.llmGenerate(
         `归纳以下记忆条目中反复出现的主题（最多 3 个）。\n输出每行格式：主题名|一句话结论\n只输出主题行，没有明显主题时只输出：无\n\n${list}`,
       );
@@ -312,8 +319,8 @@ export async function deepDreaming(
     return { promoted: 0, forgotten: executeForget(deps, now) };
   }
 
-  const prompt = `将以下记忆整合为简洁的长期记忆段落：\n\n${entries.map((e) => `- ${e.text}`).join("\n")}`;
-  const section = await deps.llmGenerate(prompt);
+  const prompt = `将以下记忆整合为简洁的长期记忆段落：\n\n${entries.map((e) => `- ${deps.maskSecret(e.text)}`).join("\n")}`;
+  const section = deps.maskSecret(await deps.llmGenerate(prompt));
   const current = await deps.readMemory();
   const today = new Date().toISOString().slice(0, 10);
   // 占位行不清除会让 buildSystemPrompt 的 "No memories yet" 判断误杀整份记忆 → 永远不注入

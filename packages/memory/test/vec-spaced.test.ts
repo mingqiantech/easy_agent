@@ -74,6 +74,7 @@ describe("REM spaced-reinforcement 复习调度", () => {
     llmGenerate: async () => llm,
     readMemory: async () => "",
     writeMemory: async () => {},
+    maskSecret: (t: string) => t,
   });
 
   it("被检索未达标条目入队；到期复习合成 recall+1 并记日期", async () => {

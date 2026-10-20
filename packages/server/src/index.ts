@@ -1,5 +1,6 @@
 import { serve } from "@hono/node-server";
 import fs from "node:fs/promises";
+import { statSync } from "node:fs";
 import path from "node:path";
 import { createApp } from "./app.js";
 import { LLMClient } from "@easy-agent/llm/client";
@@ -37,7 +38,7 @@ import { BackupManager } from "@easy-agent/core/backup/index";
 import { getDatabase } from "@easy-agent/core/database";
 import { CronManager } from "@easy-agent/core/cron/index";
 import { CronScheduler } from "@easy-agent/core/cron/scheduler";
-import { initSecretMask } from "@easy-agent/core/secrets-mask";
+import { initSecretMask, maskSecrets } from "@easy-agent/core/secrets-mask";
 import { execSync } from "node:child_process";
 import net from "node:net";
 
@@ -107,7 +108,7 @@ async function main() {
   );
   const hybrid =
     msCfg.hybrid?.enabled !== false
-      ? new HybridSearch(searcher, embedding, workspaceDir, memIndex.fts, memIndex.vec, db)
+      ? new HybridSearch(searcher, embedding, workspaceDir, memIndex.fts, memIndex.vec, db, msCfg.rerank ?? {})
       : undefined;
 
   // 索引集与 MemorySearcher 的 corpus 对齐：工作区 md + memory/ + .dreams/session-corpus
@@ -249,6 +250,7 @@ async function main() {
       ).content,
     readMemory: () => memory.readMemory(),
     writeMemory: (content: string) => memory.writeMemory(content),
+    maskSecret: maskSecrets,
   };
   let dreamBusy = false;
   async function runDreamingCycle() {
@@ -376,6 +378,47 @@ async function main() {
     runDreaming: runDreamingCycle,
     cron,
     backup,
+    // 检索管道 introspection（Web UI 检索拓扑图）：每次请求现取，热配置变更即时反映
+    getRetrievalStats: () => {
+      const counts = db
+        .prepare("SELECT source, COUNT(*) c, COUNT(DISTINCT file_path) f FROM memory_entries GROUP BY source")
+        .all() as any[];
+      const st = (p: string) =>
+        (db.prepare("SELECT last_run_at FROM dreaming_state WHERE phase=?").get(p) as any)?.last_run_at ?? 0;
+      const sm = (col: string) =>
+        (db.prepare(`SELECT COUNT(*) c FROM short_term_memory WHERE ${col}`).get() as any).c;
+      let fingerprint = "";
+      try {
+        fingerprint = String((db.prepare("SELECT value FROM meta WHERE key='embedding_fingerprint'").get() as any)?.value ?? "");
+      } catch {}
+      return {
+        embedding: {
+          provider: embCfg.provider ?? "simple",
+          model: embCfg.model ?? (embCfg.provider === "ollama" ? "nomic-embed-text" : "-"),
+          fingerprint,
+        },
+        rerankCfg: msCfg.rerank ?? { mmr: true, lambda: 0.7, halfLifeDays: 0 },
+        hybridCfg: msCfg.hybrid ?? { enabled: true, vectorWeight: 0.7, textWeight: 0.3 },
+        channels: {
+          fts: { available: memIndex.fts.ok, rows: (db.prepare("SELECT COUNT(*) c FROM memory_fts").get() as any).c },
+          vec: {
+            extension: memIndex.vec.available, // sqlite-vec .so 是否加载成功
+            accelerated: memIndex.vec.ready, // vec0 KNN 在用（否则 BLOB 暴力扫兜底）
+            dims: memIndex.vec.dims,
+            rows: (db.prepare("SELECT COUNT(*) c FROM memory_vec").get() as any).c,
+          },
+        },
+        entries: counts.map((r) => ({ source: r.source, chunks: r.c, files: r.f })),
+        reindexIntervalMinutes: msCfg.reindexIntervalMinutes ?? 10,
+        shortTerm: {
+          active: sm("promoted_at IS NULL AND forgotten_at IS NULL"),
+          promoted: sm("promoted_at IS NOT NULL"),
+          forgotten: sm("forgotten_at IS NOT NULL"),
+        },
+        dreaming: { lightAt: st("light"), remAt: st("rem"), deepAt: st("deep") },
+        memoryMdBytes: (() => { try { return statSync(path.join(workspaceDir, "MEMORY.md")).size; } catch { return 0; } })(),
+      };
+    },
   });
 
   // 梦境调度：每分钟查 settings.json；上次运行时间从 dreaming_state 读（重启不丢）
