@@ -29,6 +29,8 @@ export class HybridSearch {
   constructor(
     private textSearcher: MemorySearcher,
     private embedding?: EmbeddingProvider,
+    /** 命中路径归一化用（相对工作区），与文本通道一致 */
+    private workDir?: string,
   ) {}
 
   async search(
@@ -50,7 +52,11 @@ export class HybridSearch {
     let vectorHits: Array<{ key: string; score: number; excerpt: string; path: string }> = [];
     if (this.embedding) {
       try {
-        vectorHits = await this.vectorSearch(query, limit * 3);
+        vectorHits = await this.vectorSearch(
+          query,
+          limit * 3,
+          options.source === "session" ? "session" : "memory",
+        );
       } catch {
         vectorHits = [];
       }
@@ -63,10 +69,13 @@ export class HybridSearch {
     const keyOf = (path: string, excerpt: string) => `${path}::${excerpt.slice(0, 40)}`;
 
     for (const h of vectorHits) {
-      byKey.set(keyOf(h.path, h.excerpt), {
-        path: h.path,
+      const rel = this.workDir && h.path.startsWith(this.workDir)
+        ? h.path.slice(this.workDir.length + 1)
+        : h.path;
+      byKey.set(keyOf(rel, h.excerpt), {
+        path: rel,
         excerpt: h.excerpt,
-        source: "memory",
+        source: options.source === "session" ? "session" : "memory",
         vectorScore: h.score,
         textScore: 0,
         combinedScore: 0,
@@ -98,27 +107,28 @@ export class HybridSearch {
   }
 
   /**
-   * 向量通道：从 memory_entries 读取已索引的块，逐一算余弦相似度。
-   * （sqlite-vec 可用时优先用虚拟表；这里做通用实现，小数据量足够。）
+   * 向量通道：query 算一次 embedding，与 memory_vec 预存向量逐一余弦。
+   * 无预存向量的条目跳过（首次索引完成前自动退化为 text-only）。
    */
-  private async vectorSearch(query: string, limit: number) {
+  private async vectorSearch(query: string, limit: number, source?: string) {
     const { getDatabase } = await import("@easy-agent/core/database");
     const embedding = this.embedding!;
     const queryVec = await embedding.embed(query);
 
-    const entries = getDatabase()
-      .prepare("SELECT id, file_path, excerpt FROM memory_entries")
-      .all() as any[];
+    const rows = getDatabase()
+      .prepare(
+        `SELECT e.id, e.file_path AS path, e.excerpt AS excerpt, v.embedding AS blob
+         FROM memory_entries e JOIN memory_vec v ON v.id = e.id
+         WHERE e.source = ?`,
+      )
+      .all(source ?? "memory") as any[];
 
     const scored: Array<{ key: string; score: number; excerpt: string; path: string }> = [];
-    for (const e of entries) {
-      const vec = await embedding.embed(e.excerpt);
-      scored.push({
-        key: String(e.id),
-        score: cosine(queryVec, vec),
-        excerpt: e.excerpt,
-        path: e.file_path,
-      });
+    for (const r of rows) {
+      const vec = new Float32Array(r.blob.buffer, r.blob.byteOffset, r.blob.byteLength / 4);
+      // 维度不一致（换过 embedding 模型）→ 跳过，交给重索引修复
+      if (vec.length !== queryVec.length) continue;
+      scored.push({ key: String(r.id), score: cosine(queryVec, vec), excerpt: r.excerpt, path: r.path });
     }
     scored.sort((a, b) => b.score - a.score);
     return scored.slice(0, limit);

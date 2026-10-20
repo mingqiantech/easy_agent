@@ -71,6 +71,8 @@ export interface ServerDeps {
   cron?: CronManager;
 }
 
+const BUILD_VER = process.env.EASY_AGENT_BUILD ?? String(Date.now());
+
 export function createApp(deps: ServerDeps): Hono {
   const app = new Hono();
   app.use("*", cors());
@@ -88,7 +90,7 @@ export function createApp(deps: ServerDeps): Hono {
       rewriteRequestPath: (p) => p.replace(/^\/static/, ""),
     }),
   );
-  app.get("/", (c) => c.redirect("/static/index.html"));
+  app.get("/", (c) => c.redirect("/static/index.html?v=" + BUILD_VER));
 
   const observability = new Observability();
   app.get("/health", (c) => c.json(observability.getHealthCheck()));

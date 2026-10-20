@@ -191,7 +191,15 @@ function initializeSchema(db: Database): void {
       source TEXT NOT NULL,
       file_path TEXT NOT NULL,
       excerpt TEXT NOT NULL,
+      content_hash TEXT,
+      created_at INTEGER,
       updated_at INTEGER NOT NULL
+    );
+
+    -- 向量存储（embedding BLOB，dim 由长度决定）
+    CREATE TABLE IF NOT EXISTS memory_vec (
+      id INTEGER PRIMARY KEY REFERENCES memory_entries(id) ON DELETE CASCADE,
+      embedding BLOB NOT NULL
     );
 
     -- Week7: 用户表
@@ -298,6 +306,15 @@ function initializeSchema(db: Database): void {
   // 首页会话：每个 agent 置顶且不可删除的会话
   if (!cols.some((c) => c.name === "pinned")) {
     db.exec("ALTER TABLE sessions ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0");
+  }
+
+  // 旧库的 memory_entries 缺 content_hash/created_at 两列（IncrementalIndex 依赖）→ 补齐
+  const meCols = db.prepare("PRAGMA table_info(memory_entries)").all() as Array<{ name: string }>;
+  if (!meCols.some((c) => c.name === "content_hash")) {
+    db.exec("ALTER TABLE memory_entries ADD COLUMN content_hash TEXT");
+  }
+  if (!meCols.some((c) => c.name === "created_at")) {
+    db.exec("ALTER TABLE memory_entries ADD COLUMN created_at INTEGER");
   }
 }
 export function closeDatabase(): void {

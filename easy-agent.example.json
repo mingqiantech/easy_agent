@@ -50,5 +50,14 @@
     "tavilyApiKey": "${TAVILY_API_KEY}",
     "braveApiKey": "${BRAVE_API_KEY}",
     "bochaApiKey": "${BOCHA_API_KEY}"
+  },
+  "memorySearch": {
+    "embedding": {
+      "provider": "simple",
+      "model": "nomic-embed-text",
+      "baseUrl": "http://172.18.32.1:11434"
+    },
+    "hybrid": { "enabled": true, "vectorWeight": 0.7, "textWeight": 0.3 },
+    "reindexIntervalMinutes": 10
   }
 }

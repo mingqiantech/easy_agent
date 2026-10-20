@@ -237,7 +237,7 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
           <button class="action-btn" onclick="saveSettings()" style="margin-left:8px">💾 保存设置</button>
           <div class="hint" id="bkList"></div>
         </div>
-        <div class="card">
+        <div class="card" id="memCard" style="display:none"><!-- 长期记忆编辑器：按 elf 要求不在 Web UI 展示；后端 GET/PUT /api/memory/content 保留 -->
           <h3>🧠 长期记忆 MEMORY.md</h3>
           <div class="hint" id="memPaths" style="margin-top:0"></div>
           <textarea class="mem-ta" id="memEdit" spellcheck="false"></textarea>

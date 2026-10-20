@@ -1,3 +1,5 @@
+import { tokenizeQuery } from "./search.js";
+
 export interface EmbeddingProvider {
   embed(text: string): Promise<Float32Array>;
   embedBatch(texts: string[]): Promise<Float32Array[]>;
@@ -47,17 +49,59 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
 }
 
 /**
- * 简易本地 Embedding（回退方案）
- * 使用简单的 TF-IDF 风格的词频向量
+ * Ollama 本地 Embedding（/api/embed 批量；旧版回退 /api/embeddings）
+ * 例：{ provider:"ollama", baseUrl:"http://172.18.32.1:11434", model:"nomic-embed-text" }
+ */
+export class OllamaEmbeddingProvider implements EmbeddingProvider {
+  private baseUrl: string;
+  private model: string;
+
+  constructor(config: { baseUrl?: string; model?: string } = {}) {
+    this.baseUrl = (config.baseUrl ?? "http://127.0.0.1:11434").replace(/\/$/, "");
+    this.model = config.model ?? "nomic-embed-text";
+  }
+
+  async embed(text: string): Promise<Float32Array> {
+    return (await this.embedBatch([text]))[0]!;
+  }
+
+  async embedBatch(texts: string[]): Promise<Float32Array[]> {
+    if (!texts.length) return [];
+    const res = await fetch(`${this.baseUrl}/api/embed`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: this.model, input: texts }),
+    });
+    if (res.ok) {
+      const data = (await res.json()) as any;
+      return (data.embeddings as number[][]).map((v) => new Float32Array(v));
+    }
+    // 旧版 ollama：/api/embeddings 单条 prompt
+    const out: Float32Array[] = [];
+    for (const t of texts) {
+      const r = await fetch(`${this.baseUrl}/api/embeddings`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model: this.model, prompt: t }),
+      });
+      if (!r.ok) throw new Error(`Ollama embedding error: ${r.status} ${await r.text()}`);
+      const d = (await r.json()) as any;
+      out.push(new Float32Array(d.embedding));
+    }
+    return out;
+  }
+}
+
+/**
+ * 简易本地 Embedding（回退方案，零依赖零网络）
+ * token 哈希词频向量；CJK 走 bigram 切词，中文短句相似度可用
  */
 export class SimpleEmbeddingProvider implements EmbeddingProvider {
-  private vocab: Map<string, number> = new Map();
   private dim = 256;
 
   async embed(text: string): Promise<Float32Array> {
     const vec = new Float32Array(this.dim);
-    const words = text.toLowerCase().split(/\s+/);
-    for (const word of words) {
+    for (const word of tokenizeQuery(text)) {
       const idx = this.hash(word) % this.dim;
       vec[idx] += 1;
     }

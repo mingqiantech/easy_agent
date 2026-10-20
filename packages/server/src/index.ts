@@ -9,6 +9,14 @@ import { BasicMemory } from "@easy-agent/core/memory/basic";
 import { MemorySearcher } from "@easy-agent/memory/search";
 import { ShortTermMemory } from "@easy-agent/memory/short-term";
 import { createMemorySearchTool } from "@easy-agent/memory/tool";
+import { HybridSearch } from "@easy-agent/memory/hybrid-search";
+import { IncrementalIndex } from "@easy-agent/memory/incremental-index";
+import {
+  SimpleEmbeddingProvider,
+  OllamaEmbeddingProvider,
+  OpenAIEmbeddingProvider,
+  type EmbeddingProvider,
+} from "@easy-agent/memory/embedding";
 import { createWebsearchTool } from "@easy-agent/core/tool/builtins/websearch";
 import { SubAgentManager } from "@easy-agent/core/agent/sub-agent";
 import { createSubAgentTool } from "@easy-agent/core/agent/sub-agent-tool";
@@ -67,8 +75,92 @@ async function main() {
   // 搜索命中 -> 短期记忆 recall 统计（Dreaming 晋升依据）
   searcher.onHit = (filePath) => shortTerm.incrementRecall(filePath);
 
-  // memory_search 注册进工具表，agent 对话可用
-  tools.register(createMemorySearchTool(searcher));
+  // ── 向量/混合检索（config.memorySearch 可配）──
+  // embedding.provider: simple(零依赖离线) | ollama(本地真模型) | openai(需 key)
+  // hybrid.enabled=false 退回纯关键词；权重可调；无模型时向量通道自动缺席
+  const msCfg: any = (config as any).memorySearch ?? {};
+  const embCfg: any = msCfg.embedding ?? { provider: "simple" };
+  let embedding: EmbeddingProvider;
+  if (embCfg.provider === "ollama") {
+    embedding = new OllamaEmbeddingProvider({
+      baseUrl: embCfg.baseUrl ?? config.providers.ollama?.baseUrl,
+      model: embCfg.model ?? "nomic-embed-text",
+    });
+  } else if (embCfg.provider === "openai" && (embCfg.apiKey || config.providers.openai?.apiKey)) {
+    embedding = new OpenAIEmbeddingProvider({
+      apiKey: embCfg.apiKey ?? config.providers.openai?.apiKey ?? "",
+      baseUrl: embCfg.baseUrl,
+      model: embCfg.model,
+    });
+  } else {
+    embedding = new SimpleEmbeddingProvider();
+  }
+  const memIndex = new IncrementalIndex(db, embedding);
+  const hybrid =
+    msCfg.hybrid?.enabled !== false
+      ? new HybridSearch(searcher, embedding, workspaceDir)
+      : undefined;
+
+  // 索引集与 MemorySearcher 的 corpus 对齐：工作区 md + memory/ + .dreams/session-corpus
+  async function collectIndexableMdFiles(dir: string, includeDot = false): Promise<string[]> {
+    const out: string[] = [];
+    let entries: any[];
+    try {
+      entries = await fs.readdir(dir, { withFileTypes: true });
+    } catch {
+      return out;
+    }
+    for (const e of entries) {
+      const p = path.join(dir, e.name);
+      if (e.isDirectory()) {
+        if (e.name.startsWith(".") && !includeDot) continue;
+        out.push(...(await collectIndexableMdFiles(p, p.includes(".dreams") || includeDot)));
+      } else if (e.name.endsWith(".md") && !e.name.startsWith(".")) out.push(p);
+    }
+    return out;
+  }
+  let indexBusy = false;
+  async function reindexMemory(): Promise<{ files: number; chunks: number }> {
+    if (indexBusy) return { files: 0, chunks: 0 };
+    indexBusy = true;
+    let files = 0,
+      chunks = 0;
+    try {
+      const targets = [
+        path.join(workspaceDir, "MEMORY.md"),
+        path.join(workspaceDir, "USER.md"),
+        ...(await collectIndexableMdFiles(memoryDir)),
+      ];
+      for (const f of targets) {
+        if (!(await fs.stat(f).then(() => true, () => false))) continue;
+        const src = f.includes(".dreams") ? "session" as const : "memory" as const;
+        chunks += await memIndex.indexFile(f, src);
+        files++;
+      }
+    } finally {
+      indexBusy = false;
+    }
+    return { files, chunks };
+  }
+
+  // 启动后后台建索引（不阻塞监听）+ 周期重检（hash 未变近乎零成本）
+  setTimeout(() => {
+    reindexMemory()
+      .then((r) => r.chunks && console.log(`🧠 记忆向量索引: ${r.files} 文件 / ${r.chunks} 块`))
+      .catch((e) => console.warn("🧠 索引失败:", String(e?.message).slice(0, 120)));
+    const minutes = msCfg.reindexIntervalMinutes ?? 10;
+    setInterval(() => {
+      reindexMemory().catch(() => {});
+    }, minutes * 60000);
+  }, 5000);
+
+  // memory_search 注册进工具表（混合检索可用时走 向量+全文 融合）
+  tools.register(
+    createMemorySearchTool(searcher, {
+      hybrid,
+      weights: msCfg.hybrid,
+    }),
+  );
 
   // websearch：按配置选后端（Tavily/Brave/Bocha key，无 key 回退 Bing 抓取），覆盖内置默认实例
   tools.register(

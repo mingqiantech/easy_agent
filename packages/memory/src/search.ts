@@ -131,3 +131,23 @@ export class MemorySearcher {
     return results;
   }
 }
+
+/**
+ * 检索切词：拉丁词 + CJK 二元组（bigram）。
+ * 中文无空格，整句当一个词只能搜到一字不差的原文；
+ * bigram（相邻二字）能在不改依赖的前提下支持中文子串匹配。
+ */
+export function tokenizeQuery(q: string): string[] {
+  const tokens: string[] = [];
+  const latin = q
+    .toLowerCase()
+    .split(/[^\p{L}\p{N}_-]+/u)
+    .filter((w) => w.length > 1 && !/[\u4e00-\u9fff]/.test(w));
+  tokens.push(...latin);
+  // CJK 连续段：取相邻二字；单字噪声大，只在没有其它 token 时兜底
+  for (const run of q.match(/[\u4e00-\u9fff]+/g) ?? []) {
+    for (let i = 0; i + 1 < run.length; i++) tokens.push(run.slice(i, i + 2));
+    if (run.length === 1) tokens.push(run);
+  }
+  return [...new Set(tokens)];
+}

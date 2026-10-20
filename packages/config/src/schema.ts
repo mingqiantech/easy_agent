@@ -54,6 +54,35 @@ export const ConfigSchema = z.object({
       bochaApiKey: z.string().optional(),
     })
     .default({ provider: "auto" }),
+  /** 记忆检索：向量/混合检索配置。embedding.provider=simple 零依赖离线可用；
+   * ollama/openai 接真模型；hybrid.enabled=false 退回纯关键词 */
+  memorySearch: z
+    .object({
+      embedding: z
+        .object({
+          provider: z.enum(["simple", "ollama", "openai"]).default("simple"),
+          /** ollama/openai 的 API 地址 */
+          baseUrl: z.string().optional(),
+          apiKey: z.string().optional(),
+          /** nomic-embed-text / bge-m3 / text-embedding-3-small 等 */
+          model: z.string().optional(),
+        })
+        .default({ provider: "simple" }),
+      hybrid: z
+        .object({
+          enabled: z.boolean().default(true),
+          vectorWeight: z.number().min(0).max(1).default(0.7),
+          textWeight: z.number().min(0).max(1).default(0.3),
+        })
+        .default({ enabled: true, vectorWeight: 0.7, textWeight: 0.3 }),
+      /** 重索引周期（分钟）：内容 hash 未变时近乎零成本 */
+      reindexIntervalMinutes: z.number().int().min(1).default(10),
+    })
+    .default({
+      embedding: { provider: "simple" },
+      hybrid: { enabled: true, vectorWeight: 0.7, textWeight: 0.3 },
+      reindexIntervalMinutes: 10,
+    }),
   stateDir: z.string().default(""),
   workspaceDir: z.string().default("."),
   // Week 6: 渠道配置（可选）
