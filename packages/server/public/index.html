@@ -130,14 +130,19 @@
 .md pre .tok-tag{color:#e88f9c}
 .md pre .tok-attr{color:#d9b36a}
 .md pre .tok-key{color:#7fb4ea}
-/* 搜索视图 */
-.search-in{flex:1;max-width:420px;padding:7px 12px;border:1px solid var(--border);border-radius:9px;background:var(--bg);font-size:13px;color:var(--fg)}
-.search-results{padding:6px 20px 20px;display:flex;flex-direction:column;gap:8px;overflow-y:auto;flex:1}
-.search-item{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:10px 14px;cursor:pointer}
+/* 侧栏搜索：结果列表替换会话列表 */
+.search-in{width:100%;box-sizing:border-box;padding:7px 26px 7px 10px;border:1px solid var(--border);border-radius:9px;background:var(--bg);font-size:13px;color:var(--fg)}
+.search-box{position:relative;padding:8px 10px 4px;display:none}
+.search-box.on{display:block}
+.search-x{position:absolute;right:16px;top:14px;cursor:pointer;color:var(--muted);font-size:14px;line-height:1;padding:2px 4px}
+.search-x:hover{color:var(--fg)}
+.search-results{flex:1;overflow-y:auto;padding:6px 0 12px}
+.search-hint{padding:6px 12px;font-size:12px;color:var(--muted)}
+.search-item{margin:0 10px 8px;background:var(--card);border:1px solid var(--border);border-radius:10px;padding:8px 10px;cursor:pointer}
 .search-item:hover{background:var(--hover)}
-.si-title{font-size:12.5px;font-weight:600;margin-bottom:4px}
+.si-title{font-size:12px;font-weight:600;margin-bottom:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .si-title small{color:var(--muted);font-weight:400}
-.si-snip{font-size:12.5px;color:var(--muted);line-height:1.6;word-break:break-word}
+.si-snip{font-size:12px;color:var(--muted);line-height:1.55;word-break:break-word;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
 mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2px}
 .message.flash .bubble{outline:2px solid var(--accent);box-shadow:0 0 0 6px rgba(95,148,112,.15)}
     /* 工具调用结果分组折叠 */
@@ -164,14 +169,19 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
     <div class="brand">⚡ Easy Agent</div>
     <div class="agent-pick"><select id="agentSel" onchange="switchAgent()"></select></div>
     <div class="new-btn" onclick="newSession()">＋ 新会话</div>
+    <div class="search-box" id="searchBox">
+      <input id="searchInput" class="search-in" placeholder="🔍 搜索消息，Enter…" autocomplete="off"
+        onfocus="startSearch()" oninput="searchDebounce()" onkeydown="if(event.key==='Enter')runSearch();if(event.key==='Escape')closeSearch()">
+      <span class="search-x" onclick="closeSearch()" title="关闭搜索">✕</span>
+    </div>
     <div class="session-list" id="sessionList"></div>
+    <div class="search-results" id="searchResults" hidden></div>
   </div>
 
   <div class="main">
     <div class="topbar">
       <div class="tabs">
         <div class="tab active" id="tabChat" onclick="showView('chat')">💬 对话</div>
-        <div class="tab" id="tabSearch" onclick="showView('search')">🔍 搜索</div>
         <div class="tab" id="tabTopo" onclick="showView('topo')">🕸 Agent 拓扑</div>
         <div class="tab" id="tabSettings" onclick="showView('settings')">⚙️ 设置</div>
         <div class="tab" id="tabUsage" onclick="showView('usage')">📊 用量</div>
@@ -195,15 +205,6 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
           onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();send()}"></textarea>
         <button class="send-btn" id="sendBtn" onclick="send()">发送</button>
       </div>
-    </div>
-
-    <div class="view" id="searchView" hidden style="display:flex;flex-direction:column;overflow:hidden">
-      <div class="usage-head">
-        <input id="searchInput" class="search-in" placeholder="搜索消息内容（Enter 回车）…" onkeydown="if(event.key==='Enter')runSearch()">
-        <select id="searchScope"><option value="">全部会话</option><option value="cur">仅当前会话</option></select>
-        <button class="action-btn" onclick="runSearch()">搜索</button>
-      </div>
-      <div class="search-results" id="searchResults"><div class="hint">输入关键词，跨会话全文搜索历史消息（含压缩归档）；点结果直达原文并高亮。</div></div>
     </div>
 
     <div class="view" id="topoView" hidden>
@@ -609,29 +610,48 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
       flashMatch();
     }
 
-    /* ── 全文搜索：跨会话搜历史消息，点击结果跳回原文并闪烁定位 ── */
+    /* ── 全文搜索（侧栏内）：输入即搜历史消息，结果替换会话列表；点结果跳回原文闪烁定位 ── */
+    function startSearch(){
+      document.getElementById('searchBox').classList.add('on');
+      document.getElementById('sessionList').hidden=true;
+      const box=document.getElementById('searchResults');box.hidden=false;
+      if(!box.dataset.init){box.dataset.init='1';box.innerHTML='<div class="search-hint">输入关键词搜全部会话（含压缩归档），点结果直达原文。</div>';}
+    }
+    function closeSearch(){
+      document.getElementById('searchResults').hidden=true;
+      document.getElementById('sessionList').hidden=false;
+      document.getElementById('searchInput').value='';
+      document.getElementById('searchBox').classList.remove('on');
+    }
     function markTerm(t,q){
       const i=t.toLowerCase().indexOf(q.toLowerCase());
       if(i<0)return esc(t);
       return esc(t.slice(0,i))+'<mark>'+esc(t.slice(i,i+q.length))+'</mark>'+esc(t.slice(i+q.length));
     }
+    let searchSeq=0, searchDeb=null;
+    function searchDebounce(){
+      if(searchDeb)clearTimeout(searchDeb);
+      const v=document.getElementById('searchInput').value.trim();
+      if(v.length>=2)searchDeb=setTimeout(runSearch,400); // 够 2 字即搜；1 字噪声大等 Enter
+    }
     async function runSearch(){
       const q=document.getElementById('searchInput').value.trim();
       const box=document.getElementById('searchResults');
-      if(!q){box.innerHTML='<div class="hint">输入关键词再搜</div>';return;}
-      box.innerHTML='<div class="hint">搜索中…</div>';
-      const scope=document.getElementById('searchScope').value==='cur'&&sid?`&sid=${encodeURIComponent(sid)}`:'';
+      if(!q){box.innerHTML='<div class="search-hint">输入关键词再搜</div>';return;}
+      const seq=++searchSeq;
+      box.innerHTML='<div class="search-hint">搜索中…</div>';
       try{
-        const j=await (await fetch(`${API}/api/search?q=${encodeURIComponent(q)}${scope}&limit=80`)).json();
-        if(j.error){box.innerHTML='<div class="hint">❌ '+esc(j.error)+'</div>';return;}
-        if(!j.results.length){box.innerHTML='<div class="hint">未找到「'+esc(q)+'」相关消息</div>';return;}
-        box.innerHTML=`<div class="hint">命中 ${j.results.length} 条${scope?'（当前会话）':'（全部会话）'}</div>`+j.results.map(r=>`
+        const j=await (await fetch(`${API}/api/search?q=${encodeURIComponent(q)}&limit=80`)).json();
+        if(seq!==searchSeq)return; // 连打时丢旧响应
+        if(j.error){box.innerHTML='<div class="search-hint">❌ '+esc(j.error)+'</div>';return;}
+        if(!j.results.length){box.innerHTML='<div class="search-hint">未找到「'+esc(q)+'」相关消息</div>';return;}
+        box.innerHTML=`<div class="search-hint">命中 ${j.results.length} 条</div>`+j.results.map(r=>`
           <div class="search-item" data-sid="${esc(r.sessionId)}" data-q="${esc(q)}">
-            <div class="si-title">💬 ${esc(r.title)} <small>${r.role==='user'?'👤 用户':'🤖 助手'} · ${hhmm(r.createdAt)}</small></div>
+            <div class="si-title">💬 ${esc(r.title)} <small>${r.role==='user'?'👤':'🤖'} · ${hhmm(r.createdAt)}</small></div>
             <div class="si-snip">${markTerm(r.snippet,q)}</div>
           </div>`).join('');
         box.querySelectorAll('.search-item').forEach(el=>el.onclick=()=>jumpToResult(el.dataset.sid,el.dataset.q));
-      }catch(e){box.innerHTML='<div class="hint">❌ '+esc(e.message)+'</div>';}
+      }catch(e){if(seq===searchSeq)box.innerHTML='<div class="search-hint">❌ '+esc(e.message)+'</div>';}
     }
     async function jumpToResult(id,term){
       hlTerm=term;
@@ -703,15 +723,14 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
     /* ── 拓扑视图 ── */
     function showView(v){
       curView=v;syncHash();
-      const map={chat:'chatView',topo:'topoView',settings:'settingsView',usage:'usageView',search:'searchView'};
+      const map={chat:'chatView',topo:'topoView',settings:'settingsView',usage:'usageView'};
       for(const k in map)document.getElementById(map[k]).hidden=v!==k;
-      for(const t of ['Chat','Topo','Settings','Usage','Search'])document.getElementById('tab'+t).classList.toggle('active',v===t.toLowerCase());
+      for(const t of ['Chat','Topo','Settings','Usage'])document.getElementById('tab'+t).classList.toggle('active',v===t.toLowerCase());
       if(topoTimer){clearInterval(topoTimer);topoTimer=null;}
       if(usageTimer){clearInterval(usageTimer);usageTimer=null;}
       if(v==='topo'){refreshTopo();topoTimer=setInterval(refreshTopo,5000);}
       if(v==='settings'){loadSettingsView();loadBackups();}
       if(v==='usage'){loadUsage();usageTimer=setInterval(loadUsage,15000);}
-      if(v==='search')setTimeout(()=>document.getElementById('searchInput').focus(),50);
     }
     async function refreshTopo(){
       try{
@@ -972,7 +991,7 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
       const hp=new URLSearchParams(location.hash.slice(1));
       if(hp.get('agent'))agent=hp.get('agent');
       if(hp.get('sid'))sid=hp.get('sid');
-      const v=hp.get('view');if(v&&v!=='chat')curView=v;
+      const v=hp.get('view');if(v&&v!=='chat'&&v!=='search')curView=v; /* 旧 hash #view=search 回退 chat */
       await loadAgents();await loadModels();await loadSessions();
       if(sid){openEvents(sid);await loadMessages();}
       if(curView!=='chat')showView(curView);
