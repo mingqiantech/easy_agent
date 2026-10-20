@@ -20,10 +20,15 @@ describe("settings 存储（梦境调度配置）", () => {
   });
 
   it("保存后读回一致", () => {
-    saveSettings(dir, { dreaming: { enabled: true, intervalMinutes: 180 } });
+    saveSettings(dir, {
+      dreaming: { enabled: true, intervalMinutes: 180 },
+      backup: { enabled: true, intervalHours: 12, keep: 5 },
+    });
     const s = loadSettings(dir);
     expect(s.dreaming.enabled).toBe(true);
     expect(s.dreaming.intervalMinutes).toBe(180);
+    expect(s.backup.intervalHours).toBe(12);
+    expect(s.backup.keep).toBe(5);
   });
 
   it("部分字段缺失回退默认", () => {
@@ -36,6 +41,8 @@ describe("settings 存储（梦境调度配置）", () => {
     expect(s.dreaming.intervalMinutes).toBe(
       DEFAULT_SETTINGS.dreaming.intervalMinutes,
     );
+    // backup 整段缺失→全部回默认（自动化默认开）
+    expect(s.backup).toEqual(DEFAULT_SETTINGS.backup);
   });
 
   it("损坏文件静默回退默认（网关不因设置崩）", () => {

@@ -25,6 +25,7 @@ import {
   remDreaming,
   deepDreaming,
 } from "@easy-agent/memory/dreaming";
+import { BackupManager } from "@easy-agent/core/backup/index";
 import { getDatabase } from "@easy-agent/core/database";
 import { CronManager } from "@easy-agent/core/cron/index";
 import { CronScheduler } from "@easy-agent/core/cron/scheduler";
@@ -237,6 +238,31 @@ async function main() {
     }
   }, 1500);
 
+  // 备份自动化：每日 VACUUM INTO 快照 + 各工作区记忆文件；设置页可开关/调间隔/调保留数
+  const backup = new BackupManager(
+    path.join(config.stateDir, "backups"),
+    10,
+    Object.values(agents)
+      .map((a: any) => [
+        { label: `MEMORY.${a.name}`, path: path.join(a.workspaceDir, "MEMORY.md") },
+        { label: `USER.${a.name}`, path: path.join(a.workspaceDir, "USER.md") },
+      ])
+      .flat(),
+  );
+  setInterval(async () => {
+    try {
+      const st = loadSettings(config.stateDir);
+      if (!st.backup.enabled) return;
+      const list = await backup.list();
+      const latest = list[0]?.createdAt ?? 0;
+      if (Date.now() - latest < st.backup.intervalHours * 3600000) return;
+      const info = await backup.backup({ keep: st.backup.keep });
+      console.log(`💾 自动备份完成: ${info.name} (${(info.size / 1024).toFixed(0)}KB)`);
+    } catch (e: any) {
+      console.warn("💾 备份失败:", String(e?.message).slice(0, 140));
+    }
+  }, 60000);
+
   const app = createApp({
     llm,
     sessions,
@@ -247,6 +273,7 @@ async function main() {
     agents,
     runDreaming: runDreamingCycle,
     cron,
+    backup,
   });
 
   // 梦境调度：每分钟查 settings.json；上次运行时间从 dreaming_state 读（重启不丢）

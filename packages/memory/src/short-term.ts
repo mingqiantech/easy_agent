@@ -30,6 +30,26 @@ export class ShortTermMemory {
     return id;
   }
 
+  /**
+   * 重要事实：直接满足晋升门槛（recall/unique 预热），不等被检索命中。
+   * 轻眠（lightDreaming）提取时标 [重要] 的条目走这里，形成提取→晋升闭环。
+   */
+  addImportant(text: string, origin?: string): string {
+    const id = ulid();
+    const now = Date.now();
+    const today = new Date().toISOString().slice(0, 10);
+    this.db
+      .prepare(
+        `
+      INSERT INTO short_term_memory (id, text, origin, recall_count, unique_queries,
+        recall_days, last_recalled_at, created_at)
+      VALUES (?, ?, ?, 3, 2, ?, ?, ?)
+    `,
+      )
+      .run(id, text, origin ?? null, JSON.stringify([today]), now, now);
+    return id;
+  }
+
   getActive(): ShortTermEntry[] {
     return this.db
       .prepare(

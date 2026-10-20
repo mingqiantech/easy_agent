@@ -118,6 +118,10 @@ describe("Week7: BackupManager", () => {
 
   it("refuses restoring from a missing file", async () => {
     const manager = new BackupManager(path.join(TEST_DIR, "backups"));
-    await expect(manager.restore("/nonexistent/backup.db")).rejects.toThrow("not found");
+    // 目录外路径 → 拒绝（防任意文件读取）；目录内不存在 → not found
+    await expect(manager.restore("/nonexistent/backup.db")).rejects.toThrow("not a backup file");
+    await expect(
+      manager.restore(path.join(TEST_DIR, "backups", "backup-missing.db")),
+    ).rejects.toThrow("not found");
   });
 });

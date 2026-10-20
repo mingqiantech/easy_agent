@@ -7,6 +7,7 @@ import type { SessionManager } from "@easy-agent/core/session";
 import { ToolRegistry } from "@easy-agent/core/tool/registry";
 import type { MemorySearcher } from "@easy-agent/memory/search";
 import type { BasicMemory } from "@easy-agent/core/memory/basic";
+import type { BackupManager } from "@easy-agent/core/backup/index";
 import { serveStatic } from "hono/bun";
 import { streamSSE } from "hono/streaming";
 import { Observability } from "@easy-agent/core/observability";
@@ -64,6 +65,8 @@ export interface ServerDeps {
   agents: Record<string, AgentRuntime>;
   /** 梦境单轮执行器（index.ts 注入：接线 + 防并发） */
   runDreaming?: () => Promise<Record<string, unknown>>;
+  /** 备份管理器（设置页备份卡片 + 定时调度共用） */
+  backup?: BackupManager;
   /** cron/事件 watcher 管理器 */
   cron?: CronManager;
 }
@@ -431,6 +434,20 @@ export function createApp(deps: ServerDeps): Hono {
         return c.json({ error: "intervalMinutes 需在 5~10080 分钟之间" }, 400);
       cur.dreaming.intervalMinutes = v;
     }
+    const b = body.backup ?? {};
+    if (typeof b.enabled === "boolean") cur.backup.enabled = b.enabled;
+    if (typeof b.intervalHours === "number") {
+      const v = Math.round(b.intervalHours);
+      if (v < 1 || v > 168)
+        return c.json({ error: "intervalHours 需在 1~168 之间" }, 400);
+      cur.backup.intervalHours = v;
+    }
+    if (typeof b.keep === "number") {
+      const v = Math.round(b.keep);
+      if (v < 1 || v > 50)
+        return c.json({ error: "keep 需在 1~50 之间" }, 400);
+      cur.backup.keep = v;
+    }
     saveSettings(deps.config.stateDir, cur);
     return c.json({ settings: cur });
   });
@@ -442,6 +459,100 @@ export function createApp(deps: ServerDeps): Hono {
     } catch (e: any) {
       return c.json({ error: String(e?.message ?? e) }, 500);
     }
+  });
+
+  // ── 备份：列表 / 立即备份 / 恢复（设置页备份卡片） ──
+  app.get("/api/backup", async (c) => {
+    if (!deps.backup) return c.json({ error: "备份不可用" }, 503);
+    const st = loadSettings(deps.config.stateDir);
+    return c.json({ settings: st.backup, backups: await deps.backup.list() });
+  });
+  app.post("/api/backup", async (c) => {
+    if (!deps.backup) return c.json({ error: "备份不可用" }, 503);
+    const st = loadSettings(deps.config.stateDir);
+    try {
+      return c.json({ ok: true, backup: await deps.backup.backup({ keep: st.backup.keep }) });
+    } catch (e: any) {
+      return c.json({ error: String(e?.message ?? e) }, 500);
+    }
+  });
+  app.post("/api/backup/restore", async (c) => {
+    if (!deps.backup) return c.json({ error: "备份不可用" }, 503);
+    const body = await c.req.json().catch(() => ({}) as any);
+    const name = String(body.name ?? "");
+    // 只接受备份目录内的文件名，防路径穿越
+    if (!name || name.includes("/") || name.includes("..") || !name.startsWith("backup-"))
+      return c.json({ error: "非法备份名" }, 400);
+    const p = path.join(deps.backup.dir, name);
+    if (!fs.existsSync(p)) return c.json({ error: "备份不存在" }, 404);
+    try {
+      await deps.backup.restore(p);
+      return c.json({ ok: true, restartNeeded: true });
+    } catch (e: any) {
+      return c.json({ error: String(e?.message ?? e) }, 500);
+    }
+  });
+
+  // ── 全文搜索：跨会话搜消息（含压缩归档） ──
+  app.get("/api/search", (c) => {
+    const q = (c.req.query("q") ?? "").trim();
+    if (!q) return c.json({ error: "missing q" }, 400);
+    if (q.length > 200) return c.json({ error: "q 过长（≤200 字）" }, 400);
+    const sidF = c.req.query("sid") || null;
+    const limit = Math.min(Number(c.req.query("limit") ?? 60) || 60, 200);
+    const db2 = getDatabase();
+    const like = `%${q}%`;
+    const args: any[] = sidF ? [like, sidF, like, sidF] : [like, like];
+    const sidCond = sidF ? " AND m.session_id = ?" : "";
+    const rows = db2
+      .prepare(
+        `SELECT session_id AS sessionId, title, role, content, created_at AS createdAt FROM (
+           SELECT m.session_id, s.title, m.role, m.content, m.created_at
+             FROM messages m JOIN sessions s ON s.id = m.session_id
+            WHERE m.content LIKE ?${sidCond} AND m.role IN ('user','assistant')
+           UNION ALL
+           SELECT m.session_id, s.title, m.role, m.content, m.created_at
+             FROM messages_archive m JOIN sessions s ON s.id = m.session_id
+            WHERE m.content LIKE ?${sidCond} AND m.role IN ('user','assistant')
+         ) ORDER BY created_at DESC LIMIT ?`,
+      )
+      .all(...args, limit) as any[];
+    // 助手历史可能存 {text,toolCalls} JSON：提纯后再匹配，避免命中 JSON 噪声
+    const clean = (role: string, content: string) => {
+      if (role === "assistant") {
+        try {
+          const p = JSON.parse(content);
+          if (p && typeof p === "object")
+            return String(
+              p.text ??
+                (p.toolCalls?.length
+                  ? "🔧 " + p.toolCalls.map((t: any) => t.name).join(", ")
+                  : ""),
+            );
+        } catch {}
+      }
+      return content;
+    };
+    const ql = q.toLowerCase();
+    const results: any[] = [];
+    for (const r of rows) {
+      const text = clean(r.role, r.content ?? "");
+      const qi = text.toLowerCase().indexOf(ql);
+      if (qi < 0) continue;
+      const start = Math.max(0, qi - 80);
+      const end = Math.min(text.length, qi + q.length + 160);
+      results.push({
+        sessionId: r.sessionId,
+        title: r.title || "(未命名)",
+        role: r.role,
+        createdAt: r.createdAt,
+        snippet:
+          (start > 0 ? "…" : "") +
+          text.slice(start, end).trim() +
+          (end < text.length ? "…" : ""),
+      });
+    }
+    return c.json({ query: q, total: results.length, results });
   });
 
   // MEMORY.md 读写（设置页记忆编辑器）

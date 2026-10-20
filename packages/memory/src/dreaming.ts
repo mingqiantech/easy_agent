@@ -21,16 +21,93 @@ export interface DreamingDeps {
   writeMemory: (content: string) => Promise<void>;
 }
 
+/** 轻眠提取提示词：只提值得长记的事，[重要] 前缀的条目直接进晋升候选 */
+const LIGHT_PROMPT = `你是记忆提取器。从对话片段中提取值得长期记住的事实（用户偏好、决策、身份信息、经验教训），忽略闲聊、格式说明和一次性任务细节。
+每条必须是完整、可独立理解的句子（10~80 字），不要输出 XML 标签、段落标题或方括号标签。
+输出格式：每行一条，最多 8 条，以 • 开头；值得立即固化的行加 [重要] 前缀。
+没有可提取的内容时只输出：无
+
+对话片段：
+`;
+
+/**
+ * 浅眠：扫新消息（rowid 游标增量）→ LLM 提取事实 → 写入短期记忆。
+ * 这是 Dreaming 闭环的入口：对话→提取→(REM 评分)→深眠晋升 MEMORY.md→下轮 system prompt 注入。
+ * LLM 失败时游标不前进，下个周期重试（不丢窗口）。
+ */
 export async function lightDreaming(
   deps: DreamingDeps,
+  opts: { maxMsgs?: number } = {},
 ): Promise<{ processed: number; extracted: number }> {
   const now = Date.now();
-  deps.db
+  const persist = (cursor: number, processed: number, extracted: number) =>
+    deps.db
+      .prepare(
+        `INSERT OR REPLACE INTO dreaming_state (phase, last_run_at, state, updated_at) VALUES ('light', ?, ?, ?)`,
+      )
+      .run(
+        now,
+        JSON.stringify({ cursor, processed, extracted }),
+        now,
+      );
+
+  let cursor = 0;
+  try {
+    const row = deps.db
+      .prepare("SELECT state FROM dreaming_state WHERE phase='light'")
+      .get() as any;
+    cursor = Number(JSON.parse(row?.state ?? "{}")?.cursor ?? 0);
+  } catch {}
+
+  const msgs = deps.db
     .prepare(
-      `INSERT OR REPLACE INTO dreaming_state (phase, last_run_at, state, updated_at) VALUES ('light', ?, '{}', ?)`,
+      `SELECT rowid AS rid, session_id AS sessionId, role, content FROM messages
+       WHERE rowid > ? AND role IN ('user','assistant')
+       ORDER BY rowid LIMIT ?`,
     )
-    .run(now, now);
-  return { processed: 0, extracted: 0 };
+    .all(cursor, opts.maxMsgs ?? 300) as any[];
+  if (!msgs.length) return { processed: 0, extracted: 0 };
+  const maxRid = msgs[msgs.length - 1].rid as number;
+
+  const snippets: string[] = [];
+  for (const m of msgs) {
+    let text = String(m.content ?? "").trim();
+    // assistant 历史可能存的是 {text,toolCalls} JSON，取纯文本
+    if (m.role === "assistant") {
+      try {
+        const p = JSON.parse(text);
+        if (p && typeof p === "object") text = String(p.text ?? "").trim();
+      } catch {}
+    }
+    if (!text || text.startsWith("【摘要】") || text.startsWith("【系统恢复】")) continue;
+    if (text.length < 12 || text.length > 600) continue;
+    snippets.push(`[${m.role}] ${text.slice(0, 400)}`);
+  }
+
+  if (!snippets.length) {
+    persist(maxRid, msgs.length, 0);
+    return { processed: msgs.length, extracted: 0 };
+  }
+
+  let extracted = 0;
+  const out = await deps.llmGenerate(LIGHT_PROMPT + snippets.join("\n"));
+  for (const rawLine of out.split("\n")) {
+    const line = rawLine.trim().replace(/^[•\-*+\d.、\s]+/, "").trim();
+    if (!line || /^无[。.]?$/.test(line)) continue;
+    const important = line.startsWith("[重要]");
+    const fact = line.replace(/^\[重要\]\s*/, "").trim();
+    // 质量闸门：要求完整句子；丢弃 XML 标签碎片和纯标题式短语
+    if (fact.length < 10 || fact.length > 200) continue;
+    if (/[<>]/.test(fact)) continue;
+    if (/^[【\[(（].*[】\])）]$/.test(fact)) continue;
+    const origin = `light:msg#${maxRid}`;
+    if (important) deps.shortTerm.addImportant(fact, origin);
+    else deps.shortTerm.add(fact, origin);
+    extracted++;
+  }
+
+  persist(maxRid, msgs.length, extracted);
+  return { processed: msgs.length, extracted };
 }
 
 export async function remDreaming(

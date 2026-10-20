@@ -9,6 +9,8 @@ export interface Skill {
   triggers: string[];
   /** 需要的工具 */
   requiredTools: string[];
+  /** SKILL.md 所在目录（绝对路径） */
+  dir: string;
   /** 指令正文（注入给 Agent 的步骤说明） */
   instructions: string;
 }
@@ -90,6 +92,7 @@ export class SkillManager {
       description: String(parsed.frontmatter.description ?? ""),
       triggers: toStringArray(parsed.frontmatter.triggers),
       requiredTools: toStringArray(parsed.frontmatter.requiredTools),
+      dir: path.dirname(filePath),
       instructions: parsed.body.trim(),
     };
   }

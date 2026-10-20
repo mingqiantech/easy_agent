@@ -121,6 +121,25 @@
     .message.toolchip .clipped::after{background:linear-gradient(to bottom,transparent,var(--tool))}
     .expand-btn{display:inline-block;margin-top:6px;font-size:12px;color:var(--accent);cursor:pointer;user-select:none;border:1px solid var(--border);border-radius:8px;padding:2px 10px;background:var(--card)}
     .expand-btn:hover{background:var(--hover)}
+/* 代码高亮 token（深色 pre 专用） */
+.md pre .tok-kw{color:#c39df0}
+.md pre .tok-str{color:#93d4a4}
+.md pre .tok-com{color:#7b8496;font-style:italic}
+.md pre .tok-num{color:#e8b37c}
+.md pre .tok-fn{color:#7fb4ea}
+.md pre .tok-tag{color:#e88f9c}
+.md pre .tok-attr{color:#d9b36a}
+.md pre .tok-key{color:#7fb4ea}
+/* 搜索视图 */
+.search-in{flex:1;max-width:420px;padding:7px 12px;border:1px solid var(--border);border-radius:9px;background:var(--bg);font-size:13px;color:var(--fg)}
+.search-results{padding:6px 20px 20px;display:flex;flex-direction:column;gap:8px;overflow-y:auto;flex:1}
+.search-item{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:10px 14px;cursor:pointer}
+.search-item:hover{background:var(--hover)}
+.si-title{font-size:12.5px;font-weight:600;margin-bottom:4px}
+.si-title small{color:var(--muted);font-weight:400}
+.si-snip{font-size:12.5px;color:var(--muted);line-height:1.6;word-break:break-word}
+mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2px}
+.message.flash .bubble{outline:2px solid var(--accent);box-shadow:0 0 0 6px rgba(95,148,112,.15)}
     /* 工具调用结果分组折叠 */
     .toolgroup{margin-bottom:14px}
     .toolgroup-head{display:inline-flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);cursor:pointer;user-select:none;padding:4px 10px;border:1px solid var(--border);border-radius:10px;background:var(--card)}
@@ -152,6 +171,7 @@
     <div class="topbar">
       <div class="tabs">
         <div class="tab active" id="tabChat" onclick="showView('chat')">💬 对话</div>
+        <div class="tab" id="tabSearch" onclick="showView('search')">🔍 搜索</div>
         <div class="tab" id="tabTopo" onclick="showView('topo')">🕸 Agent 拓扑</div>
         <div class="tab" id="tabSettings" onclick="showView('settings')">⚙️ 设置</div>
         <div class="tab" id="tabUsage" onclick="showView('usage')">📊 用量</div>
@@ -177,6 +197,15 @@
       </div>
     </div>
 
+    <div class="view" id="searchView" hidden style="display:flex;flex-direction:column;overflow:hidden">
+      <div class="usage-head">
+        <input id="searchInput" class="search-in" placeholder="搜索消息内容（Enter 回车）…" onkeydown="if(event.key==='Enter')runSearch()">
+        <select id="searchScope"><option value="">全部会话</option><option value="cur">仅当前会话</option></select>
+        <button class="action-btn" onclick="runSearch()">搜索</button>
+      </div>
+      <div class="search-results" id="searchResults"><div class="hint">输入关键词，跨会话全文搜索历史消息（含压缩归档）；点结果直达原文并高亮。</div></div>
+    </div>
+
     <div class="view" id="topoView" hidden>
       <div class="topo-wrap"><svg id="topoSvg" width="100%" height="380"></svg></div>
       <div class="topo-cards" id="topoCards"></div>
@@ -194,6 +223,19 @@
           <button class="action-btn" onclick="runDreamNow()" id="dreamRunBtn">▶ 立即运行一次</button>
           <button class="action-btn" onclick="saveSettings()" style="margin-left:8px">💾 保存设置</button>
           <div class="hint" id="dreamStatus"></div>
+        </div>
+        <div class="card">
+          <h3>💾 数据备份</h3>
+          <div class="hint" style="margin-top:0">SQLite 一致性快照（VACUUM INTO）+ 各 agent 工作区 MEMORY/USER.md，存 backups/。恢复会用选中备份覆盖当前库（先自动留安全副本），完成后需重启服务生效。</div>
+          <div class="set-row" style="margin-top:12px"><label><input type="checkbox" id="bkEnabled"> 启用自动备份</label></div>
+          <div class="set-row">间隔 <select id="bkInterval">
+            <option value="6">6 小时</option><option value="12">12 小时</option><option value="24">24 小时</option><option value="48">2 天</option><option value="72">3 天</option>
+          </select> 保留 <select id="bkKeep">
+            <option value="3">3</option><option value="5">5</option><option value="7">7</option><option value="10">10</option><option value="20">20</option>
+          </select> 份</div>
+          <button class="action-btn" onclick="backupNow()" id="bkNowBtn">▶ 立即备份一次</button>
+          <button class="action-btn" onclick="saveSettings()" style="margin-left:8px">💾 保存设置</button>
+          <div class="hint" id="bkList"></div>
         </div>
         <div class="card">
           <h3>🧠 长期记忆 MEMORY.md</h3>
@@ -224,6 +266,8 @@
   <script>
     const API='';
     let sid=null, agent='default', topoTimer=null, usageTimer=null, models=[];  let es=null, esSid=null, live=null;
+    let liveRaw='', liveRT=null;   /* 流式增量 md 渲染：原始文本缓冲 + 节流定时器 */
+    let hlTerm='';                 /* 搜索结果跳转后的一次性高亮词 */
     let curView='chat';
     /* URL 状态：#agent=x&sid=y&view=chat —— 刷新/收藏后回到原界面 */
     function syncHash(){
@@ -360,6 +404,83 @@
       s=s.replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>');
       return s;
     }
+    /* ── 轻量代码高亮（纯 JS 无依赖）：按语言族逐 token 着色，未知语言原样输出 ── */
+    const HL_LANGS={javascript:'js',js:'js',jsx:'js',mjs:'js',cjs:'js',typescript:'js',ts:'js',tsx:'js',node:'js',php:'js',
+      python:'py',py:'py',shell:'sh',bash:'sh',zsh:'sh',sh:'sh',console:'sh',
+      go:'go',golang:'go',rust:'rs',rs:'rs',java:'java',kotlin:'java',scala:'java',
+      c:'cc',cpp:'cc',cs:'cc',objective_c:'cc',sql:'sql',json:'json',
+      html:'markup',xml:'markup',vue:'markup',css:'css',scss:'css',yaml:'yaml',yml:'yaml',toml:'yaml'};
+    const HL_KW={
+      js:'const|let|var|function|return|if|else|for|while|do|switch|case|default|break|continue|class|extends|new|import|export|from|as|async|await|try|catch|finally|throw|typeof|instanceof|this|null|undefined|true|false|of|in|delete|void|yield|static|super|interface|type|enum|public|private|protected|readonly',
+      py:'def|class|return|if|elif|else|for|while|import|from|try|except|finally|with|as|lambda|yield|raise|pass|break|continue|global|nonlocal|assert|del|and|or|not|in|is|None|True|False|self|async|await',
+      sh:'if|then|else|elif|fi|for|while|do|done|case|esac|function|in|exit|return|export|local|read|source|set|shift|eval|trap',
+      go:'func|package|import|var|const|type|struct|interface|map|chan|go|defer|if|else|for|return|range|switch|case|default|nil|make|new|select|string|int|error',
+      rs:'fn|let|mut|const|static|struct|enum|impl|trait|pub|use|mod|match|if|else|for|while|loop|return|self|crate|where|as|dyn|ref|move|async|await|Some|None|Ok|Err',
+      java:'public|private|protected|class|interface|extends|implements|static|final|void|int|long|double|boolean|char|return|if|else|for|while|do|switch|case|break|continue|new|try|catch|finally|throw|throws|import|package|this|super|abstract',
+      cc:'int|long|char|float|double|void|return|if|else|for|while|do|switch|case|break|continue|struct|typedef|sizeof|static|const|unsigned|signed|extern|goto|union|enum|auto|class|template|namespace|using|nullptr|true|false|new|delete',
+      sql:'select|from|where|insert|into|values|update|set|delete|create|table|drop|alter|add|column|join|left|right|inner|outer|on|group|by|order|limit|offset|as|and|or|not|null|distinct|count|sum|avg|min|max|case|when|then|else|end|like|in|between|having|union|all|primary|key|foreign|references|index',
+      json:'true|false|null'};
+    const hlCache={};
+    function hlRules(fam){
+      if(hlCache[fam])return hlCache[fam];
+      const r2=[];
+      if(fam==='markup'){
+        r2.push([/<!--[\s\S]*?(?:-->|$)/y,'com']);
+        r2.push([/<\/?[A-Za-z][\w:-]*/y,'tag']);
+        r2.push([/[A-Za-z_:][\w:.-]*(?==)/y,'attr']);
+        r2.push([/"[^"]*"|'[^']*'/y,'str']);
+      }else if(fam==='css'){
+        r2.push([/\/\*[\s\S]*?(?:\*\/|$)/y,'com']);
+        r2.push([/@[\w-]+/y,'kw']);
+        r2.push([/[\w-]+(?=\s*:)/y,'attr']);
+        r2.push([/"[^"]*"|'[^']*'/y,'str']);
+        r2.push([/#[0-9a-fA-F]{3,8}\b|\b\d[\d.]*(?:px|em|rem|%|vh|vw|s|ms)?\b/y,'num']);
+        r2.push(/[.;{},]/y,'p');
+      }else{
+        const line=(fam==='py'||fam==='sh'||fam==='yaml')?'#':fam==='sql'?'--':'\/\/';
+        r2.push([new RegExp(line+'[^\\n]*','y'),'com']);
+        if(fam!=='yaml'&&fam!=='sql'){
+          r2.push([new RegExp('\\/\\*[\\s\\S]*?(?:\\*\\/|$)','y'),'com']);
+        }
+        if(fam==='py'){
+          r2.push([/[fFRb]*"""[\s\S]*?(?:"""|$)|[fFRb]*'''[\s\S]*?(?:'''|$)/y,'str']);
+        }
+        r2.push([/"(?:\\.|[^"\\\n])*"?|'(?:\\.|[^'\\\n])*'?/y,'str']);
+        if(fam==='js')r2.push([/`(?:\\.|[^`\\])*`?/y,'str']);
+        if(fam==='yaml'){
+          r2.push([/^[ \t-]*[\w.-]+(?=\s*:)/my,'key']);
+          r2.push([/\b(?:true|false|null|yes|no)\b/y,'kw']);
+          r2.push([/\b\d[\d_.:-]*\b/y,'num']);
+        }else if(fam==='json'){
+          r2.push([/"(?:\\.|[^"\\])*"(?=\s*:)/y,'key']);
+          r2.push([/\b-?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?\b/y,'num']);
+        }else{
+          r2.push([/\b-?\d[\w.]*\b/y,'num']);
+        }
+        if(HL_KW[fam])r2.push([new RegExp('\\b(?:'+HL_KW[fam]+')\\b','y'+(fam==='sql'?'i':'')),'kw']);
+        if(fam!=='json'&&fam!=='sql')r2.push([/\b[A-Za-z_$][\w$]*(?=\s*\()/y,'fn']);
+        if(fam==='sh')r2.push([/\$\{[^}]*\}|\$[A-Za-z_][\w]*/y,'key']);
+      }
+      hlCache[fam]=r2;return r2;
+    }
+    function hlCode(src,lang){
+      const fam=HL_LANGS[(lang||'').toLowerCase()];
+      if(!fam)return esc(src);
+      const rules=hlRules(fam);
+      let out='',i=0;
+      while(i<src.length){
+        let hit=null;
+        for(const [re,cls] of rules){
+          re.lastIndex=i;
+          const m=re.exec(src);
+          if(m&&m[0].length){hit=[m[0],cls];break;}
+        }
+        if(hit){out+=`<span class="tok-${hit[1]}">${esc(hit[0])}</span>`;i+=hit[0].length;}
+        else{out+=esc(src[i]);i++;}
+      }
+      return out;
+    }
+
     function mdToHtml(src){
       const lines=String(src).replace(/｜/g,'|').split('\n');
       let out='',i=0,inUl=false,inOl=false;
@@ -380,7 +501,7 @@
             if(buf.length>=60){closed=true;break;}
             buf.push(lines[i]);i++;
           }
-          out+=`<pre${lang?` data-lang="${esc(lang)}"`:''}><span class="copy-btn" role="button">复制</span><code>${esc(buf.join('\n'))}</code></pre>`;
+          out+=`<pre${lang?` data-lang="${esc(lang)}"`:''}><span class="copy-btn" role="button">复制</span><code>${hlCode(buf.join('\n'),lang)}</code></pre>`;
           continue;
         }
         // 表格：当前行含 | 且下一行是分隔行
@@ -485,6 +606,52 @@
       groupToolMessages();
       applyCollapse();
       c.scrollTop=c.scrollHeight;
+      flashMatch();
+    }
+
+    /* ── 全文搜索：跨会话搜历史消息，点击结果跳回原文并闪烁定位 ── */
+    function markTerm(t,q){
+      const i=t.toLowerCase().indexOf(q.toLowerCase());
+      if(i<0)return esc(t);
+      return esc(t.slice(0,i))+'<mark>'+esc(t.slice(i,i+q.length))+'</mark>'+esc(t.slice(i+q.length));
+    }
+    async function runSearch(){
+      const q=document.getElementById('searchInput').value.trim();
+      const box=document.getElementById('searchResults');
+      if(!q){box.innerHTML='<div class="hint">输入关键词再搜</div>';return;}
+      box.innerHTML='<div class="hint">搜索中…</div>';
+      const scope=document.getElementById('searchScope').value==='cur'&&sid?`&sid=${encodeURIComponent(sid)}`:'';
+      try{
+        const j=await (await fetch(`${API}/api/search?q=${encodeURIComponent(q)}${scope}&limit=80`)).json();
+        if(j.error){box.innerHTML='<div class="hint">❌ '+esc(j.error)+'</div>';return;}
+        if(!j.results.length){box.innerHTML='<div class="hint">未找到「'+esc(q)+'」相关消息</div>';return;}
+        box.innerHTML=`<div class="hint">命中 ${j.results.length} 条${scope?'（当前会话）':'（全部会话）'}</div>`+j.results.map(r=>`
+          <div class="search-item" data-sid="${esc(r.sessionId)}" data-q="${esc(q)}">
+            <div class="si-title">💬 ${esc(r.title)} <small>${r.role==='user'?'👤 用户':'🤖 助手'} · ${hhmm(r.createdAt)}</small></div>
+            <div class="si-snip">${markTerm(r.snippet,q)}</div>
+          </div>`).join('');
+        box.querySelectorAll('.search-item').forEach(el=>el.onclick=()=>jumpToResult(el.dataset.sid,el.dataset.q));
+      }catch(e){box.innerHTML='<div class="hint">❌ '+esc(e.message)+'</div>';}
+    }
+    async function jumpToResult(id,term){
+      hlTerm=term;
+      const th=document.getElementById('thinkingSlot');if(th)th.remove();
+      clearLive();
+      showView('chat');            /* 先切回对话视图，scrollIntoView 才有效 */
+      await selectSession(id);      /* 内部 openEvents+loadMessages，loadMessages 尾部 flashMatch 定位 */
+    }
+    function flashMatch(){
+      if(!hlTerm)return;
+      const term=hlTerm.toLowerCase();hlTerm='';
+      const c=document.getElementById('messages');
+      const els=[...c.querySelectorAll('.bubble .clippable')];
+      /* 从后往前：同一会话多次命中时先定位最近一条 */
+      const hit=[...els].reverse().find(el=>(el.textContent||'').toLowerCase().includes(term));
+      if(!hit)return;
+      const msg=hit.closest('.message');if(!msg)return;
+      msg.scrollIntoView({block:'center'});
+      msg.classList.add('flash');
+      setTimeout(()=>msg.classList.remove('flash'),2600);
     }
 
     function setSendMode(run){const b=document.getElementById('sendBtn');if(run){b.textContent='\u25a0 \u505c\u6b62';b.onclick=abortRun;}else{b.textContent='\u53d1\u9001';b.onclick=send;}b.disabled=false;b.title='';}
@@ -536,14 +703,15 @@
     /* ── 拓扑视图 ── */
     function showView(v){
       curView=v;syncHash();
-      const map={chat:'chatView',topo:'topoView',settings:'settingsView'  ,usage:'usageView'};
+      const map={chat:'chatView',topo:'topoView',settings:'settingsView',usage:'usageView',search:'searchView'};
       for(const k in map)document.getElementById(map[k]).hidden=v!==k;
-      for(const t of ['Chat','Topo','Settings','Usage'])document.getElementById('tab'+t).classList.toggle('active',v===t.toLowerCase());
+      for(const t of ['Chat','Topo','Settings','Usage','Search'])document.getElementById('tab'+t).classList.toggle('active',v===t.toLowerCase());
       if(topoTimer){clearInterval(topoTimer);topoTimer=null;}
       if(usageTimer){clearInterval(usageTimer);usageTimer=null;}
       if(v==='topo'){refreshTopo();topoTimer=setInterval(refreshTopo,5000);}
-      if(v==='settings')loadSettingsView();
+      if(v==='settings'){loadSettingsView();loadBackups();}
       if(v==='usage'){loadUsage();usageTimer=setInterval(loadUsage,15000);}
+      if(v==='search')setTimeout(()=>document.getElementById('searchInput').focus(),50);
     }
     async function refreshTopo(){
       try{
@@ -635,7 +803,19 @@
       esRetryDelay=1000; esLostOnce=false;
       if(es){es.close();es=null;} esSid=null;clearLive();finalizeP=null;
     }
-    function clearLive(){if(live){live.remove();live=null;}}
+    /* 流式增量 md 渲染：原文进缓冲，~120ms 节流重渲染（mdToHtml 对未闭合围栏/表格有兕底） */
+    function renderLive(){
+      if(!live||!document.contains(live))return;
+      live.querySelector('.live-text').innerHTML=mdToHtml(liveRaw);
+      const c=document.getElementById('messages');c.scrollTop=c.scrollHeight;
+    }
+    function appendLive(t,sync){
+      liveRaw+=t;
+      if(sync){if(liveRT){clearTimeout(liveRT);liveRT=null;}renderLive();return;}
+      if(liveRT)return;
+      liveRT=setTimeout(()=>{liveRT=null;renderLive();},120);
+    }
+    function clearLive(){if(liveRT){clearTimeout(liveRT);liveRT=null;}liveRaw='';if(live){live.remove();live=null;}}
     /* live 气泡 → 全量历史平滑衔接：淡出旧泡同时渲染 DB 内容，避免刷新闪一下 */
     let finalizeP=null;
     function fadeRemoveLive(){
@@ -664,18 +844,18 @@
       const c=document.getElementById('messages');
       if(c.querySelector('.empty'))c.innerHTML='';
       const wrap=document.createElement('div');
-      wrap.innerHTML='<div class="message assistant"><div class="avatar">🤖</div><div><div class="bubble"><div class="live-text"></div><div class="live-chips"></div></div></div>';
+      wrap.innerHTML='<div class="message assistant"><div class="avatar">🤖</div><div><div class="bubble"><div class="live-text md"></div><div class="live-chips"></div></div></div>';
       c.appendChild(wrap.firstElementChild);
-      live=c.lastElementChild;c.scrollTop=c.scrollHeight;return live;
+      live=c.lastElementChild;liveRaw='';c.scrollTop=c.scrollHeight;return live;
     }
     function handleStreamEvent(e){
       if(!e||e.sessionId!==sid)return;
       if(e.type==='run_start'){ensureLive();return;}
-      if(e.type==='text'){const l=ensureLive();l.querySelector('.live-text').textContent+=e.text||'';const c=document.getElementById('messages');c.scrollTop=c.scrollHeight;return;}
+      if(e.type==='text'){ensureLive();appendLive(e.text||'');return;}
       if(e.type==='tool_start'){ensureLive().querySelector('.live-chips').insertAdjacentHTML('beforeend',`<span class="tool-chip">⏳ ${esc(e.name)}</span>`);return;}
       if(e.type==='tool_end'){if(!live||!document.contains(live))return;const chips=live.querySelectorAll('.tool-chip');for(let i=chips.length-1;i>=0;i--){if((chips[i].textContent||'').includes(e.name)){chips[i].innerHTML=`✅ ${esc(e.name)} <small style="color:var(--muted)">${esc((e.preview||'').slice(0,70))}</small>`;break;}}return;}
-      if(e.type==='run_end'){setSendMode(false);if(e.error&&live&&document.contains(live)){live.querySelector('.live-text').textContent+='\n❌ '+e.error;}finalizeRun();return;}
-      if(e.type==='aborted'){const l=ensureLive();l.querySelector('.live-text').textContent+='\n⏹ 已中断';return;}
+      if(e.type==='run_end'){setSendMode(false);if(e.error&&live&&document.contains(live)){appendLive('\n❌ '+e.error,true);}finalizeRun();return;}
+      if(e.type==='aborted'){ensureLive();appendLive('\n⏹ 已中断',true);return;}
     }
 
     /* ── 子代理着色/入口（运行记录展示已并入 Agent 拓扑图） ── */
@@ -705,10 +885,43 @@
       }catch(e){}
     }
     async function saveSettings(){
-      const body={dreaming:{enabled:document.getElementById('dreamEnabled').checked,intervalMinutes:Number(document.getElementById('dreamInterval').value)}};
+      const body={
+        dreaming:{enabled:document.getElementById('dreamEnabled').checked,intervalMinutes:Number(document.getElementById('dreamInterval').value)},
+        backup:{enabled:document.getElementById('bkEnabled').checked,intervalHours:Number(document.getElementById('bkInterval').value),keep:Number(document.getElementById('bkKeep').value)},
+      };
       const r=await fetch(`${API}/api/settings`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
       const j=await r.json();
       document.getElementById('setMsg').textContent=j.error?'❌ '+j.error:'✓ 设置已保存，调度器一分钟内生效';
+      if(!j.error)loadBackups();
+    }
+
+    /* ── 备份：列表/开关/立即备份/恢复 ── */
+    const fmtKB=n=>n>=1048576?(n/1048576).toFixed(1)+'MB':(n/1024).toFixed(0)+'KB';
+    async function loadBackups(){
+      try{
+        const j=await (await fetch(`${API}/api/backup`)).json();
+        if(j.error)return;
+        document.getElementById('bkEnabled').checked=!!j.settings.enabled;
+        document.getElementById('bkInterval').value=String(j.settings.intervalHours);
+        document.getElementById('bkKeep').value=String(j.settings.keep);
+        const rows=(j.backups||[]).map(b=>`<div>▸ ${esc(b.name)} · ${fmtKB(b.size)} · ${ago(b.createdAt)} <button class="expand-btn" style="margin-left:6px" onclick="restoreBackup('${esc(b.name)}')">恢复</button></div>`).join('');
+        document.getElementById('bkList').innerHTML=(j.backups||[]).length?rows:'暂无备份（开启自动后备份会在下个调度周期生成）';
+      }catch(e){}
+    }
+    async function backupNow(){
+      const b=document.getElementById('bkNowBtn');b.disabled=true;b.textContent='备份中…';
+      try{
+        const j=await (await fetch(`${API}/api/backup`,{method:'POST'})).json();
+        if(j.error)alert('❌ '+j.error);
+        loadBackups();
+      }finally{b.disabled=false;b.textContent='▶ 立即备份一次';}
+    }
+    async function restoreBackup(name){
+      if(!confirm(`用「${name}」覆盖当前数据库？\n当前数据会先自动留一份安全备份；恢复完成后需要重启服务（systemctl --user restart easy-agent）才生效。`))return;
+      const j=await (await fetch(`${API}/api/backup/restore`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name})})).json();
+      if(j.error){alert('❌ '+j.error);return;}
+      alert('✓ 已恢复。请重启服务生效：systemctl --user restart easy-agent');
+      loadBackups();
     }
     async function runDreamNow(){
       const b=document.getElementById('dreamRunBtn');b.disabled=true;b.textContent='运行中…';

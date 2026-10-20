@@ -1,8 +1,14 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { SkillManager } from "../skill/manager.js";
 
 export class BasicMemory {
   constructor(private workDir: string) {}
+
+  /** 发现工作区技能：<workDir>/skills/<name>/SKILL.md */
+  async listSkills() {
+    return new SkillManager(path.join(this.workDir, "skills")).scan();
+  }
 
   async readMemory(): Promise<string> {
     try {
@@ -84,6 +90,32 @@ export class BasicMemory {
     }
 
     await fs.mkdir(path.join(this.workDir, "memory"), { recursive: true });
+
+    // 示例技能：演示 SKILL.md 结构（仅首次，已存在不覆盖）
+    const sample = path.join(this.workDir, "skills", "example", "SKILL.md");
+    try {
+      await fs.access(sample);
+    } catch {
+      await fs.mkdir(path.dirname(sample), { recursive: true });
+      await fs.writeFile(
+        sample,
+        `---
+name: example
+description: 示例技能，仅演示 SKILL.md 格式（frontmatter + 正文步骤），可删除
+triggers: [示例]
+---
+
+# 示例技能
+
+1. 任务命中技能描述时，先读本文件
+2. 按正文步骤执行
+
+新建技能：复制本目录为 skills/<名字>/SKILL.md，改 frontmatter 即可（重启或新建会话生效）。
+`,
+        "utf-8",
+      );
+      created.push("skills/example/SKILL.md");
+    }
     return created;
   }
 
@@ -130,6 +162,20 @@ Respond in the user's language.`;
     const bootstrap = await this.readIfExists("BOOTSTRAP.md");
     if (bootstrap?.trim())
       sections.push(["bootstrap", "FIRST-RUN BOOTSTRAP (完成引导后删除本文件)", bootstrap]);
+
+    // 技能：描述常驻（只占几十 token），正文按需加载（命中才 read SKILL.md）
+    const skills = await this.listSkills();
+    if (skills.length) {
+      const lines = skills.map(
+        (s) =>
+          `- **${s.name}**：${s.description || "（无描述）"}｜用法：用 read 工具读取 ${path.join(s.dir, "SKILL.md")} 后照做`,
+      );
+      sections.push([
+        "skills",
+        "Available Skills（命中描述先读 SKILL.md 再干活）",
+        lines.join("\n"),
+      ]);
+    }
 
     for (const [tag, title, body] of sections) {
       if (!body?.trim()) continue;

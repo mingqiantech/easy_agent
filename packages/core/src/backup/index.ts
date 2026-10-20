@@ -9,22 +9,41 @@ export interface BackupInfo {
   createdAt: number;
 }
 
+export interface BackupMemoryFile {
+  /** 存档后缀标签，如 MEMORY.default */
+  label: string;
+  /** 磁盘绝对路径 */
+  path: string;
+}
+
 /**
  * 数据备份管理器
  * 用 SQLite 的 VACUUM INTO 做一致性快照（WAL 模式下也安全），
- * 同时备份 MEMORY.md 等文本记忆。
+ * 同时备份各 agent 工作区的 MEMORY.md/USER.md 等文本记忆（按 label 存档）。
  */
 export class BackupManager {
-  private backupDir: string;
-  private maxBackups: number;
+  private memoryFiles: BackupMemoryFile[];
 
-  constructor(backupDir: string, maxBackups = 10) {
-    this.backupDir = backupDir;
-    this.maxBackups = maxBackups;
+  constructor(
+    private backupDir_: string,
+    private maxBackups = 10,
+    memoryFiles?: BackupMemoryFile[],
+  ) {
+    this.backupDir = backupDir_;
+    this.memoryFiles = memoryFiles ?? [
+      { label: "MEMORY.md", path: "MEMORY.md" },
+      { label: "USER.md", path: "USER.md" },
+    ];
   }
 
-  /** 创建备份 */
-  async backup(): Promise<BackupInfo> {
+  private backupDir: string;
+
+  get dir(): string {
+    return this.backupDir;
+  }
+
+  /** 创建备份；opts.keep 可覆盖保留份数（来自设置页热配置） */
+  async backup(opts: { keep?: number } = {}): Promise<BackupInfo> {
     await fs.mkdir(this.backupDir, { recursive: true });
 
     const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
@@ -36,17 +55,17 @@ export class BackupManager {
 
     const stat = await fs.stat(backupPath);
 
-    // 同步备份文本记忆
-    for (const file of ["MEMORY.md", "USER.md"]) {
+    // 同步备份文本记忆（按 label 命名，多工作区不互撞）
+    for (const mf of this.memoryFiles) {
       try {
-        const content = await fs.readFile(file, "utf-8");
-        await fs.writeFile(`${backupPath}.${file}`, content, "utf-8");
+        const content = await fs.readFile(mf.path, "utf-8");
+        await fs.writeFile(`${backupPath}.${mf.label}`, content, "utf-8");
       } catch {
         // 文件不存在则跳过
       }
     }
 
-    await this.cleanupOldBackups();
+    await this.cleanupOldBackups(opts.keep ?? this.maxBackups);
 
     return { name: path.basename(backupPath), path: backupPath, size: stat.size, createdAt: stat.mtimeMs };
   }
@@ -73,6 +92,11 @@ export class BackupManager {
    * 注意：恢复后进程持有的旧 db 连接失效，调用方应重启服务。
    */
   async restore(backupPath: string): Promise<void> {
+    // 只允许恢复 backupDir 内的文件（防任意路径读取）
+    const resolved = path.resolve(backupPath);
+    if (!resolved.startsWith(path.resolve(this.backupDir) + path.sep))
+      throw new Error(`not a backup file: ${backupPath}`);
+    backupPath = resolved;
     try {
       await fs.access(backupPath);
     } catch {
@@ -90,11 +114,12 @@ export class BackupManager {
     await fs.copyFile(backupPath, dbPath);
 
     // 恢复文本记忆
-    for (const file of ["MEMORY.md", "USER.md"]) {
-      const memBackup = `${backupPath}.${file}`;
+    for (const mf of this.memoryFiles) {
+      const memBackup = `${backupPath}.${mf.label}`;
       try {
         const content = await fs.readFile(memBackup, "utf-8");
-        await fs.writeFile(file, content, "utf-8");
+        await fs.mkdir(path.dirname(mf.path), { recursive: true });
+        await fs.writeFile(mf.path, content, "utf-8");
       } catch {
         // 该备份没有此文件
       }
@@ -110,15 +135,20 @@ export class BackupManager {
     }
   }
 
-  /** 只保留最近 maxBackups 份 */
-  private async cleanupOldBackups(): Promise<void> {
+  /** 只保留最近 keep 份 */
+  private async cleanupOldBackups(keep: number): Promise<void> {
     const backups = await this.list();
-    if (backups.length <= this.maxBackups) return;
-    for (const old of backups.slice(this.maxBackups)) {
+    if (backups.length <= keep) return;
+    for (const old of backups.slice(keep)) {
       await fs.unlink(old.path).catch(() => {});
-      for (const suffix of [".MEMORY.md", ".USER.md"]) {
-        await fs.unlink(old.path + suffix).catch(() => {});
-      }
+      // 清掉附属文本记忆存档（任意 label 后缀）
+      try {
+        const dir = path.dirname(old.path);
+        const base = path.basename(old.path);
+        for (const e of await fs.readdir(dir))
+          if (e.startsWith(base + "."))
+            await fs.unlink(path.join(dir, e)).catch(() => {});
+      } catch {}
     }
   }
 
