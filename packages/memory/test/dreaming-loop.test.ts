@@ -74,7 +74,7 @@ describe("Dreaming 闭环：lightDreaming 提取 → 晋升", () => {
   it("deep 把预热过的重要条目晋升进 MEMORY.md（闭环出口）", async () => {
     const db = getDatabase();
     const shortTerm = new ShortTermMemory(db);
-    let memoryContent = "# Long-Term Memory\n";
+    let memoryContent = "# Long-Term Memory\n\n_No memories yet._\n";
     const deps = {
       db,
       shortTerm,
@@ -86,6 +86,8 @@ describe("Dreaming 闭环：lightDreaming 提取 → 晋升", () => {
     expect(r.promoted).toBe(1); // 只有 [重要] 预热条目达标
     expect(memoryContent).toContain("Promoted");
     expect(memoryContent).toContain("bun");
+    // 占位行必须被清除，否则 buildSystemPrompt 的 No-memories 判断会误杀整份记忆
+    expect(memoryContent).not.toContain("No memories yet");
     // 晋升后不再是活跃条目
     expect(shortTerm.getActive().length).toBe(1);
   });

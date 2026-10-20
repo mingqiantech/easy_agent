@@ -21,11 +21,16 @@ export interface DreamingDeps {
   writeMemory: (content: string) => Promise<void>;
 }
 
-/** 轻眠提取提示词：只提值得长记的事，[重要] 前缀的条目直接进晋升候选 */
-const LIGHT_PROMPT = `你是记忆提取器。从对话片段中提取值得长期记住的事实（用户偏好、决策、身份信息、经验教训），忽略闲聊、格式说明和一次性任务细节。
-每条必须是完整、可独立理解的句子（10~80 字），不要输出 XML 标签、段落标题或方括号标签。
-输出格式：每行一条，最多 8 条，以 • 开头；值得立即固化的行加 [重要] 前缀。
-没有可提取的内容时只输出：无
+/** 轻眠提取提示词：只提值得长记的事，[重要] 前缀的条目直接进晋升候选。
+ * 示例用无关微型对话隔离，防小模型把示例文本拄进真实输出 */
+const LIGHT_PROMPT = `从对话片段中提取"值得长期记住的事实"：用户偏好、身份、明确决策、踩过的坑。
+只提取 [user] 行说出的信息和 [assistant] 行确认的结论；忽略进度汇报、工具细节、格式说明。
+每条是完整句子（10~80字），最多 8 条，以 • 开头；会反复用到的偏好/决策加 [重要] 前缀。
+没有可提取内容时只输出：无
+
+格式示例（仅演示格式，切勿拄袭其内容）：
+输入：[user] 以后项目缩进都用 tab 不用空格
+输出：• [重要] 用户要求项目缩进统一用 tab
 
 对话片段：
 `;
@@ -96,10 +101,11 @@ export async function lightDreaming(
     if (!line || /^无[。.]?$/.test(line)) continue;
     const important = line.startsWith("[重要]");
     const fact = line.replace(/^\[重要\]\s*/, "").trim();
-    // 质量闸门：要求完整句子；丢弃 XML 标签碎片和纯标题式短语
+    // 质量闸门：要求完整句子；丢弃 XML 标签碎片、纯标题式短语、拄袭示例的行
     if (fact.length < 10 || fact.length > 200) continue;
     if (/[<>]/.test(fact)) continue;
     if (/^[【\[(（].*[】\])）]$/.test(fact)) continue;
+    if (/缩进.{0,12}(tab|空格)|tab.{0,8}缩进/.test(fact)) continue; // 格式示例原文拄袭兕底
     const origin = `light:msg#${maxRid}`;
     if (important) deps.shortTerm.addImportant(fact, origin);
     else deps.shortTerm.add(fact, origin);
@@ -152,8 +158,10 @@ export async function deepDreaming(
   const section = await deps.llmGenerate(prompt);
   const current = await deps.readMemory();
   const today = new Date().toISOString().slice(0, 10);
+  // 占位行不清除会让 buildSystemPrompt 的 "No memories yet" 判断误杀整份记忆 → 永远不注入
+  const cleaned = current.replace(/_No memories yet\._\n?/g, "").trimEnd();
   const final = enforceBudget(
-    current + `\n\n## Promoted (${today})\n\n${section}`,
+    cleaned + `\n\n## Promoted (${today})\n\n${section}`,
     MEMORY_BUDGET_CHARS,
   );
 
