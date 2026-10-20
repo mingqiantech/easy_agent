@@ -580,22 +580,30 @@ export function createApp(deps: ServerDeps): Hono {
       .prepare(
         `SELECT COUNT(*) calls, COALESCE(SUM(prompt_tokens),0) prompt,
                 COALESCE(SUM(completion_tokens),0) completion,
-                COALESCE(SUM(total_tokens),0) total
+                COALESCE(SUM(total_tokens),0) total,
+                COALESCE(SUM(cached_read_tokens),0) cacheRead,
+                COALESCE(SUM(cached_write_tokens),0) cacheWrite
          FROM token_usage WHERE created_at >= ?`,
       )
       .get(since) as any;
+    // 缓存命中率：输入中命中缓存的比例（旧行无缓存数据时计 0，不误报高命中）
+    totals.inputEffective = Math.max(0, totals.prompt);
+    totals.cacheHitRate =
+      totals.inputEffective > 0 ? totals.cacheRead / totals.inputEffective : null;
     const daily = db2
       .prepare(
         `SELECT strftime('%Y-%m-%d', created_at/1000, 'unixepoch') day,
                 SUM(prompt_tokens) prompt, SUM(completion_tokens) completion,
-                SUM(total_tokens) total, COUNT(*) calls
+                SUM(total_tokens) total, COUNT(*) calls,
+                SUM(cached_read_tokens) cacheRead, SUM(cached_write_tokens) cacheWrite
          FROM token_usage WHERE created_at >= ?
          GROUP BY day ORDER BY day DESC LIMIT ?`,
       )
       .all(since, days + 2) as any[];
     const byModel = db2
       .prepare(
-        `SELECT model, SUM(total_tokens) total, COUNT(*) calls
+        `SELECT model, SUM(total_tokens) total, COUNT(*) calls,
+                SUM(cached_read_tokens) cacheRead
          FROM token_usage WHERE created_at >= ?
          GROUP BY model ORDER BY total DESC`,
       )

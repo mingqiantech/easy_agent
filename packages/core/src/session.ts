@@ -499,14 +499,16 @@ export class SessionManager {
 
           if (response.usage) {
             db.prepare(
-              `INSERT INTO token_usage (session_id, model, prompt_tokens, completion_tokens, total_tokens, created_at)
-           VALUES (?, ?, ?, ?, ?, ?)`,
+              `INSERT INTO token_usage (session_id, model, prompt_tokens, completion_tokens, total_tokens, cached_read_tokens, cached_write_tokens, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
             ).run(
               sessionId,
               session.model,
               response.usage.promptTokens ?? 0,
               response.usage.completionTokens ?? 0,
               response.usage.totalTokens ?? 0,
+              response.usage.cacheReadTokens ?? 0,
+              response.usage.cacheWriteTokens ?? 0,
               now(),
             );
           }

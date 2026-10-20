@@ -39,9 +39,14 @@ export type LLMRequest = z.infer<typeof LLMRequest>;
  * Token 使用量
  */
 export const Usage = z.object({
+  /** 总输入 tokens（含缓存部分，与厂商计费口径对齐） */
   promptTokens: z.number(),
   completionTokens: z.number(),
   totalTokens: z.number(),
+  /** 命中缓存读回的输入 tokens（⊆ promptTokens） */
+  cacheReadTokens: z.number().optional(),
+  /** 写入缓存的输入 tokens（Anthropic cache_creation，⊆ promptTokens） */
+  cacheWriteTokens: z.number().optional(),
 });
 export type Usage = z.infer<typeof Usage>;
 

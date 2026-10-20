@@ -1015,28 +1015,43 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
         const days=Number(document.getElementById('usageDays').value||30);
         const u=await (await fetch(`${API}/api/usage?days=${days}`)).json();
         const t=u.totals||{};
-        document.getElementById('usageMetrics').innerHTML=[
+        const cards=[
           ['总 tokens',fmtK(t.total)],['输入',fmtK(t.prompt)],['输出',fmtK(t.completion)],['LLM 调用',t.calls||0],
-        ].map(([l,v])=>`<div class="metric"><div class="m-val">${v}</div><div class="m-lab">${l}</div></div>`).join('');
+        ];
+        if(t.cacheRead>0)cards.push(['缓存输入',fmtK(t.cacheRead)]);
+        if(t.cacheHitRate!=null)cards.push(['缓存命中率',(t.cacheHitRate*100).toFixed(1)+'%']);
+        document.getElementById('usageMetrics').innerHTML=cards.map(([l,v])=>`<div class="metric"><div class="m-val">${v}</div><div class="m-lab">${l}</div></div>`).join('');
         renderUsageChart(u.daily||[]);
         const rows=(list,key)=>'<tr><th>'+key+'</th><th>tokens</th><th>次数</th></tr>'+(list||[]).map(x=>`<tr><td>${esc(x[key])}</td><td>${fmtK(x.total)}</td><td>${x.calls}</td></tr>`).join('')||'<tr><td colspan="3" style="color:var(--muted)">暂无数据</td></tr>';
-        document.getElementById('usageModels').innerHTML=rows(u.byModel,'model');
+        document.getElementById('usageModels').innerHTML=(u.byModel||[]).length?'<tr><th>model</th><th>tokens</th><th>缓存输入</th><th>次数</th></tr>'+u.byModel.map(x=>`<tr><td>${esc(x.model)}</td><td>${fmtK(x.total)}</td><td>${x.cacheRead>0?fmtK(x.cacheRead):'-'}</td><td>${x.calls}</td></tr>`).join(''):'<tr><td colspan="4" style="color:var(--muted)">暂无数据</td></tr>';
         document.getElementById('usageAgents').innerHTML=rows(u.byAgent,'agent');
       }catch(e){}
     }
     function renderUsageChart(daily){
       const svg=document.getElementById('usageChart');
       const W=svg.clientWidth||720,H=170,pad=10;
-      const defs='<defs><linearGradient id="ub" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5b7a8c"/><stop offset="1" stop-color="#8a85a3"/></linearGradient></defs>';
-      if(!daily.length){svg.innerHTML=defs+'<text x="12" y="90" font-size="12" fill="#8b93a3">暂无用量记录</text>';return;}
-      const max=Math.max(...daily.map(d=>d.total),1);
+      const defs='';
+      if(!daily.length){svg.innerHTML='<text x="12" y="90" font-size="12" fill="#8b93a3">暂无用量记录</text>';return;}
+      // 堆叠柱：未缓存输入 + 缓存(读/写) + 输出；无缓存数据时自然退化单柱
+      const seg=d=>{const cr=d.cacheRead||0,cw=d.cacheWrite||0,un=Math.max(0,(d.prompt||0)-cr-cw);return [un,cr,cw,d.completion||0];};
+      const COLORS=['#5b7a8c','#a8c0d0','#c9b8d8','#8a85a3'];
+      const max=Math.max(...daily.map(d=>seg(d).reduce((a,b)=>a+b,0)),1);
       const step=(W-2*pad)/daily.length,bw=Math.max(3,Math.min(34,step-6));
-      svg.innerHTML=defs+daily.map((d,i)=>{
-        const h=Math.max(3,(d.total/max)*(H-56));
-        const x=pad+i*step+(step-bw)/2,y=H-30-h;
+      svg.innerHTML=daily.map((d,i)=>{
+        const parts=seg(d);const x=pad+i*step+(step-bw)/2;
+        let acc=0,bars='';
+        for(let pi=0;pi<parts.length;pi++){
+          const v=parts[pi];if(v<=0)continue;
+          const h=Math.max(2,(v/max)*(H-56));
+          bars+=`<rect x="${x}" y="${H-30-acc-h}" width="${bw}" height="${h}" rx="2" fill="${COLORS[pi]}"/>`;
+          acc+=h;
+        }
+        const tot=parts.reduce((a,b)=>a+b,0);
+        const hitPct=d.prompt>0&&d.cacheRead>0?` · 缓存命中 ${(d.cacheRead/d.prompt*100).toFixed(0)}%`:'';
         const lbl=daily.length<=16||i%Math.ceil(daily.length/10)===0?`<text x="${x+bw/2}" y="${H-12}" font-size="9" fill="#8b93a3" text-anchor="middle">${d.day.slice(5)}</text>`:'';
-        return `<rect x="${x}" y="${y}" width="${bw}" height="${h}" rx="3" fill="url(#ub)" style="cursor:pointer"><title>${d.day}: ${d.total} tokens / ${d.calls} 次</title></rect>${lbl}`;
-      }).join('')+`<text x="${W-pad}" y="14" font-size="10" fill="#8b93a3" text-anchor="end">峰值 ${fmtK(max)}</text>`;
+        return `<g style="cursor:pointer"><title>${d.day}: ${tot} tokens / ${d.calls} 次${hitPct}</title>${bars}</g>${lbl}`;
+      }).join('')+`<text x="${W-pad}" y="14" font-size="10" fill="#8b93a3" text-anchor="end">峰值 ${fmtK(max)}</text>`
+        +'<g transform="translate(10,6)">'+[['未缓存输入','#5b7a8c'],['缓存读入','#a8c0d0'],['缓存写入','#c9b8d8'],['输出','#8a85a3']].map(([lab,c],ix)=>`<rect x="${ix*92}" y="0" width="8" height="8" rx="2" fill="${c}"/><text x="${ix*92+11}" y="8" font-size="9" fill="#8b93a3">${lab}</text>`).join('')+'</g>';
     }
 
     (async function init(){

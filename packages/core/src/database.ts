@@ -171,6 +171,8 @@ function initializeSchema(db: Database): void {
       prompt_tokens INTEGER NOT NULL DEFAULT 0,
       completion_tokens INTEGER NOT NULL DEFAULT 0,
       total_tokens INTEGER NOT NULL DEFAULT 0,
+      cached_read_tokens INTEGER NOT NULL DEFAULT 0,
+      cached_write_tokens INTEGER NOT NULL DEFAULT 0,
       created_at INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_token_usage_created ON token_usage (created_at);
@@ -339,6 +341,15 @@ function initializeSchema(db: Database): void {
   }
   if (!meCols.some((c) => c.name === "created_at")) {
     db.exec("ALTER TABLE memory_entries ADD COLUMN created_at INTEGER");
+  }
+
+  // token_usage 缓存列（厂商计费口径：prompt_tokens 含缓存；此两列拆分量）
+  const tuCols = db.prepare("PRAGMA table_info(token_usage)").all() as Array<{ name: string }>;
+  if (!tuCols.some((c) => c.name === "cached_read_tokens")) {
+    db.exec("ALTER TABLE token_usage ADD COLUMN cached_read_tokens INTEGER NOT NULL DEFAULT 0");
+  }
+  if (!tuCols.some((c) => c.name === "cached_write_tokens")) {
+    db.exec("ALTER TABLE token_usage ADD COLUMN cached_write_tokens INTEGER NOT NULL DEFAULT 0");
   }
 }
 export function closeDatabase(): void {

@@ -84,8 +84,10 @@ export class OpenAIProvider implements LLMProvider {
         usage: {
           promptTokens: result.usage.promptTokens,
           completionTokens: result.usage.completionTokens,
-          totalTokens:
-            result.usage.promptTokens + result.usage.completionTokens,
+          totalTokens: result.usage.promptTokens + result.usage.completionTokens,
+          // OpenAI 协议 prompt_tokens 已含缓存段，只透传占比字段
+          cacheReadTokens:
+            Number((result.experimental_providerMetadata as any)?.openai?.cachedTokens ?? 0) || undefined,
         },
         finishReason:
           result.finishReason === "tool-calls" ? "tool_calls" : "stop",
@@ -144,6 +146,8 @@ export class OpenAIProvider implements LLMProvider {
           promptTokens: usage.promptTokens,
           completionTokens: usage.completionTokens,
           totalTokens: usage.promptTokens + usage.completionTokens,
+          cacheReadTokens:
+            Number((await result.experimental_providerMetadata)?.openai?.cachedTokens ?? 0) || undefined,
         },
       };
     }
