@@ -20,5 +20,8 @@
   "devDependencies": {
     "typescript": "5.8.2",
     "@types/bun": "1.3.13"
+  },
+  "dependencies": {
+    "sqlite-vec": "^0.1.9"
   }
 }

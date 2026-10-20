@@ -116,17 +116,85 @@ export async function lightDreaming(
   return { processed: msgs.length, extracted };
 }
 
+/** 间隔重复复习调度：1/2/4/8 天四级，毕业或封顶后移出队列；队列上限防膨胀 */
+const REVIEW_INTERVALS = [1, 2, 4, 8];
+const REVIEW_QUEUE_MAX = 60;
+interface ReviewEntry { step: number; due: number }
+
 /**
- * REM：两道工序（对齐 OpenClaw light→REM 职责）
- * 1) 晋升候选筛选（原逻辑）
- * 2) 主题反思：LLM 跨条目归纳反复出现的主题；相关条目记强化信号（unique_queries/recall_days），
+ * spaced-reinforcement（对齐 OpenClaw spaced repetition 层）：
+ * 被检索命中过但未达晋升门槛的条目 → 排入 1/2/4/8 天复习队列；
+ * 到期复习 = 合成 recall+1 并记 recall_days（拉开召回日期分布 → 抬 calcScore）→ 自然进晋升通道。
+ * 零 LLM 成本，纯 DB 操作。
+ */
+function manageSpacedReviews(
+  deps: DreamingDeps,
+  now: number,
+): { reviews: Record<string, ReviewEntry>; graduated: string[] } {
+  let reviews: Record<string, ReviewEntry> = {};
+  let graduated: string[] = [];
+  try {
+    const row = deps.db
+      .prepare("SELECT state FROM dreaming_state WHERE phase='rem'")
+      .get() as any;
+    const parsed = JSON.parse(row?.state ?? "{}");
+    reviews = parsed?.reviews ?? {};
+    graduated = parsed?.graduated ?? [];
+  } catch {}
+
+  const active = deps.shortTerm.getActive();
+  const activeIds = new Set(active.map((e) => e.id));
+  for (const id of Object.keys(reviews))
+    if (!activeIds.has(id)) delete reviews[id]; // 已晋升/已遗忘 → 退队
+  graduated = graduated.filter((id) => activeIds.has(id));
+
+  const today = new Date(now).toISOString().slice(0, 10);
+  const bump = deps.db.prepare(
+    `UPDATE short_term_memory SET
+       recall_count = recall_count + 1,
+       last_recalled_at = ?,
+       recall_days = CASE WHEN recall_days NOT LIKE ? THEN json_insert(recall_days,'$[#]',?) ELSE recall_days END
+     WHERE id = ? AND promoted_at IS NULL AND forgotten_at IS NULL`,
+  );
+  for (const [id, rv] of Object.entries(reviews)) {
+    if (rv.due > now) continue;
+    bump.run(now, `%${today}%`, today, id);
+    if (rv.step >= REVIEW_INTERVALS.length - 1) {
+      delete reviews[id]; // 训练毕业：不再重入队（防死循环刷题）
+      if (!graduated.includes(id)) graduated.push(id);
+    } else {
+      rv.step++;
+      rv.due = now + REVIEW_INTERVALS[rv.step]! * DAY_MS;
+    }
+  }
+
+  // 新入队：被检索命中过(recall>=1)但门槛未达且不在队列/已毕业
+  for (const e of deps.shortTerm.getActive()) {
+    if (reviews[e.id] || graduated.includes(e.id) || e.recallCount < 1) continue;
+    if (
+      e.recallCount >= PROMOTION.minRecallCount &&
+      e.uniqueQueries >= PROMOTION.minUniqueQueries
+    )
+      continue; // 已达标，等 deep 晋升
+    if (Object.keys(reviews).length >= REVIEW_QUEUE_MAX) break;
+    reviews[e.id] = { step: 0, due: now + REVIEW_INTERVALS[0]! * DAY_MS };
+  }
+  return { reviews, graduated };
+}
+
+/**
+ * REM：三道工序（对齐 OpenClaw light→REM 职责）
+ * 1) 间隔重复强化（零 LLM：到期复习合成 recall，拉开召回日期分布抬评分）
+ * 2) 晋升候选筛选（原逻辑）
+ * 3) 主题反思：LLM 跨条目归纳反复出现的主题；相关条目记强化信号（unique_queries/recall_days），
  *    同一主题 7 天内重复出现 → 作为重要条目进晋升通道；首次只见 short-term 不写 MEMORY.md。
  */
 export async function remDreaming(
   deps: DreamingDeps,
 ): Promise<{ candidates: number; themes: string[] }> {
   const now = Date.now();
-  const entries = deps.shortTerm.getActive();
+  const { reviews, graduated } = manageSpacedReviews(deps, now);
+  const entries = deps.shortTerm.getActive(); // 复习 bump 后重取，评分含新间隔信号
   const scored = entries.map((e) => ({ ...e, score: calcScore(e, now) }));
   const candidates = scored.filter(
     (e) =>
@@ -195,7 +263,12 @@ export async function remDreaming(
       )
       .run(
         now,
-        JSON.stringify({ candidateCount: candidates.length, themes: history }),
+        JSON.stringify({
+          candidateCount: candidates.length,
+          themes: history,
+          reviews,
+          graduated,
+        }),
         now,
       );
     return { candidates: candidates.length, themes };
@@ -205,7 +278,11 @@ export async function remDreaming(
     .prepare(
       `INSERT OR REPLACE INTO dreaming_state (phase, last_run_at, state, updated_at) VALUES ('rem', ?, ?, ?)`,
     )
-    .run(now, JSON.stringify({ candidateCount: candidates.length }), now);
+    .run(
+      now,
+      JSON.stringify({ candidateCount: candidates.length, reviews, graduated }),
+      now,
+    );
 
   return { candidates: candidates.length, themes };
 }

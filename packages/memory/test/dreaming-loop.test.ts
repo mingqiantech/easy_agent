@@ -7,16 +7,14 @@ const TEST_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "easy-agent-dream-test-")
 process.env.EASY_AGENT_STATE_DIR = path.join(TEST_DIR, "state");
 process.env.EASY_AGENT_DB_PATH = path.join(TEST_DIR, "state", "agent.db");
 
-import { getDatabase } from "@easy-agent/core/database";
+import { freshDatabase } from "@easy-agent/core/database";
 import { ShortTermMemory } from "../src/short-term.js";
 import { lightDreaming, deepDreaming } from "../src/dreaming.js";
 
-beforeAll(() => {
-  getDatabase(process.env.EASY_AGENT_DB_PATH!);
-});
+const xdb = freshDatabase(process.env.EASY_AGENT_DB_PATH!);
 
 function seedMessage(role: string, content: string) {
-  const db = getDatabase();
+  const db = xdb;
   const sid = "dream-test-session";
   db.prepare(
     `INSERT OR IGNORE INTO sessions (id, title, agent_id, model, created_at, updated_at)
@@ -36,7 +34,7 @@ describe("Dreaming 闭环：lightDreaming 提取 → 晋升", () => {
     seedMessage("user", "今天天气不错");  // 太短/闲聊，应被过滤掉
     seedMessage("tool", "raw tool noise");
 
-    const db = getDatabase();
+    const db = xdb;
     const shortTerm = new ShortTermMemory(db);
     let memoryContent = "# Long-Term Memory\n";
     const deps = {
@@ -72,7 +70,7 @@ describe("Dreaming 闭环：lightDreaming 提取 → 晋升", () => {
   });
 
   it("deep 把预热过的重要条目晋升进 MEMORY.md（闭环出口）", async () => {
-    const db = getDatabase();
+    const db = xdb;
     const shortTerm = new ShortTermMemory(db);
     let memoryContent = "# Long-Term Memory\n\n_No memories yet._\n";
     const deps = {
@@ -93,7 +91,7 @@ describe("Dreaming 闭环：lightDreaming 提取 → 晋升", () => {
   });
 
   it("light 遇到 LLM 失败时游标不前进（下轮重试不丢窗口）", async () => {
-    const db = getDatabase();
+    const db = xdb;
     const before = db.prepare("SELECT state FROM dreaming_state WHERE phase='light'").get() as any;
     const prevCursor = JSON.parse(before?.state ?? "{}")?.cursor ?? 0;
     seedMessage("user", "失败也要能重试，这条应该留在窗口里等待提取处理");

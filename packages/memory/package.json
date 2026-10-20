@@ -9,6 +9,7 @@
   "dependencies": {
     "@easy-agent/core": "workspace:*",
     "ulid": "2.3.0",
-    "zod": "3.25.76"
+    "zod": "3.25.76",
+    "sqlite-vec": "0.1.9"
   }
 }

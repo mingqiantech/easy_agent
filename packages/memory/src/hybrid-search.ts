@@ -1,7 +1,9 @@
 import type { EmbeddingProvider } from "./embedding.js";
 import path from "node:path";
+import type { Database } from "bun:sqlite";
 import type { MemorySearcher, SearchHit } from "./search.js";
 import type { FtsIndex } from "./fts.js";
+import type { VecIndex } from "./vec.js";
 
 export interface HybridHit {
   path: string;
@@ -34,6 +36,9 @@ export class HybridSearch {
     /** 命中路径归一化用（相对工作区），与文本通道一致 */
     private workDir?: string,
     private fts?: FtsIndex,
+    private vec?: VecIndex,
+    /** 索引所在库；缺省 getDatabase 单例（生产同库，测试必须显式传入） */
+    private database?: Database,
   ) {}
 
   async search(
@@ -139,10 +144,29 @@ export class HybridSearch {
    */
   private async vectorSearch(query: string, limit: number, source?: string) {
     const { getDatabase } = await import("@easy-agent/core/database");
+    const db = this.database ?? this.vec?.db ?? getDatabase();
     const embedding = this.embedding!;
     const queryVec = await embedding.embed(query);
 
-    const rows = getDatabase()
+    // 优先 sqlite-vec KNN（库内 TopK，不扫全表）
+    if (this.vec?.available) {
+      const knn = this.vec.search(queryVec, limit, source);
+      if (knn && knn.length) {
+        const getInfo = db.prepare(
+          "SELECT file_path AS path, excerpt FROM memory_entries WHERE id = ?",
+        );
+        const out: Array<{ key: string; score: number; excerpt: string; path: string }> = [];
+        for (const r of knn) {
+          const info = getInfo.get(r.id) as any;
+          if (!info) continue;
+          out.push({ key: String(r.id), score: r.score, excerpt: info.excerpt, path: info.path });
+        }
+        if (out.length) return out;
+      }
+    }
+
+    // 退回：暴力扫 memory_vec BLOB（小数据量或扩展不可用）
+    const rows = db
       .prepare(
         `SELECT e.id, e.file_path AS path, e.excerpt AS excerpt, v.embedding AS blob
          FROM memory_entries e JOIN memory_vec v ON v.id = e.id

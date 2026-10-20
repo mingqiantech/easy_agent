@@ -1,10 +1,12 @@
 import { Database } from "bun:sqlite";
 import type { EmbeddingProvider } from "./embedding.js";
 import { FtsIndex } from "./fts.js";
+import { VecIndex } from "./vec.js";
 
 export class IncrementalIndex {
   private dim: number;
   readonly fts: FtsIndex;
+  readonly vec: VecIndex;
 
   constructor(
     private db: Database,
@@ -15,6 +17,7 @@ export class IncrementalIndex {
   ) {
     this.dim = dim;
     this.fts = new FtsIndex(db);
+    this.vec = new VecIndex(db);
     this.initTable();
     this.ensureFingerprint();
   }
@@ -31,6 +34,7 @@ export class IncrementalIndex {
     this.db.prepare("DELETE FROM memory_vec").run();
     this.db.prepare("DELETE FROM memory_entries").run();
     this.fts.clearAll();
+    if (this.vec.ready) this.vec.dropAll(); // 新模型首批 embedding 会按新维度重建 vec0
     this.db
       .prepare(
         "INSERT OR REPLACE INTO meta (key, value) VALUES ('embedding_fingerprint', ?)",
@@ -86,6 +90,7 @@ export class IncrementalIndex {
         .prepare("DELETE FROM memory_entries WHERE file_path = ?")
         .run(filePath);
       this.fts.removeIds(ids);
+      this.vec.removeIds(ids);
     }
     // 分块
     const chunks = this.chunk(content, 500);
@@ -94,6 +99,10 @@ export class IncrementalIndex {
     // 批量生成 embedding
     const embeddings = await this.embedding.embedBatch(chunks);
     const now = Date.now();
+    // vec0 表按真实维度惰性建立（simple=256 / bge-m3=1024）
+    if (embeddings.length && embeddings[0]!.length !== this.dim)
+      this.dim = embeddings[0]!.length;
+    this.vec.ensureTable(this.dim);
 
     // 插入
     const insertEntry = this.db.prepare(
@@ -111,6 +120,7 @@ export class IncrementalIndex {
         try {
           insertVec.run(id, Buffer.from(embeddings[i].buffer));
         } catch {}
+        this.vec.insert(id, embeddings[i]!);
         ftsItems.push({ id, excerpt: chunks[i]! });
       }
       // FTS BM25 通道（与向量同批块）
@@ -153,6 +163,7 @@ export class IncrementalIndex {
       this.db.prepare("DELETE FROM memory_vec").run();
     } catch {}
     this.fts.clearAll();
+    if (this.vec.ready) this.vec.dropAll();
     return this.indexDirectory(dir, source);
   }
 

@@ -7,16 +7,14 @@ const TEST_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "easy-agent-hybrid-test-"
 process.env.EASY_AGENT_STATE_DIR = path.join(TEST_DIR, "state");
 process.env.EASY_AGENT_DB_PATH = path.join(TEST_DIR, "state", "agent.db");
 
-import { getDatabase } from "@easy-agent/core/database";
+import { freshDatabase } from "@easy-agent/core/database";
 import { MemorySearcher, tokenizeQuery } from "../src/search.js";
 import { SimpleEmbeddingProvider } from "../src/embedding.js";
 import { IncrementalIndex } from "../src/incremental-index.js";
 import { HybridSearch } from "../src/hybrid-search.js";
 import { createMemorySearchTool } from "../src/tool.js";
 
-beforeAll(() => {
-  getDatabase(process.env.EASY_AGENT_DB_PATH!);
-});
+const xdb = freshDatabase(process.env.EASY_AGENT_DB_PATH!);
 
 const WS = path.join(TEST_DIR, "workspace");
 const MEM = path.join(WS, "memory");
@@ -59,7 +57,7 @@ describe("MemorySearcher 中文检索", () => {
 describe("HybridSearch：向量+全文融合", () => {
   it("索引后 hybrid 模式生效，语义相近（无同词）也能命中", async () => {
     const embedding = new SimpleEmbeddingProvider();
-    const db = getDatabase();
+    const db = xdb;
     const idx = new IncrementalIndex(db, embedding);
     const n1 = await idx.indexFile(path.join(MEM, "2026-10-20.md"), "memory");
     const n2 = await idx.indexFile(path.join(WS, "MEMORY.md"), "memory");
@@ -68,7 +66,7 @@ describe("HybridSearch：向量+全文融合", () => {
     expect(await idx.indexFile(path.join(MEM, "2026-10-20.md"), "memory")).toBe(0);
 
     const searcher = new MemorySearcher(WS, MEM);
-    const hybrid = new HybridSearch(searcher, embedding, WS);
+    const hybrid = new HybridSearch(searcher, embedding, WS, undefined, undefined, xdb);
     const r = await hybrid.search("ComfyUI", { limit: 5, source: "memory" });
     expect(r.mode).toBe("hybrid");
     expect(r.hits.length).toBeGreaterThan(0);
@@ -78,7 +76,7 @@ describe("HybridSearch：向量+全文融合", () => {
 
   it("memory_search 工具带 hybrid 返回 mode 字段", async () => {
     const searcher = new MemorySearcher(WS, MEM);
-    const hybrid = new HybridSearch(searcher, new SimpleEmbeddingProvider(), WS);
+    const hybrid = new HybridSearch(searcher, new SimpleEmbeddingProvider(), WS, undefined, undefined, xdb);
     const tool = createMemorySearchTool(searcher, { hybrid });
     const out: any = await tool.execute({ query: "视频生成", corpus: "memory" }, {
       sessionId: "t", agentId: "default", workDir: WS,
@@ -89,7 +87,7 @@ describe("HybridSearch：向量+全文融合", () => {
 
   it("无向量索引时退化为 text-only 不报错", async () => {
     const searcher = new MemorySearcher(WS, MEM);
-    const hybrid = new HybridSearch(searcher, new SimpleEmbeddingProvider(), WS);
+    const hybrid = new HybridSearch(searcher, new SimpleEmbeddingProvider(), WS, undefined, undefined, xdb);
     const r = await hybrid.search("梦境闭环", { limit: 5, source: "session" }); // session 源未索引
     expect(["hybrid", "text-only"]).toContain(r.mode);
   });

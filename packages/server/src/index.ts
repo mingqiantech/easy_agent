@@ -107,7 +107,7 @@ async function main() {
   );
   const hybrid =
     msCfg.hybrid?.enabled !== false
-      ? new HybridSearch(searcher, embedding, workspaceDir, memIndex.fts)
+      ? new HybridSearch(searcher, embedding, workspaceDir, memIndex.fts, memIndex.vec, db)
       : undefined;
 
   // 索引集与 MemorySearcher 的 corpus 对齐：工作区 md + memory/ + .dreams/session-corpus

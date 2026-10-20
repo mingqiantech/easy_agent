@@ -16,6 +16,9 @@ export function getDatabase(dbPath?: string): Database {
   return _db;
 }
 function getDefaultDbPath(): string {
+  // 环境变量优先（与 BackupManager.currentDbPath 一致）；以前只认 STATE_DIR，
+  // 导致测试里只设 DB_PATH 时 getDatabase() 落到生产库造成互刷污染
+  if (process.env.EASY_AGENT_DB_PATH) return process.env.EASY_AGENT_DB_PATH;
   const stateDir =
     process.env.EASY_AGENT_STATE_DIR ??
     path.join(require("node:os").homedir(), ".easy-agent");
