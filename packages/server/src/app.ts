@@ -320,16 +320,21 @@ export function createApp(deps: ServerDeps): Hono {
     const traeOn = deps.tools.names().includes("trae_agent") && !dis.has("trae_agent");
     const acpOn = deps.tools.names().includes("acp_agent") && !dis.has("acp_agent");
     let extraSystem = "";
-    if (traeOn || acpOn) {
-      const opts = [
-        traeOn && "trae_agent（一次性外包：发任务拿结果）",
-        acpOn && "acp_agent（多轮长会话：连续多步/需保持上下文时用，同 workdir 自动复用）",
-      ]
-        .filter(Boolean)
-        .join(" / ");
+    const opts = (traeOn || acpOn)
+      ? [
+          traeOn && "trae_agent（一次性外包：发任务拿结果）",
+          acpOn && "acp_agent（多轮长会话：连续多步/需保持上下文时用，同 workdir 自动复用）",
+        ]
+          .filter(Boolean)
+          .join(" / ")
+      : "";
+    if ((agent as any)?.toolHint) {
+      // 自定义策略优先；若工具可用只声明可用性，不再附带“别外包”劝退句（避免指令冲突）
+      const lead = opts ? `外部编码 Agent 可用：${opts}。是否外包/何时外包完全由下条自定义策略决定。\n` : "";
+      extraSystem = lead + String((agent as any).toolHint);
+    } else if (opts) {
       extraSystem = `外部编码 Agent 可用：${opts}。当任务涉及多文件代码修改、仓库整体分析、批量重构、写/补测试等重活时，优先用它们处理（workdir 指向目标仓库），完成后汇总结果；日常问答、概念解释、小改动不要外包（每次调用有固定开销）。`;
     }
-    if ((agent as any)?.toolHint) extraSystem = extraSystem ? extraSystem + "\n" + (agent as any).toolHint : String((agent as any).toolHint);
     const toolRegistry = dis.size
       ? {
           getDefinitions: () => deps.tools.getDefinitions().filter((d) => !dis.has(d.name)),
