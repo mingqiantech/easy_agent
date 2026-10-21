@@ -938,18 +938,22 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
       const W=svg.clientWidth||860,H=480;
       const nodes=g.nodes??[],edges=g.edges??[];
       if(!nodes.length){svg.innerHTML='<text x="16" y="30" font-size="12" fill="#8b93a3">暂无知识点（先在设置页确认记忆索引已启用）</text>';return;}
-      // 初始化位置：agent 居中上，其余环状随机
+      // 初始化：agent 固定均匀占据顶部行（钉扎不参与力）；会话居中行靠 agent 同侧；知识点底部
       const cx=W/2;
-      nodes.forEach((n,i)=>{
-        const ang=(i/nodes.length)*Math.PI*2;
-        n.x=n.type==='agent'?cx+(i-(nodes.filter(x=>x.type==='agent').length)/2)*160:n.x??cx+Math.cos(ang)*(n.type==='session'?190:250);
-        n.y=n.type==='agent'?70:(n.type==='session'?H*0.42:H*0.62)+Math.sin(ang)*40;
+      const agentsN=nodes.filter(n=>n.type==='agent');
+      const agentX=new Map();
+      agentsN.forEach((n,i)=>{ n.x=60+((W-120)/(agentsN.length+1))*(i+1); n.pinned=true; agentX.set(n.id,n.x); });
+      nodes.forEach((n)=>{
+        if(n.type==='agent') { n.y=64; n.vx=0;n.vy=0; return; }
+        const parentX=n.agent&&agentX.get('a:'+n.agent)||cx;
+        if(n.type==='session'){ n.x=parentX+(Math.random()-0.5)*80; n.y=160; }
+        else { n.x=cx+(Math.random()-0.5)*(W-200); n.y=H*0.6+(Math.random()-0.5)*80; }
         n.vx=0;n.vy=0;
       });
       const byId=new Map(nodes.map(n=>[n.id,n]));
       const es=edges.filter(e=>byId.has(e.from)&&byId.has(e.to)).map(e=>({a:byId.get(e.from),b:byId.get(e.to),kind:e.kind,w:e.weight??0.4}));
       // 力导向迭代（固定步数，图小很快）
-      const REP=26000,SPR=0.0045,LEN=e=>e.kind==='hit'?120:e.kind==='similar'?150:110;
+      const REP=26000,SPR=0.0045,LEN=e=>e.kind==='hit'?120:e.kind==='similar'?150:90;
       for(let it=0;it<220;it++){
         for(let i=0;i<nodes.length;i++)for(let j=i+1;j<nodes.length;j++){
           const a=nodes[i],b=nodes[j];let dx=a.x-b.x,dy=a.y-b.y;let d2=dx*dx+dy*dy+0.01;const d=Math.sqrt(d2);
@@ -960,10 +964,12 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
           const f=(d-LEN(e))*SPR*(e.kind==='hit'?2.2:e.w+0.6);
           e.a.vx+=dx/d*f;e.a.vy+=dy/d*f;e.b.vx-=dx/d*f;e.b.vy-=dy/d*f;
         }
-        for(const n of nodes){ // 向心 + 分层软约束 + 阻尼
-          n.vx+=(cx-n.x)*0.0012;n.vy+=((n.type==='agent'?80:n.type==='session'?H*0.4:H*0.62)-n.y)*0.004;
+        for(const n of nodes){ // 向心 + 分层软约束 + 阻尼；agent 钉扎不动
+          if(n.pinned){n.vx=0;n.vy=0;continue;}
+          n.vx+=((n.agent&&agentX.get('a:'+n.agent)||cx)-n.x)*0.003; // 会话向自己的 agent 列对齐
+          n.vy+=((n.type==='session'?170:H*0.62)-n.y)*0.004;
           n.x+=Math.max(-14,Math.min(14,n.vx*=0.82));n.y+=Math.max(-14,Math.min(14,n.vy*=0.82));
-          n.x=Math.max(40,Math.min(W-40,n.x));n.y=Math.max(36,Math.min(H-46,n.y));
+          n.x=Math.max(40,Math.min(W-40,n.x));n.y=Math.max(120,Math.min(H-46,n.y));
         }
       }
       const EC={hit:'#8a6fae',similar:'#7291a8',file:'#5f9470',owns:'#c0985a'};

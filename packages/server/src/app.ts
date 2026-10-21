@@ -746,17 +746,15 @@ export function createApp(deps: ServerDeps): Hono {
       }
     }
 
-    // 4) 会话节点（检索模式下省略，保持图聚焦）
-    if (!q) {
-      for (const a of agentList) {
-        const sess = db2.prepare(
-          `SELECT id, title, model, updated_at FROM sessions
-           WHERE agent_id = ? AND status = 'active' ORDER BY updated_at DESC LIMIT 3`,
-        ).all(a.name) as any[];
-        for (const s of sess) {
-          nodes.push({ id: `s:${s.id}`, type: "session", label: (s.title || "会话").slice(0, 20), sub: (s.model || "").split("/").pop(), agent: a.name });
-          edges.push({ from: `a:${a.name}`, to: `s:${s.id}`, kind: "owns" });
-        }
+    // 4) 会话节点（全图/检索模式都显示，挂在各自 agent 下）
+    for (const a of agentList) {
+      const sess = db2.prepare(
+        `SELECT id, title, model, updated_at FROM sessions
+         WHERE agent_id = ? AND status = 'active' ORDER BY updated_at DESC LIMIT 3`,
+      ).all(a.name) as any[];
+      for (const s of sess) {
+        nodes.push({ id: `s:${s.id}`, type: "session", label: (s.title || "会话").slice(0, 20), sub: (s.model || "").split("/").pop(), agent: a.name });
+        edges.push({ from: `a:${a.name}`, to: `s:${s.id}`, kind: "owns" });
       }
     }
 
