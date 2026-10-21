@@ -18,7 +18,8 @@
   // ── 多 Agent（model/thinking/workspaceDir/description 各自独立；页面可切换） ──
   "agents": {
     "coder":  { "description": "编程助手", "model": "max", "thinking": "high" },
-    "writer": { "description": "写作助手", "model": "flash", "thinking": "low" }
+    "writer": { "description": "写作助手", "model": "flash", "thinking": "low",
+      "tools": { "disable": ["trae_agent", "acp_agent"] } }  // 该 agent 不用外部编码工具
   },
 
   // ── providers ──

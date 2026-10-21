@@ -109,7 +109,7 @@ export const ConfigSchema = z.object({
       allowedUserIds: z.array(z.string()).default([]),
     })
     .optional(),
-  /** 多 Agent 定义："名字" -> { model?, workspaceDir?, description?, thinking? } */
+  /** 多 Agent 定义："名字" -> { model?, workspaceDir?, description?, thinking?, tools? } */
   agents: z
     .record(
       z.object({
@@ -118,6 +118,10 @@ export const ConfigSchema = z.object({
         workspaceDir: z.string().optional(),
         /** 该 agent 的思考等级；缺省继承 thinkingDefault */
         thinking: ThinkingEnum.optional(),
+        /** 该 agent 专属工具裁剪（全局 tools.disable 之外再减一层，如禁用 trae_agent） */
+        tools: z
+          .object({ disable: z.array(z.string()).default([]) })
+          .optional(),
       }),
     )
     .default({}),

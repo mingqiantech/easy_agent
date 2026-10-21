@@ -258,6 +258,7 @@ async function main() {
       description: a.description,
       workspaceDir: a.workspaceDir,
       thinking: a.thinking,
+      toolsDisable: a.toolsDisable,
       memory: mem,
     };
   }

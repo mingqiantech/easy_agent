@@ -107,6 +107,7 @@ export function createApp(deps: ServerDeps): Hono {
         model: a.model,
         description: a.description,
         thinking: a.thinking,
+        toolsDisable: (a as any).toolsDisable ?? [],
       })),
     }),
   );
@@ -312,6 +313,17 @@ export function createApp(deps: ServerDeps): Hono {
     const id = c.req.param("id");
     const sess = deps.sessions.get(id);
     const agent = sess ? deps.agents[sess.agentId] : undefined;
+    // agent 专属工具裁剪：黑名单内工具对模型不可见且拒绝执行
+    const dis = new Set<string>((agent as any)?.toolsDisable ?? []);
+    const toolRegistry = dis.size
+      ? {
+          getDefinitions: () => deps.tools.getDefinitions().filter((d) => !dis.has(d.name)),
+          execute: (name: string, input: unknown, ctx: any) =>
+            dis.has(name)
+              ? Promise.resolve({ output: null, error: `工具 "${name}" 已被该 agent 配置禁用` })
+              : deps.tools.execute(name, input, ctx),
+        }
+      : deps.tools;
     // 排队/转向：会话有任务在跑 → 入队，运行循环会并入当前上下文
     if (
       typeof body.text === "string" &&
@@ -325,7 +337,7 @@ export function createApp(deps: ServerDeps): Hono {
     bus({ type: "run_start" });
     try {
       const response = await deps.sessions.run(id, body.text, {
-        toolRegistry: deps.tools,
+        toolRegistry,
         thinking: agent?.thinking as
           | "off"
           | "low"
@@ -367,12 +379,20 @@ export function createApp(deps: ServerDeps): Hono {
     if (!agent) return c.json({ error: `unknown agent: ${name}` }, 404);
     const body = await c.req.json().catch(() => ({}) as any);
     const levels = ["off", "low", "medium", "high"];
-    if (typeof body.thinking !== "string")
+    // 可选：agent 专属工具黑名单开关（如关 trae）；数组=替换语义，[]=清空
+    const hasToolsDisable = body.toolsDisable !== undefined;
+    if (hasToolsDisable && !Array.isArray(body.toolsDisable))
+      return c.json({ error: "toolsDisable 必须是字符串数组" }, 400);
+    if (hasToolsDisable && body.toolsDisable.some((x: any) => typeof x !== "string"))
+      return c.json({ error: "toolsDisable 元素必须是字符串" }, 400);
+    if (typeof body.thinking === "string" && body.thinking) {
+      if (!levels.includes(body.thinking))
+        return c.json({ error: "thinking 必须是 off|low|medium|high" }, 400);
+      agent.thinking = body.thinking;
+    } else if (!hasToolsDisable) {
       return c.json({ error: "thinking 必须是字符串" }, 400);
-    if (!levels.includes(body.thinking))
-      return c.json({ error: "thinking 必须是 off|low|medium|high" }, 400);
-
-    agent.thinking = body.thinking;
+    }
+    if (hasToolsDisable) (agent as any).toolsDisable = body.toolsDisable;
     try {
       const dir = deps.config.stateDir;
       fs.mkdirSync(dir, { recursive: true });
@@ -383,7 +403,11 @@ export function createApp(deps: ServerDeps): Hono {
       } catch {}
       data.agents = {
         ...(data.agents ?? {}),
-        [name]: { ...(data.agents?.[name] ?? {}), thinking: body.thinking },
+        [name]: {
+          ...(data.agents?.[name] ?? {}),
+          ...(typeof body.thinking === "string" && body.thinking ? { thinking: body.thinking } : {}),
+          ...(hasToolsDisable ? { tools: { disable: body.toolsDisable } } : {}),
+        },
       };
       fs.writeFileSync(file, JSON.stringify(data, null, 2));
     } catch (e: any) {

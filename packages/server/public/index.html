@@ -43,6 +43,9 @@
     .tab.active{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;border-color:transparent;font-weight:600}
     .model-pick{margin-left:auto;display:flex;gap:8px;align-items:center}
     .model-pick label{font-size:12px;color:var(--muted)}
+    .agent-sw{border:1px solid var(--border);background:var(--card);border-radius:9px;font-size:13px;padding:5px 8px;cursor:pointer;line-height:1}
+    .agent-sw:hover{background:var(--hover)}
+    .agent-sw.off{opacity:.45;filter:grayscale(.8)}
     .model-pick select{width:auto;min-width:76px}
     .action-btn{padding:7px 14px;border:1px solid var(--border);border-radius:10px;background:var(--card);cursor:pointer;font-size:13px;color:var(--fg)}
     .action-btn:hover{border-color:var(--accent);color:var(--accent)}
@@ -235,6 +238,7 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
         </select>
         <label>模型</label>
         <select id="modelSel" onchange="switchModel(this.value)"></select>
+        <button id="traeSw" class="agent-sw" onclick="toggleTrae()" title="当前 Agent 是否可用外部编码工具 trae_agent/acp_agent">🤖</button>
         <button class="action-btn" onclick="summarize()" id="summBtn">📝 总结本会话</button>
       </div>
     </div>
@@ -357,6 +361,26 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
     function updateThinkSel(){
       const a=(window.__agents||[]).find(x=>x.name===agent);
       document.getElementById('thinkSel').value=(a&&a.thinking)||'off';
+      updateTraeSw();
+    }
+    /* 外部编码工具（trae_agent/acp_agent）的 per-agent 开关 */
+    const TRAE_TOOLS=['trae_agent','acp_agent'];
+    function traeOffFor(name){const a=(window.__agents||[]).find(x=>x.name===name);return !!(a&&a.toolsDisable&&a.toolsDisable.includes(TRAE_TOOLS[0]));}
+    function updateTraeSw(){
+      const b=document.getElementById('traeSw');if(!b)return;
+      const off=traeOffFor(agent);
+      b.classList.toggle('off',off);
+      b.textContent=off?'🤖✕':'🤖';
+      b.title=off?'当前 Agent 已禁用外部编码工具，点击启用':'当前 Agent 可用 trae_agent/acp_agent，点击禁用';
+    }
+    async function toggleTrae(){
+      const off=traeOffFor(agent);
+      const next=off?[]:TRAE_TOOLS;
+      const r=await fetch(`${API}/api/agents/${encodeURIComponent(agent)}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({toolsDisable:next})});
+      const j=await r.json();
+      if(j.error){alert('❌ '+j.error);return;}
+      const a=(window.__agents||[]).find(x=>x.name===agent);if(a)a.toolsDisable=next;
+      updateTraeSw();
     }
     async function switchThinking(lv){
       const r=await fetch(`${API}/api/agents/${encodeURIComponent(agent)}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({thinking:lv})});

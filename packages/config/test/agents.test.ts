@@ -37,6 +37,7 @@ describe("resolveAgents（多 Agent）", () => {
       workspaceDir: "/home/dia/.easy-agent/workspace",
       description: "默认助手",
       thinking: "off",
+      toolsDisable: [],
     });
   });
 

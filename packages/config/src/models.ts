@@ -72,6 +72,8 @@ export interface ResolvedAgent {
   workspaceDir: string;
   description: string;
   thinking: ThinkingLevel;
+  /** agent 专属工具黑名单（全局 disable 之外再减） */
+  toolsDisable: string[];
 }
 
 /**
@@ -109,6 +111,7 @@ export function resolveAgents(config: Config): ResolvedAgent[] {
       workspaceDir: dflt?.workspaceDir ?? config.workspaceDir,
       description: dflt?.description ?? "默认助手",
       thinking: effectiveThinking(config, defaultModel, dflt?.thinking),
+      toolsDisable: dflt?.tools?.disable ?? [],
     },
   ];
   for (const [name, a] of Object.entries(config.agents ?? {})) {
@@ -119,6 +122,7 @@ export function resolveAgents(config: Config): ResolvedAgent[] {
       workspaceDir: a.workspaceDir ?? config.workspaceDir,
       description: a.description ?? name,
       thinking: effectiveThinking(config, model, a.thinking),
+      toolsDisable: (a as any).tools?.disable ?? [],
     });
   }
   return out;
