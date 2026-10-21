@@ -583,11 +583,14 @@ export function createApp(deps: ServerDeps): Hono {
                 COALESCE(SUM(total_tokens),0) total,
                 COALESCE(SUM(cached_read_tokens),0) cacheRead,
                 COALESCE(SUM(cached_write_tokens),0) cacheWrite,
+                SUM(cost_usd) cost,
                 COALESCE(SUM(CASE WHEN cached_read_tokens + cached_write_tokens > 0
                                   THEN prompt_tokens ELSE 0 END),0) promptCacheable
          FROM token_usage WHERE created_at >= ?`,
       )
       .get(since) as any;
+    // 计费成本：SUM 跳过 NULL（未知定价行）；全未知时 cost=null（不冒充 0）
+    totals.cost = totals.cost != null ? Math.round(totals.cost * 1e6) / 1e6 : null;
     // 命中率两口径：
     // - cacheHitRate（整体）：被缓存段稀释（ollama/旧数据/首轮都算分母），保守偏低
     // - cacheHitRateActive（缓存在效内）：只统计网关真报了缓存字段的行 → 稳定可信
@@ -603,27 +606,32 @@ export function createApp(deps: ServerDeps): Hono {
                 SUM(prompt_tokens) prompt, SUM(completion_tokens) completion,
                 SUM(total_tokens) total, COUNT(*) calls,
                 SUM(cached_read_tokens) cacheRead, SUM(cached_write_tokens) cacheWrite,
+                SUM(cost_usd) cost,
                 SUM(CASE WHEN cached_read_tokens + cached_write_tokens > 0
                          THEN prompt_tokens ELSE 0 END) promptCacheable
          FROM token_usage WHERE created_at >= ?
          GROUP BY day ORDER BY day DESC LIMIT ?`,
       )
       .all(since, days + 2) as any[];
+    const roundCost = (v: any) => (v != null ? Math.round(v * 1e6) / 1e6 : null);
+    for (const d of daily) d.cost = roundCost(d.cost);
     const byModel = db2
       .prepare(
         `SELECT model, SUM(total_tokens) total, COUNT(*) calls,
-                SUM(cached_read_tokens) cacheRead
+                SUM(cached_read_tokens) cacheRead, SUM(cost_usd) cost
          FROM token_usage WHERE created_at >= ?
          GROUP BY model ORDER BY total DESC`,
       )
       .all(since) as any[];
+    for (const m of byModel) m.cost = roundCost(m.cost);
     const byAgent = db2
       .prepare(
-        `SELECT s.agent_id agent, SUM(t.total_tokens) total, COUNT(*) calls
+        `SELECT s.agent_id agent, SUM(t.total_tokens) total, COUNT(*) calls, SUM(t.cost_usd) cost
          FROM token_usage t JOIN sessions s ON s.id = t.session_id
          WHERE t.created_at >= ? GROUP BY s.agent_id ORDER BY total DESC`,
       )
       .all(since) as any[];
+    for (const a of byAgent) a.cost = roundCost(a.cost);
     return c.json({ days, totals, daily: daily.reverse(), byModel, byAgent });
   });
 

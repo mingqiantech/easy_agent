@@ -1,6 +1,7 @@
 import { Database } from "bun:sqlite";
 import path from "node:path";
 import fs from "node:fs";
+import { estimateCostUsd } from "@easy-agent/llm/pricing";
 let _db: Database | null = null;
 export function getDatabase(dbPath?: string): Database {
   if (_db) return _db;
@@ -173,6 +174,7 @@ function initializeSchema(db: Database): void {
       total_tokens INTEGER NOT NULL DEFAULT 0,
       cached_read_tokens INTEGER NOT NULL DEFAULT 0,
       cached_write_tokens INTEGER NOT NULL DEFAULT 0,
+      cost_usd REAL,
       created_at INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_token_usage_created ON token_usage (created_at);
@@ -350,6 +352,39 @@ function initializeSchema(db: Database): void {
   }
   if (!tuCols.some((c) => c.name === "cached_write_tokens")) {
     db.exec("ALTER TABLE token_usage ADD COLUMN cached_write_tokens INTEGER NOT NULL DEFAULT 0");
+  }
+  // 行级计费成本（USD；定价缺失 NULL，不冒充 0）
+  if (!tuCols.some((c) => c.name === "cost_usd")) {
+    db.exec("ALTER TABLE token_usage ADD COLUMN cost_usd REAL");
+  }
+  // 存量行补算成本（一次性：只碰 cost_usd IS NULL 的行）
+  const unpriced = db
+    .prepare(
+      `SELECT id, model, prompt_tokens, completion_tokens, cached_read_tokens, cached_write_tokens
+       FROM token_usage WHERE cost_usd IS NULL`,
+    )
+    .all() as Array<{
+      id: number; model: string; prompt_tokens: number;
+      completion_tokens: number; cached_read_tokens: number; cached_write_tokens: number;
+    }>;
+  if (unpriced.length > 0) {
+    const upd = db.prepare("UPDATE token_usage SET cost_usd = ? WHERE id = ?");
+    db.exec("BEGIN");
+    try {
+      for (const r of unpriced) {
+        const cost = estimateCostUsd(r.model, {
+          promptTokens: r.prompt_tokens,
+          completionTokens: r.completion_tokens,
+          cacheReadTokens: r.cached_read_tokens,
+          cacheWriteTokens: r.cached_write_tokens,
+        });
+        upd.run(cost ?? null, r.id);
+      }
+      db.exec("COMMIT");
+    } catch (e) {
+      db.exec("ROLLBACK");
+      throw e;
+    }
   }
 }
 export function closeDatabase(): void {

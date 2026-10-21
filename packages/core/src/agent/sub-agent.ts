@@ -1,6 +1,7 @@
 import { ulid } from "ulid";
 import { getDatabase } from "../database.js";
 import { createRun, finishRun } from "./runs.js";
+import { estimateCostUsd } from "@easy-agent/llm/pricing";
 import { maskSecrets } from "../secrets-mask.js";
 import type { SessionManager } from "../session.js";
 import type { ToolRegistry } from "../tool/registry.js";
@@ -93,14 +94,15 @@ export class SubAgentManager {
         if (llmResponse.usage) {
           totalTokens += llmResponse.usage.totalTokens ?? 0;
           db.prepare(
-            `INSERT INTO token_usage (session_id, model, prompt_tokens, completion_tokens, total_tokens, created_at)
-             VALUES (?, ?, ?, ?, ?, ?)`,
+            `INSERT INTO token_usage (session_id, model, prompt_tokens, completion_tokens, total_tokens, cost_usd, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?)`,
           ).run(
             sessionId,
             model,
             llmResponse.usage.promptTokens ?? 0,
             llmResponse.usage.completionTokens ?? 0,
             llmResponse.usage.totalTokens ?? 0,
+            estimateCostUsd(model, llmResponse.usage) ?? null,
             Date.now(),
           );
         }

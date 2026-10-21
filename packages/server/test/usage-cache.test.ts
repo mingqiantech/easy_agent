@@ -74,3 +74,48 @@ describe("用量 API 缓存统计", () => {
     expect(names).toContain("cached_write_tokens");
   });
 });
+
+describe("用量 API 计费成本", () => {
+  it("cost=定价行成本之和；NULL 行（未知定价）不参与且全未知时 cost=null", async () => {
+    const db = getDatabase();
+    db.prepare("DELETE FROM token_usage").run();
+    const now = Date.now();
+    const sid = "usage-cost-test";
+    db.prepare(
+      `INSERT INTO sessions (id,title,agent_id,model,created_at,updated_at) VALUES (?,'c','default','qwen3.8-flash',?,?)`,
+    ).run(sid, now, now);
+    const ins = db.prepare(
+      `INSERT INTO token_usage (session_id,model,prompt_tokens,completion_tokens,total_tokens,cached_read_tokens,cached_write_tokens,cost_usd,created_at)
+       VALUES (?,?,?,?,?,?,?,?,?)`,
+    );
+    // 已知定价：1M 输入全未缓存 + 1M 输出 = $2.5 + $10
+    ins.run(sid, "qwen3.8-flash", 1_000_000, 1_000_000, 2_000_000, 0, 0, 12.5, now);
+    // 未知定价模型：cost NULL，不计入
+    ins.run(sid, "ollama-local", 5000, 100, 5100, 0, 0, null, now);
+
+    const app = createApp(stubDeps());
+    const j = await (await app.request("/api/usage?days=7")).json() as any;
+    expect(j.totals.cost).toBeCloseTo(12.5, 6);
+    const flash = j.byModel.find((x: any) => x.model === "qwen3.8-flash");
+    expect(flash.cost).toBeCloseTo(12.5, 6);
+    const local = j.byModel.find((x: any) => x.model === "ollama-local");
+    expect(local.cost).toBeNull();
+    const agent = j.byAgent.find((x: any) => x.agent === "default");
+    expect(agent.cost).toBeCloseTo(12.5, 6);
+    const today = j.daily[j.daily.length - 1];
+    expect(today.cost).toBeCloseTo(12.5, 6);
+  });
+
+  it("全部无定价时 totals.cost=null", async () => {
+    const db = getDatabase();
+    db.prepare("DELETE FROM token_usage").run();
+    const app = createApp(stubDeps());
+    const j = await (await app.request("/api/usage?days=7")).json() as any;
+    expect(j.totals.cost).toBeNull();
+  });
+
+  it("token_usage 有 cost_usd 列", () => {
+    const cols = getDatabase().prepare("PRAGMA table_info(token_usage)").all() as any[];
+    expect(cols.map((c) => c.name)).toContain("cost_usd");
+  });
+});

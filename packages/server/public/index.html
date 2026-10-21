@@ -1010,6 +1010,7 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
 
     /* ── 用量页 ── */
     const fmtK=n=>{n=n||0;return n>=1e6?(n/1e6).toFixed(2)+'M':n>=1e3?(n/1e3).toFixed(1)+'k':String(Math.round(n))};
+    const fmtUSD=n=>n==null?'—':n>=1000?'$'+(n/1000).toFixed(2)+'k':n>=1?'$'+n.toFixed(2):n>=0.01?'$'+n.toFixed(3):'$'+n.toFixed(5).replace(/0+$/,'').replace(/\.$/,'.0');
     async function loadUsage(){
       try{
         const days=Number(document.getElementById('usageDays').value||30);
@@ -1019,13 +1020,14 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
           ['总 tokens',fmtK(t.total)],['输入',fmtK(t.prompt)],['输出',fmtK(t.completion)],['LLM 调用',t.calls||0],
         ];
         if(t.cacheRead>0)cards.push(['缓存输入',fmtK(t.cacheRead)]);
+        if(t.cost!=null)cards.push(['预估费用 (USD)',fmtUSD(t.cost)]);
         // 优先“缓存在效内命中率”（只统计网关真报缓存的行）；无则退回整体口径
         const hr=t.cacheHitRateActive!=null?t.cacheHitRateActive:t.cacheHitRate;
         if(hr!=null)cards.push([t.cacheHitRateActive!=null?'缓存命中率*':'缓存命中率',(hr*100).toFixed(1)+'%']);
         document.getElementById('usageMetrics').innerHTML=cards.map(([l,v])=>`<div class="metric"><div class="m-val">${v}</div><div class="m-lab">${l}</div></div>`).join('');
         renderUsageChart(u.daily||[]);
-        const rows=(list,key)=>'<tr><th>'+key+'</th><th>tokens</th><th>次数</th></tr>'+(list||[]).map(x=>`<tr><td>${esc(x[key])}</td><td>${fmtK(x.total)}</td><td>${x.calls}</td></tr>`).join('')||'<tr><td colspan="3" style="color:var(--muted)">暂无数据</td></tr>';
-        document.getElementById('usageModels').innerHTML=(u.byModel||[]).length?'<tr><th>model</th><th>tokens</th><th>缓存输入</th><th>次数</th></tr>'+u.byModel.map(x=>`<tr><td>${esc(x.model)}</td><td>${fmtK(x.total)}</td><td>${x.cacheRead>0?fmtK(x.cacheRead):'-'}</td><td>${x.calls}</td></tr>`).join(''):'<tr><td colspan="4" style="color:var(--muted)">暂无数据</td></tr>';
+        const rows=(list,key)=>'<tr><th>'+key+'</th><th>tokens</th><th>次数</th><th>费用</th></tr>'+(list||[]).map(x=>`<tr><td>${esc(x[key])}</td><td>${fmtK(x.total)}</td><td>${x.calls}</td><td>${fmtUSD(x.cost)}</td></tr>`).join('')||'<tr><td colspan="4" style="color:var(--muted)">暂无数据</td></tr>';
+        document.getElementById('usageModels').innerHTML=(u.byModel||[]).length?'<tr><th>model</th><th>tokens</th><th>缓存输入</th><th>次数</th><th>费用</th></tr>'+u.byModel.map(x=>`<tr><td>${esc(x.model)}</td><td>${fmtK(x.total)}</td><td>${x.cacheRead>0?fmtK(x.cacheRead):'-'}</td><td>${x.calls}</td><td>${fmtUSD(x.cost)}</td></tr>`).join(''):'<tr><td colspan="5" style="color:var(--muted)">暂无数据</td></tr>';
         document.getElementById('usageAgents').innerHTML=rows(u.byAgent,'agent');
       }catch(e){}
     }
@@ -1052,7 +1054,8 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
         // 命中率用“缓存在效内”口径（分母=当日真走了缓存的输入），不被无缓存行稀释
         const denom=d.promptCacheable||d.prompt;
         const hitPct=denom>0&&d.cacheRead>0?`\n缓存命中率: ${(d.cacheRead/denom*100).toFixed(1)}%（读 ${fmtK(d.cacheRead)} / 写 ${fmtK(d.cacheWrite||0)}）`:'';
-        const tip=`${d.day}: ${tot} tokens / ${d.calls} 次\n未缓存输入 ${fmtK(parts[0])} · 缓存读 ${fmtK(parts[1])} · 缓存写 ${fmtK(parts[2])} · 输出 ${fmtK(parts[3])}${hitPct}`;
+        const costTip=d.cost!=null?`\n预估费用: ${fmtUSD(d.cost)}`:'';
+        const tip=`${d.day}: ${tot} tokens / ${d.calls} 次\n未缓存输入 ${fmtK(parts[0])} · 缓存读 ${fmtK(parts[1])} · 缓存写 ${fmtK(parts[2])} · 输出 ${fmtK(parts[3])}${hitPct}${costTip}`;
         // 透明全高命中区：柱子细不好悬停，整列可探
         const zone=`<rect x="${pad+i*step}" y="16" width="${step}" height="${H-46}" fill="transparent"><title>${esc(tip).replace(/&quot;/g,'"')}</title></rect>`;
         const lbl=daily.length<=16||i%Math.ceil(daily.length/10)===0?`<text x="${x+bw/2}" y="${H-12}" font-size="9" fill="#8b93a3" text-anchor="middle">${d.day.slice(5)}</text>`:'';

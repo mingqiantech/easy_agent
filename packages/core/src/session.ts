@@ -1,6 +1,7 @@
 import { getDatabase } from "./database.js";
 import { generateId, logDebug, now } from "./utils.js";
 import { needsCompaction, compactHistory } from "./compaction.js";
+import { estimateCostUsd } from "@easy-agent/llm/pricing";
 import type { LLMClient } from "@easy-agent/llm/client";
 import type {
   LLMRequest,
@@ -498,9 +499,10 @@ export class SessionManager {
           }
 
           if (response.usage) {
+            const costUsd = estimateCostUsd(session.model, response.usage);
             db.prepare(
-              `INSERT INTO token_usage (session_id, model, prompt_tokens, completion_tokens, total_tokens, cached_read_tokens, cached_write_tokens, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+              `INSERT INTO token_usage (session_id, model, prompt_tokens, completion_tokens, total_tokens, cached_read_tokens, cached_write_tokens, cost_usd, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             ).run(
               sessionId,
               session.model,
@@ -509,6 +511,7 @@ export class SessionManager {
               response.usage.totalTokens ?? 0,
               response.usage.cacheReadTokens ?? 0,
               response.usage.cacheWriteTokens ?? 0,
+              costUsd ?? null,
               now(),
             );
           }
