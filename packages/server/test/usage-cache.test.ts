@@ -47,8 +47,12 @@ describe("用量 API 缓存统计", () => {
     expect(j.totals.cacheRead).toBe(900);
     expect(j.totals.cacheWrite).toBe(50);
     expect(j.totals.cacheHitRate).toBeCloseTo(900 / 1700, 4);
+    // 在效口径：只算真走了缓存的行（1000+200=1200），不被无缓存行稀释
+    expect(j.totals.promptCacheable).toBe(1200);
+    expect(j.totals.cacheHitRateActive).toBeCloseTo(900 / 1200, 4);
     const today = j.daily[j.daily.length - 1];
     expect(today.cacheRead).toBe(900);
+    expect(today.promptCacheable).toBe(1200);
     const flash = j.byModel.find((x: any) => x.model === "m-flash");
     expect(flash.cacheRead).toBe(800);
   });
@@ -59,6 +63,7 @@ describe("用量 API 缓存统计", () => {
     const app = createApp(stubDeps());
     const j = await (await app.request("/api/usage?days=7")).json() as any;
     expect(j.totals.cacheHitRate).toBeNull();
+    expect(j.totals.cacheHitRateActive).toBeNull();
     expect(j.totals.cacheRead).toBe(0);
   });
 

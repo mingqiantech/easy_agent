@@ -1019,7 +1019,9 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
           ['总 tokens',fmtK(t.total)],['输入',fmtK(t.prompt)],['输出',fmtK(t.completion)],['LLM 调用',t.calls||0],
         ];
         if(t.cacheRead>0)cards.push(['缓存输入',fmtK(t.cacheRead)]);
-        if(t.cacheHitRate!=null)cards.push(['缓存命中率',(t.cacheHitRate*100).toFixed(1)+'%']);
+        // 优先“缓存在效内命中率”（只统计网关真报缓存的行）；无则退回整体口径
+        const hr=t.cacheHitRateActive!=null?t.cacheHitRateActive:t.cacheHitRate;
+        if(hr!=null)cards.push([t.cacheHitRateActive!=null?'缓存命中率*':'缓存命中率',(hr*100).toFixed(1)+'%']);
         document.getElementById('usageMetrics').innerHTML=cards.map(([l,v])=>`<div class="metric"><div class="m-val">${v}</div><div class="m-lab">${l}</div></div>`).join('');
         renderUsageChart(u.daily||[]);
         const rows=(list,key)=>'<tr><th>'+key+'</th><th>tokens</th><th>次数</th></tr>'+(list||[]).map(x=>`<tr><td>${esc(x[key])}</td><td>${fmtK(x.total)}</td><td>${x.calls}</td></tr>`).join('')||'<tr><td colspan="3" style="color:var(--muted)">暂无数据</td></tr>';
@@ -1047,9 +1049,14 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
           acc+=h;
         }
         const tot=parts.reduce((a,b)=>a+b,0);
-        const hitPct=d.prompt>0&&d.cacheRead>0?` · 缓存命中 ${(d.cacheRead/d.prompt*100).toFixed(0)}%`:'';
+        // 命中率用“缓存在效内”口径（分母=当日真走了缓存的输入），不被无缓存行稀释
+        const denom=d.promptCacheable||d.prompt;
+        const hitPct=denom>0&&d.cacheRead>0?`\n缓存命中率: ${(d.cacheRead/denom*100).toFixed(1)}%（读 ${fmtK(d.cacheRead)} / 写 ${fmtK(d.cacheWrite||0)}）`:'';
+        const tip=`${d.day}: ${tot} tokens / ${d.calls} 次\n未缓存输入 ${fmtK(parts[0])} · 缓存读 ${fmtK(parts[1])} · 缓存写 ${fmtK(parts[2])} · 输出 ${fmtK(parts[3])}${hitPct}`;
+        // 透明全高命中区：柱子细不好悬停，整列可探
+        const zone=`<rect x="${pad+i*step}" y="16" width="${step}" height="${H-46}" fill="transparent"><title>${esc(tip).replace(/&quot;/g,'"')}</title></rect>`;
         const lbl=daily.length<=16||i%Math.ceil(daily.length/10)===0?`<text x="${x+bw/2}" y="${H-12}" font-size="9" fill="#8b93a3" text-anchor="middle">${d.day.slice(5)}</text>`:'';
-        return `<g style="cursor:pointer"><title>${d.day}: ${tot} tokens / ${d.calls} 次${hitPct}</title>${bars}</g>${lbl}`;
+        return `<g>${bars}${zone}</g>${lbl}`;
       }).join('')+`<text x="${W-pad}" y="14" font-size="10" fill="#8b93a3" text-anchor="end">峰值 ${fmtK(max)}</text>`
         +'<g transform="translate(10,6)">'+[['未缓存输入','#5b7a8c'],['缓存读入','#a8c0d0'],['缓存写入','#c9b8d8'],['输出','#8a85a3']].map(([lab,c],ix)=>`<rect x="${ix*92}" y="0" width="8" height="8" rx="2" fill="${c}"/><text x="${ix*92+11}" y="8" font-size="9" fill="#8b93a3">${lab}</text>`).join('')+'</g>';
     }

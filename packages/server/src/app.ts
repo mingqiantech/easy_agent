@@ -582,20 +582,29 @@ export function createApp(deps: ServerDeps): Hono {
                 COALESCE(SUM(completion_tokens),0) completion,
                 COALESCE(SUM(total_tokens),0) total,
                 COALESCE(SUM(cached_read_tokens),0) cacheRead,
-                COALESCE(SUM(cached_write_tokens),0) cacheWrite
+                COALESCE(SUM(cached_write_tokens),0) cacheWrite,
+                COALESCE(SUM(CASE WHEN cached_read_tokens + cached_write_tokens > 0
+                                  THEN prompt_tokens ELSE 0 END),0) promptCacheable
          FROM token_usage WHERE created_at >= ?`,
       )
       .get(since) as any;
-    // 缓存命中率：输入中命中缓存的比例（旧行无缓存数据时计 0，不误报高命中）
-    totals.inputEffective = Math.max(0, totals.prompt);
+    // 命中率两口径：
+    // - cacheHitRate（整体）：被缓存段稀释（ollama/旧数据/首轮都算分母），保守偏低
+    // - cacheHitRateActive（缓存在效内）：只统计网关真报了缓存字段的行 → 稳定可信
     totals.cacheHitRate =
-      totals.inputEffective > 0 ? totals.cacheRead / totals.inputEffective : null;
+      totals.prompt > 0 ? Math.min(1, totals.cacheRead / totals.prompt) : null;
+    totals.cacheHitRateActive =
+      totals.promptCacheable > 0
+        ? Math.min(1, totals.cacheRead / totals.promptCacheable)
+        : null;
     const daily = db2
       .prepare(
         `SELECT strftime('%Y-%m-%d', created_at/1000, 'unixepoch') day,
                 SUM(prompt_tokens) prompt, SUM(completion_tokens) completion,
                 SUM(total_tokens) total, COUNT(*) calls,
-                SUM(cached_read_tokens) cacheRead, SUM(cached_write_tokens) cacheWrite
+                SUM(cached_read_tokens) cacheRead, SUM(cached_write_tokens) cacheWrite,
+                SUM(CASE WHEN cached_read_tokens + cached_write_tokens > 0
+                         THEN prompt_tokens ELSE 0 END) promptCacheable
          FROM token_usage WHERE created_at >= ?
          GROUP BY day ORDER BY day DESC LIMIT ?`,
       )
