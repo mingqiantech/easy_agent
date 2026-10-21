@@ -23,6 +23,16 @@ describe("parseTraeJson 防御解析", () => {
     expect(parseTraeJson(JSON.stringify({ message: "hi" })).result).toBe("hi");
     expect(parseTraeJson(JSON.stringify({ response: "ho" })).result).toBe("ho");
   });
+  it("实测 0.121.3 结构：message.content + 顶层 session_id + response_meta.usage", () => {
+    const p = parseTraeJson(JSON.stringify({
+      session_id: "943c7d83-x",
+      message: { role: "assistant", content: "棒", response_meta: { usage: { prompt_tokens: 12566, completion_tokens: 3, prompt_token_details: { cached_tokens: 7424 } } } },
+      stats: { model_usage: { "GLM-5.3": { input_tokens: 12566 } } },
+    }));
+    expect(p.result).toBe("棒");
+    expect(p.sessionId).toBe("943c7d83-x");
+    expect(p.usage).toEqual({ promptTokens: 12566, completionTokens: 3, cacheReadTokens: 7424 });
+  });
 });
 
 describe("trae_agent 工具", () => {

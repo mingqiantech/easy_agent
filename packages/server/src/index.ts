@@ -225,14 +225,6 @@ async function main() {
     ),
   );
 
-  // 外部编码 agent（trae-cli headless）：配置 trae 节才注册；缺省围栏=各 agent 工作区
-  if (config.trae?.enabled !== false && (config as any).trae) {
-    const traeCfg = { ...(config as any).trae };
-    if (!traeCfg.allowedWorkdirs?.length)
-      traeCfg.allowedWorkdirs = Object.values(agents).map((a: any) => a.workspaceDir);
-    tools.register(createTraeTool(traeCfg));
-  }
-
   // 工具裁剪：配置 tools.disable=[...] 注销对应工具（对所有 agent 生效）
   for (const name of config.tools?.disable ?? []) tools.unregister(name);
 
@@ -269,6 +261,15 @@ async function main() {
     };
   }
   console.log(`🤖 Agents: ${Object.keys(agents).join(", ")}`);
+
+  // 外部编码 agent（trae-cli headless）：配置 trae 节才注册；缺省围栏=各 agent 工作区
+  // （必须在 agents 构建之后：引用 workspaceDir）
+  if ((config as any).trae && (config as any).trae.enabled !== false) {
+    const traeCfg = { ...(config as any).trae };
+    if (!traeCfg.allowedWorkdirs?.length)
+      traeCfg.allowedWorkdirs = Object.values(agents).map((a: any) => a.workspaceDir);
+    tools.register(createTraeTool(traeCfg));
+  }
 
   // 梦境（Dreaming）：浅眠→REM→深眠，短期记忆提炼晋升；设置页与调度器共用
   const dreamDeps = {

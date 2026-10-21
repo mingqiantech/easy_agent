@@ -21,10 +21,11 @@ export interface TraeToolConfig {
 
 const MAX_OUTPUT = 50 * 1024;
 
-/** trae -p --json 输出解析（结构未登录全验，防御式多路兜底） */
+/** trae -p --json 输出解析（实测 0.121.3 结构：顶层 session_id + message{role,content,response_meta.usage} + stats） */
 export function parseTraeJson(stdout: string): {
   result: string;
   sessionId?: string;
+  usage?: { promptTokens?: number; completionTokens?: number; cacheReadTokens?: number };
   raw?: unknown;
   error?: string;
 } {
@@ -35,18 +36,28 @@ export function parseTraeJson(stdout: string): {
     return { result: stdout.trim() }; // 非 JSON（text 模式/旧版）→ 原样
   }
   const error = typeof j?.error === "string" ? j.error : undefined;
-  // result 字段名多版本兜底
+  // result 字段名多版本兜底（v1: message.content；旧/他版: result/response/message 字符串）
+  const msg = j?.message;
   const result =
+    (typeof msg?.content === "string" && msg.content) ||
     (typeof j?.result === "string" && j.result) ||
     (typeof j?.response === "string" && j.response) ||
-    (typeof j?.message === "string" && j.message) ||
-    (typeof j === "string" ? j : "") ||
+    (typeof msg === "string" ? msg : "") ||
     "";
   const sessionId =
-    (Array.isArray(j?.sessions) && j.sessions[0]?.session_id) ||
     (typeof j?.session_id === "string" && j.session_id) ||
+    (Array.isArray(j?.sessions) && j.sessions[0]?.session_id) ||
     undefined;
-  return { result: result || (error ? "" : JSON.stringify(j).slice(0, MAX_OUTPUT)), sessionId: sessionId || undefined, raw: j, error };
+  const u = msg?.response_meta?.usage ?? j?.usage;
+  const usage = u && typeof u === "object"
+    ? {
+        promptTokens: typeof u.prompt_tokens === "number" ? u.prompt_tokens : undefined,
+        completionTokens: typeof u.completion_tokens === "number" ? u.completion_tokens : undefined,
+        cacheReadTokens:
+          typeof u.prompt_token_details?.cached_tokens === "number" ? u.prompt_token_details.cached_tokens : undefined,
+      }
+    : undefined;
+  return { result: result || (error ? "" : JSON.stringify(j).slice(0, MAX_OUTPUT)), sessionId: sessionId || undefined, usage, raw: j, error };
 }
 
 export function createTraeTool(cfg: TraeToolConfig = {}): Tool {
@@ -77,7 +88,8 @@ export function createTraeTool(cfg: TraeToolConfig = {}): Tool {
       }
       const timeoutMs = (input.timeoutMinutes ?? cfg.timeoutMinutes ?? 10) * 60_000;
       // 声明式参数组装：print+json 基座 + resume + 工具白名单 + 权限策略
-      const baseArgs = ["-p", "--json", "-w", wd];
+      // ⚠️ 不用 -w：它是 --worktree（git worktree 隔离），非工作目录；目录靠 spawn cwd
+      const baseArgs = ["-p", "--json"];
       const permArgs = [
         ...(cfg.yolo ? ["--yolo"] : []),
         ...(cfg.permissionMode ? ["--permission-mode", cfg.permissionMode] : []),
@@ -130,6 +142,7 @@ export function createTraeTool(cfg: TraeToolConfig = {}): Tool {
             exitCode: code,
             result: parsed.result || (stderr ? `[stderr] ${stderr.slice(0, 400)}` : "(空输出)"),
             ...(parsed.sessionId ? { sessionId: parsed.sessionId } : {}),
+            ...(parsed.usage?.promptTokens || parsed.usage?.completionTokens ? { usage: parsed.usage } : {}),
             ...(truncated ? { truncated: true } : {}),
           });
         });
