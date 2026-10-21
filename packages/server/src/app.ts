@@ -666,7 +666,9 @@ export function createApp(deps: ServerDeps): Hono {
       }
     } catch {}
 
-    // 2) agent 归属：file_path 按 workspaceDir 最长前缀匹配
+    // 2) agent 归属：file_path 按 workspaceDir 最长前缀匹配；
+    //    会话语料（.dreams/session-corpus/<md5(sid)前12位>.md）反查会话→agent，
+    //    共享工作区的多 agent 也能把知识挂对各自主人
     const agentList = Object.values(deps.agents ?? {}) as any[];
     const ownerOf = (fp: string): string | null => {
       let best: string | null = null, bl = -1;
@@ -676,13 +678,27 @@ export function createApp(deps: ServerDeps): Hono {
       }
       return best;
     };
+    const corpusOwner = new Map<string, { agent: string | null; sessionId: string }>();
+    try {
+      const { createHash } = await import("node:crypto");
+      for (const s of db2.prepare("SELECT id, agent_id FROM sessions").all() as any[]) {
+        const h = createHash("md5").update(s.id).digest("hex").slice(0, 12);
+        corpusOwner.set(h, { agent: s.agent_id ?? null, sessionId: s.id });
+      }
+    } catch {}
 
     const nodes: any[] = [];
     const edges: any[] = [];
     for (const a of agentList) {
       nodes.push({ id: `a:${a.name}`, type: "agent", label: a.name, sub: (a.model || "").split("/").pop() });
     }
-    const entryLabel = (e: any, i: number) => {
+    const entryLabel = (e: any, _i: number) => {
+      const m = String(e.file_path).match(/session-corpus\/([0-9a-f]{12})\.md$/);
+      if (m) {
+        const own = corpusOwner.get(m[1]);
+        const title = own ? (db2.prepare("SELECT title FROM sessions WHERE id=?").get(own.sessionId) as any)?.title : null;
+        return `${(title || own?.agent || "会话").slice(0, 10)}·语料#${e.id}`;
+      }
       const base = String(e.file_path).split("/").pop() ?? "?";
       return `${base.replace(/\.md$/, "")}#${e.id}`;
     };
@@ -709,14 +725,19 @@ export function createApp(deps: ServerDeps): Hono {
 
     const involvedAgents = new Set<string>();
     for (const e of kept) {
-      const owner = ownerOf(String(e.file_path));
+      const corpus = String(e.file_path).match(/session-corpus\/([0-9a-f]{12})\.md$/);
+      const owner = corpus ? corpusOwner.get(corpus[1])?.agent ?? ownerOf(String(e.file_path)) : ownerOf(String(e.file_path));
       if (owner) involvedAgents.add(owner);
       nodes.push({
         id: `m${e.id}`, type: "memory", label: entryLabel(e, 0),
         sub: e.source, file: e.file_path,
         excerpt: String(e.excerpt ?? "").slice(0, 600), agent: owner, updatedAt: e.updated_at,
       });
-      if (owner) edges.push({ from: `a:${owner}`, to: `m${e.id}`, kind: "file" });
+      if (corpus && corpusOwner.get(corpus[1])) {
+        edges.push({ from: `s:${corpusOwner.get(corpus[1])!.sessionId}`, to: `m${e.id}`, kind: "corpus" });
+      } else if (owner) {
+        edges.push({ from: `a:${owner}`, to: `m${e.id}`, kind: "file" });
+      }
     }
 
     // 3) 知识点间相似边（余弦 ≥ minSim，每人 top3，防糊成一团）

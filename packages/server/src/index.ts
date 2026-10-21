@@ -106,6 +106,9 @@ async function main() {
         ? `openai:${embCfg.model ?? "text-embedding-3-small"}`
         : "simple",
   );
+  // 会话语料摄取：活跃会话消息 → memory/.dreams/session-corpus/<hash>.md → 索引进知识网
+  const { SessionIngester } = await import("@easy-agent/memory/ingestion");
+  const sessionIngester = new SessionIngester(db, memoryDir);
   const hybrid =
     msCfg.hybrid?.enabled !== false
       ? new HybridSearch(searcher, embedding, workspaceDir, memIndex.fts, memIndex.vec, db, msCfg.rerank ?? {})
@@ -123,7 +126,8 @@ async function main() {
     for (const e of entries) {
       const p = path.join(dir, e.name);
       if (e.isDirectory()) {
-        if (e.name.startsWith(".") && !includeDot) continue;
+        // .dreams 是会话语料目录，需要摄取；其余点目录跳过
+        if (e.name.startsWith(".") && e.name !== ".dreams" && !includeDot) continue;
         out.push(...(await collectIndexableMdFiles(p, p.includes(".dreams") || includeDot)));
       } else if (e.name.endsWith(".md") && !e.name.startsWith(".")) out.push(p);
     }
@@ -136,6 +140,26 @@ async function main() {
     let files = 0,
       chunks = 0;
     try {
+      // 先摄取活跃会话语料（失败不阻断文件索引）
+      try {
+        for (const s of sessions.list(50)) {
+          const msgs = sessions.getMessages(s.id)
+            .filter((m) => m.role === "user" || m.role === "assistant")
+            .map((m) => {
+              if (m.role === "user") return { role: m.role, content: m.content };
+              // assistant 存的是 JSON{text,toolCalls}，只取可读文本
+              try {
+                const p = JSON.parse(m.content);
+                return { role: m.role, content: typeof p?.text === "string" ? p.text : m.content };
+              } catch {
+                return { role: m.role, content: m.content };
+              }
+            });
+          if (msgs.length) await sessionIngester.ingest(s.id, msgs);
+        }
+      } catch (e: any) {
+        console.warn("📥 会话摄取失败:", String(e?.message).slice(0, 120));
+      }
       const targets = [
         path.join(workspaceDir, "MEMORY.md"),
         path.join(workspaceDir, "USER.md"),
