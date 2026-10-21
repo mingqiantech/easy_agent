@@ -175,7 +175,6 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
     .titem .tbody{display:none;border-top:1px dashed var(--border);padding:8px 12px 10px;background:var(--card)}
     .titem.open .tbody{display:block}
     .toolgroup-body .titem .tbody+.tbody{border-top:1px dashed var(--border)}
-    .toolgroup-body .message.assistant{max-width:100%;margin:0 0 6px;font-size:12px}
     .titem .tsec{font-size:10px;letter-spacing:.6px;color:var(--muted);font-weight:700;margin:2px 0 5px}
     .titem .tpre{margin:0;font:11.5px/1.55 ui-monospace,Menlo,Consolas,monospace;white-space:pre-wrap;word-break:break-all;max-height:320px;overflow:auto;color:var(--fg)}
     .mem-ta{width:100%;height:200px;background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:10px;font:12px/1.6 ui-monospace,monospace;color:var(--fg);resize:vertical;margin-top:8px}
@@ -619,31 +618,20 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
       setTimeout(()=>{btn.textContent='复制';btn.classList.remove('copied');},1600);
     });
     /* 连续工具卡片 → 外层可折叠「活动」组；同 toolCallId 的 call+result 合并成一项（INPUT+OUTPUT 双段）
-       注：助手在工具调用之间穿插的短文本（“我先看看…”）不打断分组，一并收进组体 */
-    const isShortAsstText=el=>{
-      if(!el.classList)return false;
-      if(!el.classList.contains('message')||!el.classList.contains('assistant'))return false;
-      if(el.classList.contains('toolchip')||el.classList.contains('summ'))return false;
-      const b=el.querySelector('.bubble');
-      return !!b&&b.textContent.trim().length<=500;
-    };
+       注：助手文本气泡永远在组外正常显示，并把工具流切成多个组（时间顺序不乱） */
     function groupToolMessages(){
       const c=document.getElementById('messages');
       let el=c.firstElementChild;
       while(el){
         if(el.classList&&el.classList.contains('toolchip')){
-          const run=[];const nodes=[]; // nodes=按序全部收编节点（含穿插文本）
-          let n=el,textGap=0;
-          while(n){
-            if(n.classList&&n.classList.contains('toolchip')){run.push(n);nodes.push(n);textGap=0;n=n.nextElementSibling;continue;}
-            if(textGap===0&&isShortAsstText(n)){nodes.push(n);textGap=1;n=n.nextElementSibling;continue;}
-            break;
-          }
+          const run=[el];
+          let n=el.nextElementSibling;
+          while(n&&n.classList&&n.classList.contains('toolchip')){run.push(n);n=n.nextElementSibling;}
           if(run.length>=2){
             // 按序规划：相邻且同 toolCallId 的 call+result 合并成一项（INPUT+OUTPUT 双段）
             const items=[];
-            for(let k=0;k<nodes.length;k++){
-              const a=nodes[k],b=nodes[k+1];
+            for(let k=0;k<run.length;k++){
+              const a=run[k],b=run[k+1];
               const pid=a.dataset?a.dataset.pair:null;
               if(pid&&b&&a.dataset.kind==='call'&&b.dataset.kind==='result'&&b.dataset.pair===pid){
                 items.push([a,b]);k++;
@@ -655,7 +643,7 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
             head.className='toolgroup-head';
             head.innerHTML=`<span class="tg-arrow">▸</span> Activity: ${run.length} tools`;
             const body=document.createElement('div');body.className='toolgroup-body';
-            nodes[0].parentNode.insertBefore(grp,nodes[0]);
+            run[0].parentNode.insertBefore(grp,run[0]);
             for(const item of items){
               if(item.length===2){
                 const [a,b]=item;
