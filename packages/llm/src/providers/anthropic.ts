@@ -226,6 +226,31 @@ export class AnthropicProvider implements LLMProvider {
     });
   }
 
+  /**
+   * 尾断点：给最后一条 core message 盖 cache 断点（滚动缓存前缀）。
+   * Anthropic 语义：断点=缓存"到此为止的全部前缀"（tools+system+历史消息），
+   * ai-sdk 会把消息级 cacheControl 落到该消息最后一个 content block 上。
+   * 只盖 system 时，逐轮增长的对话历史每轮都按未缓存全价计费；加尾断点后
+   * tool loop / 多轮聊天里前 N-1 轮历史全部走 cache_read（10% 计费），
+   * 新尾巴按 125% 写缓存一次。会话历史是纯追加式，前缀稳定，命中随轮次上升。
+   * 上限 4 个断点：此处 system+尾=2，安全。
+   */
+  markTailCache(messages: any[]): any[] {
+    if (messages.length === 0) return messages;
+    const out = [...messages];
+    const last = out[out.length - 1];
+    // 已是带断点的 system（超短会话唯一消息）不重复盖
+    if (last?.experimental_providerMetadata?.anthropic?.cacheControl) return out;
+    out[out.length - 1] = {
+      ...last,
+      experimental_providerMetadata: {
+        ...(last?.experimental_providerMetadata ?? {}),
+        anthropic: { cacheControl: { type: "ephemeral" } },
+      },
+    };
+    return out;
+  }
+
   async generate(request: LLMRequest): Promise<LLMResponse> {
     const model = this.client(request.model);
     const messages = this.convertMessages(request.messages);
@@ -235,7 +260,10 @@ export class AnthropicProvider implements LLMProvider {
     try {
       const result = await generateText({
         model,
-        messages: [...this.systemMessages(request.system), ...this.markSystemCache(messages)] as any,
+        messages: [
+          ...this.systemMessages(request.system),
+          ...this.markTailCache(this.markSystemCache(messages)),
+        ] as any,
         tools,
         temperature: request.generation?.temperature,
         abortSignal: request.signal,
@@ -277,7 +305,10 @@ export class AnthropicProvider implements LLMProvider {
       : undefined;
     const result = streamText({
       model,
-      messages: [...this.systemMessages(request.system), ...this.markSystemCache(messages)] as any,
+      messages: [
+        ...this.systemMessages(request.system),
+        ...this.markTailCache(this.markSystemCache(messages)),
+      ] as any,
       tools,
       temperature: request.generation?.temperature,
       abortSignal: request.signal,
