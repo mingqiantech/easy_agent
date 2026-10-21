@@ -69,6 +69,8 @@ export interface ServerDeps {
   backup?: BackupManager;
   /** 检索管道状态（检索拓扑图数据源；index.ts 注入，每次请求现取） */
   getRetrievalStats?: () => Record<string, unknown>;
+  /** 嵌入提供方（知识拓扑图相似度计算；index.ts 注入） */
+  embedding?: { embed: (text: string) => Promise<Float32Array> };
   /** cron/事件 watcher 管理器 */
   cron?: CronManager;
 }
@@ -636,6 +638,134 @@ export function createApp(deps: ServerDeps): Hono {
       .all(since) as any[];
     for (const a of byAgent) a.cost = roundCost(a.cost);
     return c.json({ days, totals, daily: daily.reverse(), byModel, byAgent });
+  });
+
+  // ── 知识拓扑图：记忆知识点（向量相似）+ agent 归属 + 会话关联；?q= 切换为检索模式 ──
+  app.get("/api/knowledge/graph", async (c) => {
+    const db2 = getDatabase();
+    const q = String(c.req.query("q") ?? "").trim();
+    const minSim = Math.min(Math.max(Number(c.req.query("minSim") ?? 0.35), 0), 0.99);
+    const MAX_ENTRIES = 150;
+
+    const cos=(a:Float32Array,b:Float32Array)=>{
+      const n=Math.min(a.length,b.length); if(!n)return 0;
+      let dot=0,na=0,nb=0;
+      for(let i=0;i<n;i++){dot+=a[i]*b[i];na+=a[i]*a[i];nb+=b[i]*b[i];}
+      return na&&nb?dot/Math.sqrt(na*nb):0;
+    };
+
+    // 1) 知识点节点（memory_entries 最新 N 条 + 向量）
+    const entries = db2.prepare(
+      `SELECT id, source, file_path, excerpt, updated_at FROM memory_entries
+       ORDER BY updated_at DESC LIMIT ?`,
+    ).all(MAX_ENTRIES) as any[];
+    const vecMap = new Map<number, Float32Array>();
+    try {
+      for (const r of db2.prepare("SELECT id, embedding FROM memory_vec").all() as any[]) {
+        if (r.embedding) vecMap.set(r.id, new Float32Array(r.embedding.buffer, r.embedding.byteOffset, r.embedding.byteLength / 4));
+      }
+    } catch {}
+
+    // 2) agent 归属：file_path 按 workspaceDir 最长前缀匹配
+    const agentList = Object.values(deps.agents ?? {}) as any[];
+    const ownerOf = (fp: string): string | null => {
+      let best: string | null = null, bl = -1;
+      for (const a of agentList) {
+        const wd = String(a.workspaceDir ?? "");
+        if (wd && fp.startsWith(wd) && wd.length > bl) { best = a.name; bl = wd.length; }
+      }
+      return best;
+    };
+
+    const nodes: any[] = [];
+    const edges: any[] = [];
+    for (const a of agentList) {
+      nodes.push({ id: `a:${a.name}`, type: "agent", label: a.name, sub: (a.model || "").split("/").pop() });
+    }
+    const entryLabel = (e: any, i: number) => {
+      const base = String(e.file_path).split("/").pop() ?? "?";
+      return `${base.replace(/\.md$/, "")}#${e.id}`;
+    };
+    let kept = entries;
+
+    if (q && deps.embedding) {
+      // 检索模式：query 为中心，只展 top 命中 + 命中间相似边
+      try {
+        const qv = await deps.embedding.embed(q);
+        const scored = entries
+          .map((e) => ({ e, s: vecMap.has(e.id) ? cos(qv, vecMap.get(e.id)!) : 0 }))
+          .filter((x) => x.s >= 0.15)
+          .sort((x, y) => y.s - x.s)
+          .slice(0, 10);
+        kept = scored.map((x) => x.e);
+        nodes.push({ id: "q", type: "query", label: q, sub: `${kept.length} 个知识点命中` });
+        for (const { e, s } of scored) {
+          edges.push({ from: "q", to: `m${e.id}`, kind: "hit", weight: Math.round(s * 100) / 100 });
+        }
+      } catch (err: any) {
+        return c.json({ error: "嵌入查询失败：" + String(err?.message ?? err).slice(0, 120) }, 502);
+      }
+    }
+
+    const involvedAgents = new Set<string>();
+    for (const e of kept) {
+      const owner = ownerOf(String(e.file_path));
+      if (owner) involvedAgents.add(owner);
+      nodes.push({
+        id: `m${e.id}`, type: "memory", label: entryLabel(e, 0),
+        sub: e.source, file: e.file_path,
+        excerpt: String(e.excerpt ?? "").slice(0, 600), agent: owner, updatedAt: e.updated_at,
+      });
+      if (owner) edges.push({ from: `a:${owner}`, to: `m${e.id}`, kind: "file" });
+    }
+
+    // 3) 知识点间相似边（余弦 ≥ minSim，每人 top3，防糊成一团）
+    if (kept.length > 1) {
+      const withVec = kept.filter((e: any) => vecMap.has(e.id));
+      const topK = new Map<number, { id: number; s: number }[]>();
+      for (let i = 0; i < withVec.length; i++) {
+        for (let j = i + 1; j < withVec.length; j++) {
+          const s = cos(vecMap.get(withVec[i].id)!, vecMap.get(withVec[j].id)!);
+          if (s < minSim) continue;
+          for (const [a, b] of [[withVec[i].id, withVec[j].id], [withVec[j].id, withVec[i].id]]) {
+            const list = topK.get(a) ?? [];
+            list.push({ id: b, s });
+            topK.set(a, list);
+          }
+        }
+      }
+      const seen = new Set<string>();
+      for (const [a, list] of topK) {
+        list.sort((x, y) => y.s - x.s).slice(0, 3);
+        for (const { id: b, s } of list) {
+          const key = a < b ? `${a}|${b}` : `${b}|${a}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          edges.push({ from: `m${a}`, to: `m${b}`, kind: "similar", weight: Math.round(s * 100) / 100 });
+        }
+      }
+    }
+
+    // 4) 会话节点（检索模式下省略，保持图聚焦）
+    if (!q) {
+      for (const a of agentList) {
+        const sess = db2.prepare(
+          `SELECT id, title, model, updated_at FROM sessions
+           WHERE agent_id = ? AND status = 'active' ORDER BY updated_at DESC LIMIT 3`,
+        ).all(a.name) as any[];
+        for (const s of sess) {
+          nodes.push({ id: `s:${s.id}`, type: "session", label: (s.title || "会话").slice(0, 20), sub: (s.model || "").split("/").pop(), agent: a.name });
+          edges.push({ from: `a:${a.name}`, to: `s:${s.id}`, kind: "owns" });
+        }
+      }
+    }
+
+    return c.json({
+      query: q || null,
+      agents: agentList.map((a) => a.name),
+      entryTotal: db2.prepare("SELECT COUNT(*) n FROM memory_entries").get(),
+      nodes, edges,
+    });
   });
 
   // ── 定时任务 / 事件 watcher ──

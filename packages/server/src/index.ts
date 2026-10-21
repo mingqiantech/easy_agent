@@ -375,6 +375,7 @@ async function main() {
     memory,
     config,
     agents,
+    embedding,
     runDreaming: runDreamingCycle,
     cron,
     backup,

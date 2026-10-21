@@ -156,6 +156,21 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
 .message.flash .bubble{outline:2px solid var(--accent);box-shadow:0 0 0 6px rgba(95,148,112,.15)}
     /* 工具调用结果分组折叠 */
     .toolgroup{margin-bottom:14px}
+    /* 知识拓扑页 */
+    .know-bar{display:flex;gap:8px;padding:12px 20px 0;align-items:center}
+    .know-bar input{flex:1;padding:8px 12px;border:1px solid var(--border);border-radius:10px;background:var(--card);color:var(--fg);font-size:13px;font-family:inherit}
+    .know-bar select,.know-bar button{padding:8px 10px;border:1px solid var(--border);border-radius:10px;background:var(--card);color:var(--fg);font-size:12px;cursor:pointer}
+    .know-main{display:flex;gap:14px;padding:12px 20px;align-items:stretch}
+    .know-main .topo-wrap{flex:1;min-width:0}
+    .know-detail{width:300px;flex-shrink:0;background:var(--card);border:1px solid var(--border);border-radius:12px;padding:12px;font-size:12px;overflow:auto;max-height:520px}
+    .kd-title{font-weight:700;font-size:13px;margin-bottom:4px;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+    .kd-tag{font-size:10px;font-weight:400;color:var(--muted);background:var(--bg);border-radius:6px;padding:1px 6px}
+    .kd-sub{color:var(--muted);font-size:11px;margin-bottom:8px;word-break:break-all}
+    .kd-ex{margin:0;white-space:pre-wrap;word-break:break-word;font-size:11.5px;line-height:1.55;background:var(--bg);border-radius:8px;padding:8px 10px;max-height:220px;overflow:auto}
+    .kd-link{padding:3px 0;color:var(--muted);border-bottom:1px dashed var(--border)}
+    .kd-link b{color:var(--accent2)}
+    .kd-actions{margin:8px 0}
+    .kd-actions button{border:1px solid var(--accent);background:var(--accent-soft);color:var(--accent);border-radius:8px;padding:5px 10px;font-size:12px;cursor:pointer}
     .toolgroup-head{display:inline-flex;align-items:center;gap:8px;font-size:12.5px;font-weight:600;color:var(--fg);cursor:pointer;user-select:none;padding:5px 12px;border:1px solid var(--border);border-radius:10px;background:var(--card)}
     .toolgroup-head:hover{background:var(--hover)}
     .toolgroup-head .tg-arrow{font-size:10px;color:var(--muted)}
@@ -209,6 +224,7 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
       <div class="tabs">
         <div class="tab active" id="tabChat" onclick="showView('chat')">💬 对话</div>
         <div class="tab" id="tabTopo" onclick="showView('topo')">🕸 Agent 拓扑</div>
+        <div class="tab" id="tabKnow" onclick="showView('know')">🧠 知识拓扑</div>
         <div class="tab" id="tabSettings" onclick="showView('settings')">⚙️ 设置</div>
         <div class="tab" id="tabUsage" onclick="showView('usage')">📊 用量</div>
       </div>
@@ -236,6 +252,20 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
     <div class="view" id="topoView" hidden>
       <div class="topo-wrap"><svg id="topoSvg" width="100%" height="380"></svg></div>
       <div class="topo-cards" id="topoCards"></div>
+    </div>
+
+    <div class="view" id="knowView" hidden>
+      <div class="know-bar">
+        <input id="knowQ" type="text" placeholder="🔍 语义检索：输入问题/关键词，回车看命中知识网络（留空=全图）" onkeydown="if(event.key==='Enter')loadKnowledge()">
+        <select id="knowSim" onchange="loadKnowledge()" title="相似度边阈值">
+          <option value="0.3">宽泛连接</option><option value="0.35" selected>标准连接</option><option value="0.5">紧密连接</option>
+        </select>
+        <button onclick="loadKnowledge()">刷新</button>
+      </div>
+      <div class="know-main">
+        <div class="topo-wrap"><svg id="knowSvg" width="100%" height="480"></svg></div>
+        <div class="know-detail" id="knowDetail"><div class="search-hint">点节点查看详情；🔴 外环 = 当前选中 Agent。</div></div>
+      </div>
     </div>
 
     <div class="view" id="settingsView" hidden>
@@ -811,12 +841,13 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
     /* ── 拓扑视图 ── */
     function showView(v){
       curView=v;syncHash();
-      const map={chat:'chatView',topo:'topoView',settings:'settingsView',usage:'usageView'};
+      const map={chat:'chatView',topo:'topoView',settings:'settingsView',usage:'usageView',know:'knowView'};
       for(const k in map)document.getElementById(map[k]).hidden=v!==k;
-      for(const t of ['Chat','Topo','Settings','Usage'])document.getElementById('tab'+t).classList.toggle('active',v===t.toLowerCase());
+      for(const t of ['Chat','Topo','Know','Settings','Usage'])document.getElementById('tab'+t).classList.toggle('active',v===t.toLowerCase());
       if(topoTimer){clearInterval(topoTimer);topoTimer=null;}
       if(usageTimer){clearInterval(usageTimer);usageTimer=null;}
       if(v==='topo'){refreshTopo();topoTimer=setInterval(refreshTopo,5000);}
+      if(v==='know'){loadKnowledge();}
       if(v==='settings'){loadSettingsView();loadBackups();loadRetrieval();}
       if(v==='usage'){loadUsage();usageTimer=setInterval(loadUsage,15000);}
     }
@@ -881,6 +912,96 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
     }
     function pickAgentByName(name){
       document.getElementById('agentSel').value=name;switchAgent();showView('chat');
+    }
+
+    /* ── 知识拓扑图：力导向布局（节点=agent/会话/知识点/query，边=归属/相似/命中）── */
+    const KNOW_STYLE={
+      agent:{r:26,fill:'#5f9470',txt:'#fff'},
+      session:{r:12,fill:'#c0985a',txt:'#3a3325'},
+      memory:{r:11,fill:'#7291a8',txt:'#22303a'},
+      query:{r:20,fill:'#8a6fae',txt:'#fff'},
+    };
+    async function loadKnowledge(){
+      const svg=document.getElementById('knowSvg');
+      if(!svg)return;
+      const q=(document.getElementById('knowQ').value||'').trim();
+      const sim=document.getElementById('knowSim').value||'0.35';
+      svg.innerHTML='<text x="16" y="30" font-size="12" fill="#8b93a3">加载中…</text>';
+      let g;
+      try{g=await (await fetch(`${API}/api/knowledge/graph?q=${encodeURIComponent(q)}&minSim=${sim}`)).json();}catch(e){svg.innerHTML='<text x="16" y="30" font-size="12" fill="#c26d64">加载失败</text>';return;}
+      if(g.error){svg.innerHTML=`<text x="16" y="30" font-size="12" fill="#c26d64">${esc(g.error)}</text>`;return;}
+      window.__know=g;
+      drawKnowGraph(g);
+    }
+    function drawKnowGraph(g){
+      const svg=document.getElementById('knowSvg');
+      const W=svg.clientWidth||860,H=480;
+      const nodes=g.nodes??[],edges=g.edges??[];
+      if(!nodes.length){svg.innerHTML='<text x="16" y="30" font-size="12" fill="#8b93a3">暂无知识点（先在设置页确认记忆索引已启用）</text>';return;}
+      // 初始化位置：agent 居中上，其余环状随机
+      const cx=W/2;
+      nodes.forEach((n,i)=>{
+        const ang=(i/nodes.length)*Math.PI*2;
+        n.x=n.type==='agent'?cx+(i-(nodes.filter(x=>x.type==='agent').length)/2)*160:n.x??cx+Math.cos(ang)*(n.type==='session'?190:250);
+        n.y=n.type==='agent'?70:(n.type==='session'?H*0.42:H*0.62)+Math.sin(ang)*40;
+        n.vx=0;n.vy=0;
+      });
+      const byId=new Map(nodes.map(n=>[n.id,n]));
+      const es=edges.filter(e=>byId.has(e.from)&&byId.has(e.to)).map(e=>({a:byId.get(e.from),b:byId.get(e.to),kind:e.kind,w:e.weight??0.4}));
+      // 力导向迭代（固定步数，图小很快）
+      const REP=26000,SPR=0.0045,LEN=e=>e.kind==='hit'?120:e.kind==='similar'?150:110;
+      for(let it=0;it<220;it++){
+        for(let i=0;i<nodes.length;i++)for(let j=i+1;j<nodes.length;j++){
+          const a=nodes[i],b=nodes[j];let dx=a.x-b.x,dy=a.y-b.y;let d2=dx*dx+dy*dy+0.01;const d=Math.sqrt(d2);
+          const f=REP/d2;a.vx+=dx/d*f;a.vy+=dy/d*f;b.vx-=dx/d*f;b.vy-=dy/d*f;
+        }
+        for(const e of es){
+          let dx=e.b.x-e.a.x,dy=e.b.y-e.a.y;const d=Math.sqrt(dx*dx+dy*dy)+0.01;
+          const f=(d-LEN(e))*SPR*(e.kind==='hit'?2.2:e.w+0.6);
+          e.a.vx+=dx/d*f;e.a.vy+=dy/d*f;e.b.vx-=dx/d*f;e.b.vy-=dy/d*f;
+        }
+        for(const n of nodes){ // 向心 + 分层软约束 + 阻尼
+          n.vx+=(cx-n.x)*0.0012;n.vy+=((n.type==='agent'?80:n.type==='session'?H*0.4:H*0.62)-n.y)*0.004;
+          n.x+=Math.max(-14,Math.min(14,n.vx*=0.82));n.y+=Math.max(-14,Math.min(14,n.vy*=0.82));
+          n.x=Math.max(40,Math.min(W-40,n.x));n.y=Math.max(36,Math.min(H-46,n.y));
+        }
+      }
+      const EC={hit:'#8a6fae',similar:'#7291a8',file:'#5f9470',owns:'#c0985a'};
+      let html=es.map(e=>{
+        const lw=e.kind==='hit'?2.2:1.6;
+        const dash=e.kind==='file'||e.kind==='owns'?'stroke-dasharray="4 4"':'';
+        const mid=`${((e.a.x+e.b.x)/2).toFixed(0)},${((e.a.y+e.b.y)/2-6).toFixed(0)}`;
+        return `<line x1="${e.a.x.toFixed(1)}" y1="${e.a.y.toFixed(1)}" x2="${e.b.x.toFixed(1)}" y2="${e.b.y.toFixed(1)}" stroke="${EC[e.kind]||'#c3c9d4'}" stroke-width="${e.kind==='similar'?1+e.w*3:lw}" opacity="${e.kind==='hit'?0.85:0.5}" ${dash}/>`+
+          (e.kind==='hit'||e.kind==='similar'&&e.w>=0.5?`<text x="${mid.split(',')[0]}" y="${mid.split(',')[1]}" font-size="8.5" fill="#8b93a3" text-anchor="middle">${Math.round(e.w*100)}%</text>`:'');
+      }).join('');
+      html+=nodes.map(n=>{
+        const st=KNOW_STYLE[n.type]||KNOW_STYLE.memory;
+        const cur=n.type==='agent'&&n.label===agent;
+        const lbl=n.type==='agent'||n.type==='query'?n.label:(n.label||'').slice(0,14);
+        return `<g style="cursor:pointer" onclick="showKnowNode('${esc(n.id)}')">`+
+          (cur?`<circle cx="${n.x.toFixed(1)}" cy="${n.y.toFixed(1)}" r="${st.r+6}" fill="none" stroke="var(--accent)" stroke-width="2.5" stroke-dasharray="5 4"><animate attributeName="stroke-dashoffset" from="0" to="18" dur="1.6s" repeatCount="indefinite"/></circle>`:n.busy?`<circle cx="${n.x.toFixed(1)}" cy="${n.y.toFixed(1)}" r="${st.r+4}" fill="rgba(95,148,112,.12)"/>`:'')+
+          `<circle cx="${n.x.toFixed(1)}" cy="${n.y.toFixed(1)}" r="${st.r}" fill="${st.fill}" stroke="${n.type==='memory'&&n.score!=null?'#8a6fae':'#fff'}" stroke-width="${n.type==='memory'?2.5:0}"/>`+
+          `<text x="${n.x.toFixed(1)}" y="${(n.y+(n.type==='agent'||n.type==='query'?st.r+14:-1)).toFixed(1)}" font-size="${n.type==='agent'||n.type==='query'?11.5:9.5}" text-anchor="${n.type==='agent'||n.type==='query'?'middle':'start'}" fill="#454b56" font-weight="${n.type==='agent'?700:400}">${n.type==='agent'?'':'· '}${esc(lbl)}${cur?' ◀当前':''}</text></g>`;
+      }).join('');
+      // 图例
+      html+=`<g transform="translate(10,${H-14})" font-size="9.5" fill="#8b93a3">`+
+        (g.query?`<text>🔍 检索模式：紫色节点=查询，边宽/百分比=相似度</text>`:`<circle cx="6" cy="-3" r="5" fill="#7291a8"/><text x="16" y="0">知识点</text><circle cx="76" cy="-3" r="5" fill="#5f9470"/><text x="86" y="0">Agent</text><circle cx="146" cy="-3" r="5" fill="#c0985a"/><text x="156" y="0">会话</text><text x="210" y="0">｜实线=语义相似，虚线=归属</text>`)+`</g>`;
+      svg.innerHTML=html;
+    }
+    function showKnowNode(id){
+      const g=window.__know;if(!g)return;
+      const n=(g.nodes||[]).find(x=>x.id===id);const box=document.getElementById('knowDetail');
+      if(!n){box.innerHTML='';return;}
+      const links=(g.edges||[]).filter(e=>e.from===id||e.to===id).map(e=>{
+        const other=e.from===id?e.to:e.from;const o=(g.nodes||[]).find(x=>x.id===other);
+        return `<div class="kd-link">${e.kind==='similar'?'≈相似':e.kind==='hit'?'🔍命中':e.kind==='file'?'📁归属':'💬会话'} ${esc(o?o.label:other)}${e.weight!=null?' <b>'+(e.weight*100).toFixed(0)+'%</b>':''}</div>`;
+      }).join('');
+      box.innerHTML=`<div class="kd-title">${esc(n.label)}${n.type==='memory'?'<span class="kd-tag">'+esc(n.sub||'')+'</span>':''}</div>`+
+        (n.file?`<div class="kd-sub">${esc(n.file)}${n.agent?' · '+esc(n.agent):''}</div>`:'')+
+        (n.excerpt?`<pre class="kd-ex">${esc(n.excerpt)}</pre>`:'')+
+        (n.type==='agent'?`<div class="kd-actions"><button onclick="pickAgentByName('${esc(n.label)}')">切到该 Agent 对话 →</button></div>`:'')+
+        (n.type==='session'?`<div class="kd-actions"><button onclick="openSubRun('${esc(n.id.slice(2))}')">打开会话 →</button></div>`:'')+
+        links;
     }
 
     /* ── SSE 事件流：逐字渲染 + 实时工具卡片；断线自动重连，重连后补齐历史 ── */
