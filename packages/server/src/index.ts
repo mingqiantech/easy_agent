@@ -24,6 +24,7 @@ import { createSubAgentTool } from "@easy-agent/core/agent/sub-agent-tool";
 import { createVisionTool } from "@easy-agent/core/tool/builtins/vision";
 import { ImageGenerator } from "@easy-agent/core/image-gen/index";
 import { createImageGenTool } from "@easy-agent/core/tool/builtins/image-gen";
+import { createTraeTool } from "@easy-agent/core/tool/builtins/trae-agent";
 import { MonitoringSystem } from "@easy-agent/core/monitoring/index";
 
 import { loadConfig } from "@easy-agent/config/loader";
@@ -223,6 +224,14 @@ async function main() {
       }),
     ),
   );
+
+  // 外部编码 agent（trae-cli headless）：配置 trae 节才注册；缺省围栏=各 agent 工作区
+  if (config.trae?.enabled !== false && (config as any).trae) {
+    const traeCfg = { ...(config as any).trae };
+    if (!traeCfg.allowedWorkdirs?.length)
+      traeCfg.allowedWorkdirs = Object.values(agents).map((a: any) => a.workspaceDir);
+    tools.register(createTraeTool(traeCfg));
+  }
 
   // 工具裁剪：配置 tools.disable=[...] 注销对应工具（对所有 agent 生效）
   for (const name of config.tools?.disable ?? []) tools.unregister(name);

@@ -348,7 +348,10 @@ export function createApp(deps: ServerDeps): Hono {
           });
         },
       });
-      bus({ type: "run_end" });
+      // 空响应（core 重试后仍空）：占位消息已落库，但 live 气泡需同步提示，避免“没下文”
+      if (!String(response ?? "").trim())
+        bus({ type: "run_end", error: "模型本轮未返回内容（已重试），请重发或换个说法" });
+      else bus({ type: "run_end" });
       return c.json({ response });
     } catch (e: any) {
       bus({ type: "run_end", error: String(e?.message ?? e).slice(0, 200) });

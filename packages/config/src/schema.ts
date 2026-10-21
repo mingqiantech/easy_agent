@@ -127,6 +127,20 @@ export const ConfigSchema = z.object({
   tools: z
     .object({ disable: z.array(z.string()).default([]) })
     .default({ disable: [] }),
+  /** 外部编码 agent（trae-cli）：trae_agent 工具配置；enabled=false 或缺省节均不注册 */
+  trae: z
+    .object({
+      enabled: z.boolean().default(true),
+      bin: z.string().optional(),
+      timeoutMinutes: z.number().positive().max(60).optional(),
+      allowedWorkdirs: z.array(z.string()).optional(),
+      extraArgs: z.array(z.string()).optional(),
+      /** ⚠️ 绕过 trae 工具审批；仅信任环境手动开启 */
+      yolo: z.boolean().optional(),
+      permissionMode: z.enum(["default", "plan", "bypass_permissions"]).optional(),
+      allowedTools: z.array(z.string()).optional(),
+    })
+    .optional(),
   /** 图片生成模型（ref 或 alias） */
   imageGenModel: z.string().optional(),
 });

@@ -456,6 +456,8 @@ export class SessionManager {
         const toolDefs = options?.toolRegistry?.getDefinitions();
         let turnAborted = false;
         let savedAssistant = false;
+        let emptyRetries = 0;
+        let endedEmpty = false;
 
         for (let step = 0; step < 20; step++) {
           db.prepare(
@@ -518,6 +520,17 @@ export class SessionManager {
 
           const hasPayload =
             (response.content ?? "") !== "" || !!response.toolCalls?.length;
+          // 空响应（网关流中断/安全过滤/思考吃掉 max_tokens）→ 静默重试一次；
+          // 此前直接 break → 本轮零输出，用户端表现为“没有下文”
+          if (!hasPayload && !ctrl.signal.aborted) {
+            if (emptyRetries < 1) {
+              emptyRetries++;
+              logDebug(`⚠️ 空响应（step ${step}）→ 重试 #${emptyRetries}`);
+              step--;
+              continue;
+            }
+            endedEmpty = true; // 重试后仍空：标记本轮无终文，循环后补占位
+          }
           if (hasPayload && (!ctrl.signal.aborted || (response.content ?? "") !== "")) {
             this.addMessage(sessionId, {
               role: "assistant",
@@ -534,7 +547,6 @@ export class SessionManager {
           options?.onText?.(response.content);
 
           if (!response.toolCalls?.length || !options?.toolRegistry) break;
-
           for (const tc of response.toolCalls) {
             options.onToolCall?.(tc.name, tc.input);
             const result = await options.toolRegistry.execute(tc.name, tc.input, {
@@ -570,6 +582,14 @@ export class SessionManager {
               content: "⏹ 已中断",
             });
           break; // 不再消费队列尾部：剩余排队消息保留在库中下次续跑
+        }
+        // 本轮终文为空（重试后仍空，非中断）→ 补占位 assistant，避免“没有下文”
+        if (!turnAborted && !ctrl.signal.aborted && endedEmpty) {
+          this.addMessage(sessionId, {
+            role: "assistant",
+            content:
+              "⚠️ 模型本轮未返回内容（已重试一次，可能网关流中断/安全过滤），请重发或换个说法。",
+          });
         }
 
         // 队列尾部：本轮答完后仍有排队消息 → 作为下一用户轮继续运行

@@ -45,6 +45,17 @@
   // provider: auto | tavily | brave | bocha | bing
   //   auto = 按 tavily > brave > bocha 顺序取第一个已填 key 的 API；都没填则用 Bing 抓取（免密钥）
   //   指定 provider 但该 key 缺失/API 失败时，也会自动回退 Bing 抓取
+  // ── 外部编码 agent：trae-cli（headless `-p --json`）──
+  // 存在该节才注册 trae_agent 工具；yolo/permissionMode 仅配置层可开，模型传不了
+  // ⚠️ 前置：trae-cli 需先完成登录与模型配置（WSL 无 keyring 时把 key 写进 ~/.traecli.yaml）
+  "trae": {
+    "enabled": true,
+    "bin": "trae-cli",
+    "timeoutMinutes": 10,
+    "allowedWorkdirs": [],
+    "allowedTools": ["Bash", "Read", "Edit"]
+  },
+
   "websearch": {
     "provider": "auto",
     "tavilyApiKey": "${TAVILY_API_KEY}",

@@ -1093,7 +1093,7 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
       if(e.type==='text'){ensureLive();appendLive(e.text||'');return;}
       if(e.type==='tool_start'){ensureLive().querySelector('.live-chips').insertAdjacentHTML('beforeend',`<span class="tool-chip">⏳ ${esc(e.name)}</span>`);return;}
       if(e.type==='tool_end'){if(!live||!document.contains(live))return;const chips=live.querySelectorAll('.tool-chip');for(let i=chips.length-1;i>=0;i--){if((chips[i].textContent||'').includes(e.name)){chips[i].innerHTML=`✅ ${esc(e.name)} <small style="color:var(--muted)">${esc((e.preview||'').slice(0,70))}</small>`;break;}}return;}
-      if(e.type==='run_end'){setSendMode(false);if(e.error&&live&&document.contains(live)){appendLive('\n❌ '+e.error,true);}finalizeRun();return;}
+      if(e.type==='run_end'){setSendMode(false);if(e.error&&live&&document.contains(live)){appendLive('\n❌ '+e.error,true);}else if(e.error){loadMessages();}finalizeRun();return;}
       if(e.type==='aborted'){ensureLive();appendLive('\n⏹ 已中断',true);return;}
     }
 

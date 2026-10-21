@@ -210,4 +210,39 @@ describe("任意步 abort + 排队持久化", () => {
     expect(out).toBe("");
     expect(sm.getMessages(s.id).length).toBe(0);
   });
+
+  it("空响应：静默重试一次后落占位消息，历史不断档", async () => {
+    let calls = 0;
+    const stub: any = {
+      generate: async () => { calls++; return { content: "", toolCalls: [], usage: undefined, finishReason: "stop" }; },
+      stream: async function* () { calls++; },
+    };
+    const sm = new SessionManager(stub, { defaultModel: "test/model" });
+    const s = sm.create({});
+    const out = await sm.run(s.id, "hi", { onEvent: () => {} });
+    expect(out).toBe("");
+    expect(calls).toBe(2); // 原始一次 + 重试一次
+    const msgs = sm.getMessages(s.id);
+    const last = msgs[msgs.length - 1];
+    expect(last.role).toBe("assistant");
+    expect(last.content).toContain("未返回内容");
+  });
+
+  it("空响应后第二轮恢复正常：占位只在空轮出现", async () => {
+    let calls = 0;
+    const stub: any = {
+      generate: async () => ({ content: "", toolCalls: [], finishReason: "stop" }),
+      stream: async function* () {
+        calls++;
+        if (calls > 2) { yield { type: "text", text: "恢复了" }; yield { type: "done", finishReason: "stop" }; }
+      },
+    };
+    const sm = new SessionManager(stub, { defaultModel: "test/model" });
+    const s = sm.create({});
+    await sm.run(s.id, "hi", { onEvent: () => {} });
+    const out2 = await sm.run(s.id, "再试", { onEvent: () => {} });
+    expect(out2).toBe("恢复了");
+    const msgs = sm.getMessages(s.id);
+    expect(msgs.filter((m: any) => m.role === "assistant" && m.content.includes("未返回内容")).length).toBe(1);
+  });
 });
