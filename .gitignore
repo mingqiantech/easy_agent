@@ -6,3 +6,4 @@ dist/
 MEMORY.md
 /memory/*
 .easy-agent/
+*.tsbuildinfo
