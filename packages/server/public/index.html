@@ -156,10 +156,27 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
 .message.flash .bubble{outline:2px solid var(--accent);box-shadow:0 0 0 6px rgba(95,148,112,.15)}
     /* 工具调用结果分组折叠 */
     .toolgroup{margin-bottom:14px}
-    .toolgroup-head{display:inline-flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);cursor:pointer;user-select:none;padding:4px 10px;border:1px solid var(--border);border-radius:10px;background:var(--card)}
+    .toolgroup-head{display:inline-flex;align-items:center;gap:8px;font-size:12.5px;font-weight:600;color:var(--fg);cursor:pointer;user-select:none;padding:5px 12px;border:1px solid var(--border);border-radius:10px;background:var(--card)}
     .toolgroup-head:hover{background:var(--hover)}
+    .toolgroup-head .tg-arrow{font-size:10px;color:var(--muted)}
     .toolgroup-body{margin-top:6px}
     .toolgroup.collapsed .toolgroup-body{display:none}
+    /* 工具卡片：多重折叠（组→项→INPUT/OUTPUT 双段） */
+    .message.toolchip.titem{margin-bottom:6px;align-items:flex-start}
+    .toolgroup-body .titem{margin-bottom:6px}
+    .titem .tcol{flex:1;min-width:0;background:var(--tool);border:1px solid var(--border);border-radius:10px;overflow:hidden}
+    .titem .thead{display:flex;gap:8px;align-items:center;font-size:12px;cursor:pointer;user-select:none;padding:7px 10px;font-family:ui-monospace,Menlo,Consolas,monospace}
+    .titem .thead:hover{background:var(--hover)}
+    .titem .thead b{color:var(--accent);font-weight:700;flex-shrink:0}
+    .terr .thead b{color:#b3564b}
+    .titem .tdesc{color:var(--muted);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .titem .tarrow{color:var(--muted);font-size:10px;flex-shrink:0;transition:transform .15s}
+    .titem.open .tarrow{transform:rotate(90deg)}
+    .titem .tbody{display:none;border-top:1px dashed var(--border);padding:8px 12px 10px;background:var(--card)}
+    .titem.open .tbody{display:block}
+    .toolgroup-body .titem .tbody+.tbody{border-top:1px dashed var(--border)}
+    .titem .tsec{font-size:10px;letter-spacing:.6px;color:var(--muted);font-weight:700;margin:2px 0 5px}
+    .titem .tpre{margin:0;font:11.5px/1.55 ui-monospace,Menlo,Consolas,monospace;white-space:pre-wrap;word-break:break-all;max-height:320px;overflow:auto;color:var(--fg)}
     .mem-ta{width:100%;height:200px;background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:10px;font:12px/1.6 ui-monospace,monospace;color:var(--fg);resize:vertical;margin-top:8px}
     .metrics{display:flex;gap:12px;flex-wrap:wrap;padding:16px 20px 0}
     .metric{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:10px 18px;box-shadow:var(--shadow);min-width:110px}
@@ -387,16 +404,46 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
     }
 
     /* ── 消息 ── */
+    /* 工具行摘要：从入参提炼一行描述 */
+    function toolSummary(raw){
+      const i=(raw&&typeof raw==='object')?raw:{};
+      const one=s=>String(s).replace(/\s+/g,' ').trim();
+      if(typeof i.command==='string')return one(i.command);
+      if(i.pattern&&i.path)return 'search "'+one(i.pattern)+'" in '+i.path+(i.glob?' ('+i.glob+')':'');
+      if(i.query)return 'search "'+one(i.query)+'"';
+      if(i.path&&i.offset!=null)return 'print lines '+i.offset+(i.limit!=null?'-'+(Number(i.offset)+Number(i.limit)):'+' )+' from '+i.path;
+      if(i.path)return one(i.path);
+      if(i.url)return one(i.url);
+      const fv=Object.values(i).find(v=>typeof v==='string'&&v.trim());
+      return fv?one(fv):'';
+    }
+    const clipLen=(s,n)=>{s=String(s);return s.length>n?s.slice(0,n)+"\n… 已截断 "+(s.length-n)+" 字符":s};
     function bubbleHtml(m){
       if(m.role==='system')return '';
       const ts=m.createdAt?`<div class="ts">${hhmm(m.createdAt)}</div>`:'';
-      if(m.role==='tool')return `<div class="message toolchip"><div class="avatar">⚙</div><div><div class="bubble"><div class="clippable">${esc(m.content)}</div></div>${ts}</div></div>`;
+      if(m.role==='tool'){
+        // 工具结果→卡片行：头部一行（名字+输出预览），展开看完整 OUTPUT
+        let t=null;try{t=JSON.parse(m.content);}catch(e){}
+        const name=(t&&t.toolName)||'tool';
+        const err=!!(t&&t.error!=null);
+        let out;
+        if(t&&'result' in t)out=typeof t.result==='string'?t.result:JSON.stringify(t.result,null,2);
+        else if(err)out=typeof t.error==='string'?t.error:JSON.stringify(t.error,null,2);
+        else out=m.content;
+        const pid=t&&t.toolCallId?' data-pair="'+esc(t.toolCallId)+'"':'';
+        return '<div class="message toolchip titem'+(err?' terr':'')+'"'+pid+' data-kind="result"><div class="avatar">⚙</div><div class="tcol"><div class="thead"><span class="tarrow">▸</span><b>'+esc(name)+'</b><span class="tdesc">'+esc(clip(out,110))+'</span></div><div class="tbody"><div class="tsec">⚡ TOOL OUTPUT</div><pre class="tpre">'+esc(clipLen(out,8000))+'</pre></div></div></div>';
+      }
       let text=m.content||'';let toolLine='';
       if(m.role==='assistant'){
         try{const p=JSON.parse(text);
           if(p&&typeof p==='object'&&('text' in p||p.toolCalls)){
             text=p.text||'';
-            if(p.toolCalls?.length) toolLine=`<div class="message toolchip" style="margin-top:6px"><div><div class="bubble">🔧 ${esc(p.toolCalls.map(t=>t.name).join(', '))}</div></div></div>`;
+            // 每个 toolCall → 独立卡片行：头部（名字+入参摘要），展开看 INPUT（可与后续 RESULT 成对合并）
+            if(p.toolCalls?.length)toolLine=p.toolCalls.map(tc=>{
+              const inp=tc.input??{};
+              let j;try{j=typeof inp==='string'?inp:JSON.stringify(inp,null,2);}catch(e){j=String(inp);}
+              return '<div class="message toolchip titem" data-pair="'+esc(tc.id||'')+'" data-kind="call"><div class="avatar">🔧</div><div class="tcol"><div class="thead"><span class="tarrow">▸</span><b>'+esc(tc.name||'tool')+'</b><span class="tdesc">'+esc(clip(toolSummary(typeof inp==='string'?{}:inp),110))+'</span></div><div class="tbody"><div class="tsec">⚡ TOOL INPUT</div><pre class="tpre">'+esc(clipLen(j,8000))+'</pre></div></div></div>';
+            }).join('');
           }
         }catch(e){}
       }
@@ -568,7 +615,7 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
       });
       setTimeout(()=>{btn.textContent='复制';btn.classList.remove('copied');},1600);
     });
-    /* 连续的 ⚙ 工具结果分组成可折叠块（默认收起，点头展开） */
+    /* 连续工具卡片 → 外层可折叠「活动」组；同 toolCallId 的 call+result 合并成一项（INPUT+OUTPUT 双段） */
     function groupToolMessages(){
       const c=document.getElementById('messages');
       let el=c.firstElementChild;
@@ -578,19 +625,36 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
           let n=el.nextElementSibling;
           while(n&&n.classList&&n.classList.contains('toolchip')){run.push(n);n=n.nextElementSibling;}
           if(run.length>=2){
-            const names=run.map(m=>{
-              const b=m.querySelector('.bubble');const s=b?b.textContent.trim():'';
-              if(s.startsWith('⚙')){try{return JSON.parse(m.querySelector('.clippable').textContent).toolName||'?';}catch{return 'tool';}}
-              return s.replace(/^🔧\s*/,'').split(/[,\s]/)[0]||'tool';
-            });
+            // 先规划合并（此时不动 DOM，避免遍历错位）
+            const merged=[];
+            for(let k=0;k<run.length;k++){
+              const a=run[k],b=run[k+1];
+              const pid=a.getAttribute('data-pair');
+              if(pid&&b&&a.dataset.kind==='call'&&b.dataset.kind==='result'&&b.getAttribute('data-pair')===pid){
+                merged.push([a,b]);k++;
+              }else merged.push([a]);
+            }
             const grp=document.createElement('div');
             grp.className='toolgroup collapsed';
             const head=document.createElement('div');
             head.className='toolgroup-head';
-            head.innerHTML=`⚙ 工具调用 ×${run.length} <small>${esc(names.join('、').slice(0,60))}</small> <span class="tg-arrow">▸</span>`;
+            head.innerHTML=`<span class="tg-arrow">▸</span> Activity: ${merged.length} tools`;
             const body=document.createElement('div');body.className='toolgroup-body';
             run[0].parentNode.insertBefore(grp,run[0]);
-            run.forEach(m=>body.appendChild(m));
+            for(const pair of merged){
+              if(pair.length===2){
+                const [a,b]=pair;
+                const item=document.createElement('div');item.className='titem';
+                const col=document.createElement('div');col.className='tcol';
+                col.appendChild(a.querySelector('.thead'));
+                col.appendChild(a.querySelector('.tbody'));
+                col.appendChild(b.querySelector('.tbody'));
+                item.appendChild(col);
+                body.appendChild(item);
+              }else{
+                body.appendChild(pair[0]);
+              }
+            }
             grp.appendChild(head);grp.appendChild(body);
             head.onclick=()=>{const on=grp.classList.toggle('collapsed');head.querySelector('.tg-arrow').textContent=on?'▸':'▾';};
             el=grp;
@@ -598,6 +662,11 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
         } else el=el.nextElementSibling;
       }
     }
+    // 工具卡片行展开/收起（事件委托，成组搬移后仍生效）
+    document.addEventListener('click',e=>{
+      const h=e.target.closest&&e.target.closest('.message .thead, .toolgroup-body .thead');
+      if(h&&!h.closest('.toolgroup-head'))h.closest('.titem').classList.toggle('open');
+    });
     /* 长文本溢出检测：内容高过 ~420px 就折叠 + 渐变遮罩 + 展开/收起按钮 */
     function applyCollapse(){
       document.querySelectorAll('#messages .clippable').forEach(el=>{
