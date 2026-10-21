@@ -248,9 +248,12 @@ export function createApp(deps: ServerDeps): Hono {
         )
         .all(a.name) as any[];
 
+      // 实际运行模型：以最近活跃会话的 model 为准（会话可单独切换，配置默认会过时）
+      const effectiveModel = tasks.find((t: any) => t.model)?.model ?? a.model;
       return {
         name: a.name,
-        model: a.model,
+        model: effectiveModel,
+        configModel: a.model,
         description: a.description,
         thinking: a.thinking,
         sessions: agg?.c ?? 0,
