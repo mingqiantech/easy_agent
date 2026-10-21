@@ -45,6 +45,19 @@
   // provider: auto | tavily | brave | bocha | bing
   //   auto = 按 tavily > brave > bocha 顺序取第一个已填 key 的 API；都没填则用 Bing 抓取（免密钥）
   //   指定 provider 但该 key 缺失/API 失败时，也会自动回退 Bing 抓取
+  // ── ACP 长会话 agent（acp_agent 工具，方案 B）──
+  // agents 非空才注册；进程池复用：同 agent+workdir 的多轮对话上下文留在 Agent 侧
+  // autoApprove=true：权限请求自动选 allow_once（工具场景无法交互审批，谨慎开）
+  "acp": {
+    "timeoutMinutes": 15,           // 单轮 prompt 上限
+    "idleMinutes": 10,              // 空闲进程回收
+    "autoApprove": true,
+    "allowedWorkdirs": [],          // 缺省=各 agent 工作区
+    "agents": {
+      "trae": { "bin": "trae-cli", "args": ["acp", "serve"] }
+    }
+  },
+
   // ── 外部编码 agent：trae-cli（headless `-p --json`）──
   // 存在该节才注册 trae_agent 工具；yolo/permissionMode 仅配置层可开，模型传不了
   // ⚠️ 前置：trae-cli 需先完成登录与模型配置（WSL 无 keyring 时把 key 写进 ~/.traecli.yaml）

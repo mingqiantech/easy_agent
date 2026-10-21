@@ -25,6 +25,7 @@ import { createVisionTool } from "@easy-agent/core/tool/builtins/vision";
 import { ImageGenerator } from "@easy-agent/core/image-gen/index";
 import { createImageGenTool } from "@easy-agent/core/tool/builtins/image-gen";
 import { createTraeTool } from "@easy-agent/core/tool/builtins/trae-agent";
+import { createAcpAgentTool } from "@easy-agent/core/tool/builtins/acp-agent";
 import { MonitoringSystem } from "@easy-agent/core/monitoring/index";
 
 import { loadConfig } from "@easy-agent/config/loader";
@@ -269,6 +270,14 @@ async function main() {
     if (!traeCfg.allowedWorkdirs?.length)
       traeCfg.allowedWorkdirs = Object.values(agents).map((a: any) => a.workspaceDir);
     tools.register(createTraeTool(traeCfg));
+  }
+
+  // ACP 长会话 agent（方案 B）：配置 acp.agents 非空才注册
+  if ((config as any).acp?.agents && Object.keys((config as any).acp.agents).length > 0) {
+    const acpCfg = { ...(config as any).acp };
+    if (!acpCfg.allowedWorkdirs?.length)
+      acpCfg.allowedWorkdirs = Object.values(agents).map((a: any) => a.workspaceDir);
+    tools.register(createAcpAgentTool(acpCfg));
   }
 
   // 梦境（Dreaming）：浅眠→REM→深眠，短期记忆提炼晋升；设置页与调度器共用

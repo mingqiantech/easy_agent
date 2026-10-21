@@ -121,6 +121,19 @@ export const ConfigSchema = z.object({
       }),
     )
     .default({}),
+  /** ACP 长会话 agent（acp_agent 工具）：agents 非空才注册 */
+  acp: z
+    .object({
+      timeoutMinutes: z.number().positive().max(60).optional(),
+      idleMinutes: z.number().positive().optional(),
+      autoApprove: z.boolean().optional(),
+      allowedWorkdirs: z.array(z.string()).optional(),
+      maxSessionsPerAgent: z.number().int().positive().optional(),
+      agents: z
+        .record(z.object({ bin: z.string(), args: z.array(z.string()).optional(), cwd: z.string().optional() }))
+        .default({}),
+    })
+    .default({ agents: {} }),
   /** 视觉模型（ref 或 alias）；未配置时用主模型链首位 */
   visionModel: z.string().optional(),
   /** 工具裁剪：disable 列表里的内置工具不注册（如 ["image-gen","sub_agent"]） */
