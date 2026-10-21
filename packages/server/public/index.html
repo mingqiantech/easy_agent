@@ -976,7 +976,6 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
       let html=es.map(e=>{
         const lw=e.kind==='hit'?2.2:1.6;
         const dash=e.kind==='file'||e.kind==='owns'||e.kind==='corpus'?'stroke-dasharray="4 4"':'';
-        const dash=e.kind==='file'||e.kind==='owns'||e.kind==='corpus'?'stroke-dasharray="4 4"':'';
         const mid=`${((e.a.x+e.b.x)/2).toFixed(0)},${((e.a.y+e.b.y)/2-6).toFixed(0)}`;
         return `<line x1="${e.a.x.toFixed(1)}" y1="${e.a.y.toFixed(1)}" x2="${e.b.x.toFixed(1)}" y2="${e.b.y.toFixed(1)}" stroke="${EC[e.kind]||'#c3c9d4'}" stroke-width="${e.kind==='similar'?1+e.w*3:lw}" opacity="${e.kind==='hit'?0.85:0.5}" ${dash}/>`+
           (e.kind==='hit'||e.kind==='similar'&&e.w>=0.5?`<text x="${mid.split(',')[0]}" y="${mid.split(',')[1]}" font-size="8.5" fill="#8b93a3" text-anchor="middle">${Math.round(e.w*100)}%</text>`:'');
