@@ -19,7 +19,8 @@
   "agents": {
     "coder":  { "description": "编程助手", "model": "max", "thinking": "high" },
     "writer": { "description": "写作助手", "model": "flash", "thinking": "low",
-      "tools": { "disable": ["trae_agent", "acp_agent"] } }  // 该 agent 不用外部编码工具
+      "tools": { "disable": ["trae_agent", "acp_agent"] },  // 该 agent 不用外部编码工具
+      "toolHint": "回答前先查 MEMORY.md 里的人物偏好" }      // 每轮动态附加提示（可选）
   },
 
   // ── providers ──

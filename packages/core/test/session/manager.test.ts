@@ -197,6 +197,26 @@ describe("任意步 abort + 排队持久化", () => {
     expect(c).toBe(0);
   });
 
+  it("extraSystem：注入在头部 system 块之后、首条非 system 消息之前", async () => {
+    const seen: any[] = [];
+    const stub: any = {
+      generate: async (req: any) => { seen.push(req.messages); return { content: "ok", toolCalls: [], finishReason: "stop" }; },
+      stream: async function* (req: any) { seen.push(req.messages); yield { type: "text", text: "ok" }; yield { type: "done", finishReason: "stop" }; },
+    };
+    const sm = new SessionManager(stub, { defaultModel: "test/model" });
+    const s = sm.create({ systemPrompt: "基础系统提示" });
+    await sm.run(s.id, "你好", { onEvent: () => {}, extraSystem: "外部工具引导：重活优先 trae_agent" });
+    const msgs = seen[0];
+    expect(msgs[0].role).toBe("system");
+    expect(msgs[0].content).toBe("基础系统提示"); // 基础 prompt 前缀不变（缓存友好）
+    expect(msgs[1].role).toBe("system");
+    expect(msgs[1].content).toContain("trae_agent");
+    expect(msgs[2].role).toBe("user");
+    // 未传 extraSystem 的下一轮：不注入
+    await sm.run(s.id, "再来", { onEvent: () => {} });
+    expect(seen[1][1].role).toBe("user");
+  });
+
   it("userText=null 的空恢复轮：无遗留时立即返回且不写消息", async () => {
     const stub: any = {
       generate: async () => {

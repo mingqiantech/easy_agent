@@ -118,10 +118,13 @@ export const ConfigSchema = z.object({
         workspaceDir: z.string().optional(),
         /** 该 agent 的思考等级；缺省继承 thinkingDefault */
         thinking: ThinkingEnum.optional(),
-        /** 该 agent 专属工具裁剪（全局 tools.disable 之外再减一层，如禁用 trae_agent） */
+        /** agent 专属工具裁剪（全局 tools.disable 之外再减一层，如禁用 trae_agent） */
         tools: z
           .object({ disable: z.array(z.string()).default([]) })
           .optional(),
+        /** 附加提示词：每轮动态注入 system 区（开关切换即时生效）；
+         *  与内置 trae 使用引导叠加，自定义文案优先 */
+        toolHint: z.string().max(2000).optional(),
       }),
     )
     .default({}),

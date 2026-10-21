@@ -413,6 +413,8 @@ export class SessionManager {
       toolRegistry?: ToolRegistry;
       workDir?: string;
       thinking?: "off" | "low" | "medium" | "high";
+      /** 每轮动态附加的 system 提示（注入在头部 system 块之后，前缀缓存友好） */
+      extraSystem?: string;
       onText?: (text: string) => void;
       onToolCall?: (name: string, input: unknown) => void;
       onToolResult?: (name: string, result: unknown) => void;
@@ -476,9 +478,18 @@ export class SessionManager {
 
           await this.compactIfNeeded(sessionId);
           const messages = pruneToolResults(this.getMessages(sessionId));
+          // extraSystem 插入位置：头部连续 system 块之后（基础 prompt 前缀不变，
+          // 开关/提示切换只失效到 hint 层，不连坐底层 system 缓存）
+          const reqMessages = options?.extraSystem
+            ? (() => {
+                const i = messages.findIndex((m) => m.role !== "system");
+                const at = i < 0 ? messages.length : i;
+                return [...messages.slice(0, at), { role: "system" as const, content: options.extraSystem! }, ...messages.slice(at)];
+              })()
+            : messages;
           const request: LLMRequest = {
             model: session.model,
-            messages,
+            messages: reqMessages,
             tools: toolDefs,
             toolChoice: toolDefs?.length ? "auto" : undefined,
             generation:

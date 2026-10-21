@@ -23,4 +23,13 @@ describe("agent 专属工具黑名单（toolsDisable）", () => {
     const rs = resolveAgents(cfg as any);
     expect(rs[0]!.toolsDisable).toEqual(["bash"]);
   });
+  it("toolHint 透传；未配置为 undefined", () => {
+    const cfg = ConfigSchema.parse({
+      ...base,
+      agents: { writer: { toolHint: "涉及代码重构时先用 acp_agent" }, coder: {} },
+    } as any);
+    const rs = resolveAgents(cfg as any);
+    expect(rs.find((r) => r.name === "writer")!.toolHint).toBe("涉及代码重构时先用 acp_agent");
+    expect(rs.find((r) => r.name === "coder")!.toolHint).toBeUndefined();
+  });
 });

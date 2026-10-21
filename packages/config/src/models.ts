@@ -74,6 +74,8 @@ export interface ResolvedAgent {
   thinking: ThinkingLevel;
   /** agent 专属工具黑名单（全局 disable 之外再减） */
   toolsDisable: string[];
+  /** 每轮动态注入 system 区的附加提示词 */
+  toolHint?: string;
 }
 
 /**
@@ -112,6 +114,7 @@ export function resolveAgents(config: Config): ResolvedAgent[] {
       description: dflt?.description ?? "默认助手",
       thinking: effectiveThinking(config, defaultModel, dflt?.thinking),
       toolsDisable: dflt?.tools?.disable ?? [],
+      toolHint: dflt?.toolHint,
     },
   ];
   for (const [name, a] of Object.entries(config.agents ?? {})) {
@@ -123,6 +126,7 @@ export function resolveAgents(config: Config): ResolvedAgent[] {
       description: a.description ?? name,
       thinking: effectiveThinking(config, model, a.thinking),
       toolsDisable: (a as any).tools?.disable ?? [],
+      toolHint: (a as any).toolHint,
     });
   }
   return out;

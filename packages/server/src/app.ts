@@ -108,6 +108,7 @@ export function createApp(deps: ServerDeps): Hono {
         description: a.description,
         thinking: a.thinking,
         toolsDisable: (a as any).toolsDisable ?? [],
+        toolHint: (a as any).toolHint,
       })),
     }),
   );
@@ -315,6 +316,20 @@ export function createApp(deps: ServerDeps): Hono {
     const agent = sess ? deps.agents[sess.agentId] : undefined;
     // agent 专属工具裁剪：黑名单内工具对模型不可见且拒绝执行
     const dis = new Set<string>((agent as any)?.toolsDisable ?? []);
+    // 外部编码工具使用引导：仅在该 agent 真拿得到工具时注入；toolHint 叠加在后
+    const traeOn = deps.tools.names().includes("trae_agent") && !dis.has("trae_agent");
+    const acpOn = deps.tools.names().includes("acp_agent") && !dis.has("acp_agent");
+    let extraSystem = "";
+    if (traeOn || acpOn) {
+      const opts = [
+        traeOn && "trae_agent（一次性外包：发任务拿结果）",
+        acpOn && "acp_agent（多轮长会话：连续多步/需保持上下文时用，同 workdir 自动复用）",
+      ]
+        .filter(Boolean)
+        .join(" / ");
+      extraSystem = `外部编码 Agent 可用：${opts}。当任务涉及多文件代码修改、仓库整体分析、批量重构、写/补测试等重活时，优先用它们处理（workdir 指向目标仓库），完成后汇总结果；日常问答、概念解释、小改动不要外包（每次调用有固定开销）。`;
+    }
+    if ((agent as any)?.toolHint) extraSystem = extraSystem ? extraSystem + "\n" + (agent as any).toolHint : String((agent as any).toolHint);
     const toolRegistry = dis.size
       ? {
           getDefinitions: () => deps.tools.getDefinitions().filter((d) => !dis.has(d.name)),
@@ -338,6 +353,7 @@ export function createApp(deps: ServerDeps): Hono {
     try {
       const response = await deps.sessions.run(id, body.text, {
         toolRegistry,
+        extraSystem: extraSystem || undefined,
         thinking: agent?.thinking as
           | "off"
           | "low"
@@ -389,10 +405,16 @@ export function createApp(deps: ServerDeps): Hono {
       if (!levels.includes(body.thinking))
         return c.json({ error: "thinking 必须是 off|low|medium|high" }, 400);
       agent.thinking = body.thinking;
-    } else if (!hasToolsDisable) {
+    } else if (!hasToolsDisable && body.toolHint === undefined) {
       return c.json({ error: "thinking 必须是字符串" }, 400);
     }
     if (hasToolsDisable) (agent as any).toolsDisable = body.toolsDisable;
+    const hasToolHint = body.toolHint !== undefined;
+    if (hasToolHint && body.toolHint !== null && typeof body.toolHint !== "string")
+      return c.json({ error: "toolHint 必须是字符串或 null（清除）" }, 400);
+    if (typeof body.toolHint === "string" && body.toolHint.length > 2000)
+      return c.json({ error: "toolHint 最长 2000 字符" }, 400);
+    if (hasToolHint) (agent as any).toolHint = body.toolHint ?? undefined;
     try {
       const dir = deps.config.stateDir;
       fs.mkdirSync(dir, { recursive: true });
@@ -407,6 +429,7 @@ export function createApp(deps: ServerDeps): Hono {
           ...(data.agents?.[name] ?? {}),
           ...(typeof body.thinking === "string" && body.thinking ? { thinking: body.thinking } : {}),
           ...(hasToolsDisable ? { tools: { disable: body.toolsDisable } } : {}),
+          ...(hasToolHint ? { toolHint: body.toolHint } : {}),
         },
       };
       fs.writeFileSync(file, JSON.stringify(data, null, 2));

@@ -259,6 +259,7 @@ async function main() {
       workspaceDir: a.workspaceDir,
       thinking: a.thinking,
       toolsDisable: a.toolsDisable,
+      toolHint: a.toolHint,
       memory: mem,
     };
   }
