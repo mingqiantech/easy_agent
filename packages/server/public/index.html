@@ -63,10 +63,18 @@
     .message.summ{max-width:100%}
     .message.summ .bubble{border-left:4px solid var(--accent2);background:rgba(139,92,246,.06)}
     .ts{font-size:10px;color:var(--muted);margin-top:5px}
-    .input-area{padding:14px 16px;border-top:1px solid var(--border);display:flex;gap:8px;align-items:flex-end;background:var(--card)}
+    .input-area{padding:14px 16px;border-top:1px solid var(--border);display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;background:var(--card)}
     .input-area textarea{flex:1;background:var(--bg);color:var(--fg);border:1px solid var(--border);border-radius:14px;padding:12px 14px;font-size:16px;font-family:inherit;resize:none;min-height:46px;max-height:180px}
     .input-area textarea:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
     .send-btn{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;border:none;border-radius:14px;padding:12px 26px;cursor:pointer;font-size:14px;font-weight:600}
+    .attach-btn{background:var(--hover);border:1px solid var(--border);border-radius:14px;height:46px;padding:0 14px;cursor:pointer;font-size:16px}
+    .attach-btn:hover{background:var(--accent-soft)}
+    .img-strip{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px}
+    .img-chip{position:relative}
+    .img-chip img{max-height:80px;max-width:130px;border-radius:8px;border:1px solid var(--border);display:block}
+    .img-chip .rm{position:absolute;top:-7px;right:-7px;background:#c26d64;color:#fff;border:none;border-radius:50%;width:18px;height:18px;font-size:11px;cursor:pointer;line-height:18px;padding:0}
+    .img-thumbs{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px}
+    .img-thumbs img{max-width:220px;max-height:200px;border-radius:10px;border:1px solid var(--border);cursor:zoom-in;display:block}
     .send-btn:hover{opacity:.9}
     .send-btn:disabled{opacity:.4;cursor:not-allowed}
     .empty{flex:1;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:14px}
@@ -246,7 +254,10 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
     <div class="view" id="chatView">
       <div class="messages" id="messages"></div>
       <div class="input-area">
-        <textarea id="input" rows="1" placeholder="输入消息…（Enter 发送 / Shift+Enter 换行）" style="height:46px;overflow-y:auto"
+        <div class="img-strip" id="imgStrip" style="display:none;flex-basis:100%"></div>
+        <button class="attach-btn" title="添加图片（也可在输入框直接粘贴）" onclick="document.getElementById('imgInput').click()">📎</button>
+        <input type="file" id="imgInput" accept="image/png,image/jpeg,image/gif,image/webp,image/bmp" multiple hidden>
+        <textarea id="input" rows="1" placeholder="输入消息…（Enter 发送 / Shift+Enter 换行 / 可粘图）" style="height:46px;overflow-y:auto"
           oninput="this.style.height='46px';this.style.height=Math.min(this.scrollHeight,180)+'px'"
           onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();send()}"></textarea>
         <button class="send-btn" id="sendBtn" onclick="send()">发送</button>
@@ -509,7 +520,13 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
       if(m.role==='assistant'&&!text.trim()) return toolLine;
       const av=m.role==='user'?'🙂':'🤖';
       const inner=m.role==='assistant'?`<div class="clippable md">${mdToHtml(text)}</div>`:esc(text);
-      return `<div class="message ${m.role}"><div class="avatar">${av}</div><div><div class="bubble">${inner}</div>${ts}</div></div>${toolLine}`;
+      // 用户消息附图：历史用 /uploads/ 引用，刚发的本地 _dataUrl；点击新标签看大图
+      let imgsHtml='';
+      const imlist=(m.metadata&&m.metadata.images)||[];
+      if(m.role==='user'&&imlist.length){
+        imgsHtml='<div class="img-thumbs">'+imlist.map(im=>{const src=im._dataUrl||(`${API}/uploads/`+encodeURIComponent(im.file));return `<img src="${src}" alt="${esc(im.name||'')}" title="${esc(im.name||'')}" onclick="window.open(this.src)">`;}).join('')+'</div>';
+      }
+      return `<div class="message ${m.role}"><div class="avatar">${av}</div><div><div class="bubble">${imgsHtml}${inner}</div>${ts}</div></div>${toolLine}`;
     }
     const clip=s=>{s=String(s);return s.length>300?s.slice(0,300)+'…':s};
     /* 轻量 Markdown 渲染（无依赖）：标题/hr/列表/表格/加粗/行内码；全角｜归一为半角 */
@@ -817,23 +834,49 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
     }
 
     function setSendMode(run){const b=document.getElementById('sendBtn');if(run){b.textContent='\u25a0 \u505c\u6b62';b.onclick=abortRun;}else{b.textContent='\u53d1\u9001';b.onclick=send;}b.disabled=false;b.title='';}
+    /* ── 图片附件：📎 选择或输入框粘贴，base64 随消息 POST；历史消息用 /uploads/ 缩略图 ── */
+    let pendingImgs=[]; // {name,mimeType,dataBase64}
+    const MAX_IMG=5*1024*1024, MAX_IMGS=4;
+    function fileToImg(f){return new Promise(res=>{const r=new FileReader();r.onload=()=>{const s=String(r.result);res({name:f.name||('image-'+Date.now()),mimeType:f.type,dataBase64:s.slice(s.indexOf(',')+1)});};r.readAsDataURL(f);});}
+    async function pickImages(files){
+      for(const f of files){
+        if(!f)continue;
+        if(!String(f.type).startsWith('image/'))continue;
+        if(f.size>MAX_IMG){alert('图片超过 5MB：'+(f.name||'clipboard'));continue;}
+        if(pendingImgs.length>=MAX_IMGS){alert('单条消息最多 '+MAX_IMGS+' 张图');break;}
+        pendingImgs.push(await fileToImg(f));
+      }
+      renderImgStrip();
+    }
+    function renderImgStrip(){
+      const s=document.getElementById('imgStrip');
+      if(!pendingImgs.length){s.style.display='none';s.innerHTML='';return;}
+      s.style.display='flex';
+      s.innerHTML=pendingImgs.map((im,i)=>`<div class="img-chip"><img src="data:${im.mimeType};base64,${im.dataBase64}"><button class="rm" onclick="pendingImgs.splice(${i},1);renderImgStrip()">✕</button></div>`).join('');
+    }
+    document.getElementById('imgInput').addEventListener('change',e=>{pickImages([...e.target.files]);e.target.value='';});
+    document.getElementById('input').addEventListener('paste',e=>{
+      const items=[...(e.clipboardData&&e.clipboardData.items||[])].filter(i=>i.kind==='file'&&i.type.startsWith('image/'));
+      if(items.length){e.preventDefault();pickImages(items.map(i=>i.getAsFile()));}
+    });
     async function abortRun(){const b=document.getElementById('sendBtn');b.disabled=true;b.title='\u4e2d\u65ad\u4e2d\u2026';try{await fetch(`${API}/api/sessions/${sid}/abort`,{method:'POST'});}catch(e){b.disabled=false;}}
     async function send(){
       const input=document.getElementById('input'),text=input.value.trim();
-      if(!text)return;
+      if(!text&&!pendingImgs.length)return;
       if(!sid)await newSession();
       input.value='';input.style.height='46px';
       setSendMode(true);
       const c=document.getElementById('messages');
       if(c.querySelector('.empty'))c.innerHTML='';
-      c.insertAdjacentHTML('beforeend',bubbleHtml({role:'user',content:text,createdAt:Date.now()}));
+      const sending=pendingImgs.slice();pendingImgs=[];renderImgStrip();
+      c.insertAdjacentHTML('beforeend',bubbleHtml({role:'user',content:text,createdAt:Date.now(),metadata:sending.length?{images:sending.map(im=>({file:'',mimeType:im.mimeType,name:im.name,_dataUrl:'data:'+im.mimeType+';base64,'+im.dataBase64}))}:undefined}));
       const thinking=document.createElement('div');
       thinking.id='thinkingSlot';
       thinking.innerHTML=`<div class="message assistant"><div class="avatar">🤖</div><div><div class="bubble" style="color:var(--muted)">思考中…</div></div></div>`;
       c.appendChild(thinking);c.scrollTop=c.scrollHeight;
       openEvents(sid);
       try{
-        const r=await fetch(`${API}/api/sessions/${sid}/messages`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text})});
+        const r=await fetch(`${API}/api/sessions/${sid}/messages`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(sending.length?{text,images:sending}:{text})});
         const j=await r.json();
         if(j.status==='queued'){
           clearLive();
@@ -844,11 +887,12 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
         }else if(j.error){
           clearLive();
           thinking.innerHTML=bubbleHtml({role:'assistant',content:'❌ '+j.error,createdAt:Date.now()});
+          if(sending.length){pendingImgs=sending;renderImgStrip();} // 发送失败：图退回预览区可重试
         }else{
           // 成功：走淡出衔接（finalizeRun 幂等，SSE run_end 先到则不重复）
           await finalizeRun();
         }
-      }catch(e){clearLive();thinking.innerHTML=bubbleHtml({role:'assistant',content:'❌ '+e.message});}
+      }catch(e){clearLive();thinking.innerHTML=bubbleHtml({role:'assistant',content:'❌ '+e.message});if(sending.length){pendingImgs=sending;renderImgStrip();}}
       setSendMode(false);c.scrollTop=c.scrollHeight;await loadSessions();
     }
 

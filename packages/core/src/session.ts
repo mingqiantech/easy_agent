@@ -11,6 +11,17 @@ import type {
 } from "@easy-agent/schema/llm";
 import type { ToolRegistry } from "./tool/registry.js";
 import { pruneToolResults } from "./context.js";
+
+/** 行→Message 的 metadata 反序列化：空/坏 JSON 当无 metadata，不阻断历史加载 */
+function parseMetadata(raw: unknown): Record<string, any> | null {
+  if (!raw || typeof raw !== "string" || raw === "{}" || raw === "null") return null;
+  try {
+    const o = JSON.parse(raw);
+    return o && typeof o === "object" && Object.keys(o).length ? o : null;
+  } catch {
+    return null;
+  }
+}
 import { maskSecrets } from "./secrets-mask.js";
 
 export interface CreateSessionOptions {
@@ -204,9 +215,16 @@ export class SessionManager {
     const id = generateId();
     const ts = now();
     db.prepare(
-      `INSERT INTO messages (id, session_id, role, content, created_at)
-       VALUES (?, ?, ?, ?, ?)`,
-    ).run(id, sessionId, message.role, message.content, ts);
+      `INSERT INTO messages (id, session_id, role, content, metadata, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    ).run(
+      id,
+      sessionId,
+      message.role,
+      message.content,
+      message.metadata ? JSON.stringify(message.metadata) : "{}",
+      ts,
+    );
     db.prepare("UPDATE sessions SET updated_at = ? WHERE id = ?").run(
       ts,
       sessionId,
@@ -220,12 +238,16 @@ export class SessionManager {
         "SELECT * FROM messages WHERE session_id = ? ORDER BY created_at ASC",
       )
       .all(sessionId) as any[];
-    return rows.map((row) => ({
-      role: row.role,
-      content: row.content,
-      id: row.id,
-      createdAt: row.created_at,
-    }));
+    return rows.map((row) => {
+      const meta = parseMetadata(row.metadata);
+      return {
+        role: row.role as Message["role"],
+        content: row.content,
+        id: row.id,
+        createdAt: row.created_at,
+        ...(meta ? { metadata: meta } : {}),
+      };
+    });
   }
 
   /** 全量历史（含压缩归档消息），供 UI 展示；LLM 上下文仍用 getMessages */
@@ -234,19 +256,23 @@ export class SessionManager {
     const rows = db
       .prepare(
         `SELECT * FROM (
-           SELECT id, role, content, created_at, 0 AS archived FROM messages WHERE session_id = ?
+           SELECT id, role, content, metadata, created_at, 0 AS archived FROM messages WHERE session_id = ?
            UNION ALL
-           SELECT id, role, content, created_at, 1 AS archived FROM messages_archive WHERE session_id = ?
+           SELECT id, role, content, metadata, created_at, 1 AS archived FROM messages_archive WHERE session_id = ?
          ) ORDER BY created_at ASC`,
       )
       .all(sessionId, sessionId) as any[];
-    return rows.map((row) => ({
-      role: row.role,
-      content: row.content,
-      id: row.id,
-      createdAt: row.created_at,
-      archived: !!row.archived,
-    }));
+    return rows.map((row) => {
+      const meta = parseMetadata(row.metadata);
+      return {
+        role: row.role as Message["role"],
+        content: row.content,
+        id: row.id,
+        createdAt: row.created_at,
+        archived: !!row.archived,
+        ...(meta ? { metadata: meta } : {}),
+      };
+    });
   }
 
   /** 服务启动时扫描被中断的轮次，注入续跑消息到 pending_queue；返回恢复的会话数 */
@@ -330,11 +356,19 @@ export class SessionManager {
         const ins = db.prepare(
           `INSERT OR REPLACE INTO messages_archive
            (id, session_id, role, content, metadata, created_at, archived_at)
-           VALUES (?, ?, ?, ?, '{}', ?, ?)`,
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
         );
         const del = db.prepare("DELETE FROM messages WHERE id = ?");
         for (const m of toArchive) {
-          ins.run(m.id, sessionId, m.role, m.content, m.createdAt ?? ts, ts);
+          ins.run(
+            m.id,
+            sessionId,
+            m.role,
+            m.content,
+            m.metadata ? JSON.stringify(m.metadata) : "{}",
+            m.createdAt ?? ts,
+            ts,
+          );
           del.run(m.id);
         }
       }
@@ -415,6 +449,8 @@ export class SessionManager {
       thinking?: "off" | "low" | "medium" | "high";
       /** 每轮动态附加的 system 提示（注入在头部 system 块之后，前缀缓存友好） */
       extraSystem?: string;
+      /** 本轮用户消息附带的图片（服务端 uploads 文件引用，存 metadata.images） */
+      images?: Array<{ file: string; mimeType: string; name?: string }>;
       onText?: (text: string) => void;
       onToolCall?: (name: string, input: unknown) => void;
       onToolResult?: (name: string, result: unknown) => void;
@@ -443,8 +479,15 @@ export class SessionManager {
       // userText 为 null 的恢复轮：以遗留队列头一条启动（否则循环空转）
       let nextText: string | null = userText ?? this.takeQueued(sessionId);
       while (nextText !== null) {
-        if (nextText) {
-          this.addMessage(sessionId, { role: "user", content: nextText });
+        if (nextText || options?.images?.length) {
+          this.addMessage(sessionId, {
+            role: "user",
+            content: nextText || "",
+            // 图片只随本轮首条用户消息入库（排队转向消息不带图）
+            ...(nextText === userText && options?.images?.length
+              ? { metadata: { images: options.images } }
+              : {}),
+          });
           if (!session.title) {
             const t = nextText.slice(0, 50);
             db.prepare("UPDATE sessions SET title = ? WHERE id = ?").run(

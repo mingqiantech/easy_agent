@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { stream } from "hono/streaming";
 import { runStream } from "@easy-agent/core/session-stream";
+import { saveImageUploads } from "../uploads.js";
 
 export function createStreamRoutes(deps: any): Hono {
   const app = new Hono();
@@ -8,12 +9,14 @@ export function createStreamRoutes(deps: any): Hono {
   app.post("/api/sessions/:id/stream", async (c) => {
     const sessionId = c.req.param("id");
     const body = await c.req.json();
+    const { refs: imageRefs } = saveImageUploads(body.images);
 
     return stream(c, async (s) => {
       try {
         await runStream(deps.sessions, sessionId, body.text, {
           toolRegistry: deps.tools,
           workDir: deps.config.workspaceDir,
+          ...(imageRefs.length ? { images: imageRefs } : {}),
           onText: (text) =>
             s.write(`data: ${JSON.stringify({ type: "text", text })}\n\n`),
           onToolCall: (name, input) =>

@@ -17,6 +17,12 @@ import type { CronManager } from "@easy-agent/core/cron/index";
 import { listRuns, runningCount } from "@easy-agent/core/agent/runs";
 import { subscribeEvents, emitEvents } from "./bus.js";
 import { maskSecrets } from "@easy-agent/core/secrets-mask";
+import {
+  saveImageUploads,
+  resolveUploadFile,
+  ocrImage,
+  UPLOADS_DIR,
+} from "./uploads.js";
 import path from "node:path";
 import os from "node:os";
 import fs from "node:fs";
@@ -304,6 +310,20 @@ export function createApp(deps: ServerDeps): Hono {
     return c.json({ ok: true });
   });
 
+  /** 用户上传图片的缩略图访问（UI 用）；文件名白名单后缀 + basename 防穿越 */
+  app.get("/uploads/:file", (c) => {
+    const abs = resolveUploadFile(c.req.param("file"));
+    if (!abs) return c.json({ error: "not found" }, 404);
+    const ext = abs.split(".").pop()!;
+    const mime =
+      { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp", bmp: "image/bmp" }[ext] ??
+      "application/octet-stream";
+    return c.body(new Uint8Array(fs.readFileSync(abs)), 200, {
+      "Content-Type": mime,
+      "Cache-Control": "public, max-age=31536000, immutable",
+    });
+  });
+
   app.get("/api/sessions/:id/messages", (c) => {
     // 全量历史（含压缩归档）；LLM 上下文仍走 getMessages（仅活跃窗口）
     return c.json({ messages: deps.sessions.getFullMessages(c.req.param("id")) });
@@ -312,7 +332,32 @@ export function createApp(deps: ServerDeps): Hono {
   app.post("/api/sessions/:id/messages", async (c) => {
     const body = await c.req.json();
     const id = c.req.param("id");
+    // 图片附件：base64 → uploads 目录落盘，拿文件引用传给 run（存 metadata.images）
+    let imageRefs: ReturnType<typeof saveImageUploads>["refs"] = [];
+    if (Array.isArray(body.images) && body.images.length) {
+      const { refs, errors } = saveImageUploads(body.images);
+      if (errors.length && !refs.length)
+        return c.json({ error: "图片无效：" + errors.join("；") }, 400);
+      imageRefs = refs;
+    }
+    if (!String(body.text ?? "").trim() && !imageRefs.length)
+      return c.json({ error: "消息内容为空" }, 400);
     const sess = deps.sessions.get(id);
+    // 非视觉模型：图片 OCR 转文字拼进正文（工作区守则：识别统一走 rapidocr）；
+    // 视觉模型直接发 image part。refs 带 ocr 标记后 convert 层不再展开图。
+    if (imageRefs.length) {
+      const modelRef = sess?.model ?? "";
+      const vision = /vl|vision|qvq|omni|minimax|gemini/i.test(modelRef);
+      if (!vision) {
+        for (const ref of imageRefs) {
+          const txt = await ocrImage(path.join(UPLOADS_DIR, ref.file));
+          if (txt) {
+            ref.ocr = txt;
+            body.text = `${String(body.text ?? "").trim()}\n\n【图片 ${ref.name} OCR 识别内容】\n${txt}`.trim();
+          }
+        }
+      }
+    }
     const agent = sess ? deps.agents[sess.agentId] : undefined;
     // agent 专属工具裁剪：黑名单内工具对模型不可见且拒绝执行
     const dis = new Set<string>((agent as any)?.toolsDisable ?? []);
@@ -345,20 +390,26 @@ export function createApp(deps: ServerDeps): Hono {
         }
       : deps.tools;
     // 排队/转向：会话有任务在跑 → 入队，运行循环会并入当前上下文
+    // （带图消息不入队：转向链路只支持纯文本，直接走本轮附带）
     if (
       typeof body.text === "string" &&
       body.text &&
+      !imageRefs.length &&
       deps.sessions.queueMessage(id, body.text)
     ) {
       return c.json({ status: "queued" }, 202);
     }
+    // 带图消息不支持排队转向：本轮在跑时直接拒绝，避免并发双循环串话
+    if (imageRefs.length && deps.sessions.isBusy(id))
+      return c.json({ error: "当前轮任务进行中，图片消息请等它结束后再发" }, 409);
     const bus = (e: Record<string, unknown>) =>
       emitEvents(id, { sessionId: id, ts: Date.now(), ...e });
     bus({ type: "run_start" });
     try {
-      const response = await deps.sessions.run(id, body.text, {
+      const response = await deps.sessions.run(id, body.text ?? "", {
         toolRegistry,
         extraSystem: extraSystem || undefined,
+        ...(imageRefs.length ? { images: imageRefs } : {}),
         thinking: agent?.thinking as
           | "off"
           | "low"

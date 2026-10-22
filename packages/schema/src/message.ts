@@ -9,6 +9,19 @@ export const MessageRole = z.enum([
 ]);
 export type MessageRole = z.infer<typeof MessageRole>;
 
+/**
+ * 图片附件（存服务端 uploads 目录，DB 只存引用，避免 base64 擑爆消息表）
+ */
+export const ImageAttachment = z.object({
+  /** uploads 目录下的文件名（服务端负责拼绝对路径） */
+  file: z.string(),
+  mimeType: z.string(),
+  name: z.string().optional(),
+  /** 非视觉模型的 OCR 预识别文本（已拼入 content，发送时跳过 image part） */
+  ocr: z.string().optional(),
+});
+export type ImageAttachment = z.infer<typeof ImageAttachment>;
+
 export const Message = z.object({
   role: MessageRole,
   content: z.string(),

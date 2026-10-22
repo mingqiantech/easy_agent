@@ -22,12 +22,21 @@ export async function runStream(
   sessions: SessionManager,
   sessionId: string,
   userText: string,
-  options: { toolRegistry?: ToolRegistry; workDir?: string } & StreamCallbacks,
+  options: {
+    toolRegistry?: ToolRegistry;
+    workDir?: string;
+    /** 图片附件引用（已落盘 uploads） */
+    images?: Array<{ file: string; mimeType: string; name?: string }>;
+  } & StreamCallbacks,
 ): Promise<string> {
   const session = sessions.get(sessionId);
   if (!session) throw new Error(`Session not found: ${sessionId}`);
 
-  sessions.addMessage(sessionId, { role: "user", content: userText });
+  sessions.addMessage(sessionId, {
+    role: "user",
+    content: userText,
+    ...(options.images?.length ? { metadata: { images: options.images } } : {}),
+  });
 
   const toolDefs = options?.toolRegistry?.getDefinitions();
   const workDir = options.workDir ?? process.cwd();
