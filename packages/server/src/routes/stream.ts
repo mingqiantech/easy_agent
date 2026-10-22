@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { stream } from "hono/streaming";
 import { runStream } from "@easy-agent/core/session-stream";
-import { saveImageUploads } from "../uploads.js";
+import { saveImageUploads, offloadLongText } from "../uploads.js";
 
 export function createStreamRoutes(deps: any): Hono {
   const app = new Hono();
@@ -10,6 +10,8 @@ export function createStreamRoutes(deps: any): Hono {
     const sessionId = c.req.param("id");
     const body = await c.req.json();
     const { refs: imageRefs } = saveImageUploads(body.images);
+    if (typeof body.text === "string" && body.text)
+      body.text = offloadLongText(body.text);
 
     return stream(c, async (s) => {
       try {

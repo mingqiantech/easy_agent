@@ -78,6 +78,7 @@ export function saveImageUploads(
     }
     const id = crypto.randomUUID();
     const file = `${id}.${sniffed.ext}`;
+    cleanupOldUploads();
     fs.writeFileSync(path.join(UPLOADS_DIR, file), buf);
     refs.push({
       file,
@@ -107,6 +108,45 @@ function sniffImageMagic(buf: Buffer): { ext: string; mime: string } | null {
   if (buf.length > 2 && buf[0] === 0x42 && buf[1] === 0x4d)
     return { ext: "bmp", mime: "image/bmp" };
   return null;
+}
+
+/**
+ * 长文本卸载（OpenClaw 式）：超过阈值的用户消息落盘，上下文只留引用+预览，
+ * 模型需要细节时用 read 工具按行取——避免大块日志/文档逐轮全价重复计费。
+ * 阈值可 EASY_AGENT_LONG_TEXT_MIN_CHARS 调（<=0 禁用）。
+ */
+export const LONG_TEXT_MIN_CHARS = Number(
+  process.env.EASY_AGENT_LONG_TEXT_MIN_CHARS ?? 4000,
+);
+const LONG_TEXT_PREVIEW_CHARS = 400;
+
+export function offloadLongText(text: string): string {
+  if (LONG_TEXT_MIN_CHARS <= 0 || text.length <= LONG_TEXT_MIN_CHARS)
+    return text;
+  fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+  cleanupOldUploads();
+  const id = crypto.randomUUID();
+  const abs = path.join(UPLOADS_DIR, `longtext-${id}.txt`);
+  fs.writeFileSync(abs, text, "utf-8");
+  return [
+    `[长文本已存文件：${abs}（共 ${text.length} 字符）。需要细节用 read 工具按 offset/limit 分段读取，不要整份复述。]`,
+    `--- 前 ${LONG_TEXT_PREVIEW_CHARS} 字预览 ---`,
+    text.slice(0, LONG_TEXT_PREVIEW_CHARS),
+    `…（其余 ${text.length - LONG_TEXT_PREVIEW_CHARS} 字在文件中）`,
+  ].join("\n");
+}
+
+/** 懒清理：uploads 目录只增不减，写入新文件时顺手扫掉 30 天前的旧附件 */
+function cleanupOldUploads(): void {
+  try {
+    const cutoff = Date.now() - 30 * 86400_000;
+    for (const f of fs.readdirSync(UPLOADS_DIR)) {
+      const p = path.join(UPLOADS_DIR, f);
+      try {
+        if (fs.statSync(p).mtimeMs < cutoff) fs.rmSync(p, { force: true });
+      } catch {}
+    }
+  } catch {}
 }
 
 /** 安全解析 uploads 文件名（防目录穿越）；非法返回 null */

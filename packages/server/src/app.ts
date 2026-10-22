@@ -21,6 +21,7 @@ import {
   saveImageUploads,
   resolveUploadFile,
   ocrImage,
+  offloadLongText,
   UPLOADS_DIR,
 } from "./uploads.js";
 import path from "node:path";
@@ -358,6 +359,10 @@ export function createApp(deps: ServerDeps): Hono {
         }
       }
     }
+    // 长文本卸载：超阈值消息先落盘，上下文只留引用+预览（模型用 read 按需取段）；
+    // 在 OCR 拼接之后做，图文合并超长也能盖到
+    if (typeof body.text === "string" && body.text)
+      body.text = offloadLongText(body.text);
     const agent = sess ? deps.agents[sess.agentId] : undefined;
     // agent 专属工具裁剪：黑名单内工具对模型不可见且拒绝执行
     const dis = new Set<string>((agent as any)?.toolsDisable ?? []);
