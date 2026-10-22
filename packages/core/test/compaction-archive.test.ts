@@ -7,6 +7,8 @@ describe("compactIfNeeded 归档（不删除历史）", () => {
   let sessions: SessionManager;
 
   beforeAll(() => {
+    // 阈值改为 env 可调后，测试压低触发线（生产默认 64000 token 等价位）
+    process.env.EASY_AGENT_COMPACT_MAX_TOKENS = "8000";
     getDatabase(":memory:");
     let n = 0;
     const fakeLlm: any = {

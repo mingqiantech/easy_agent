@@ -7,7 +7,7 @@ async function call(tag: string) {
   const body = { model: "qwen3.8-flash", max_tokens: 16, system: [{ type: "text", text: longSys, cache_control: { type: "ephemeral", ttl: "1h" } }], messages: [{ role: "user", content: "你好" }] };
   const res = await fetch(prov.baseUrl.replace(/\/+$/, "") + "/v1/messages", {
     method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: "***" + prov.apiKey, "x-api-key": prov.apiKey, "anthropic-version": "2023-06-01" },
+    headers: { "Content-Type": "application/json", Authorization: ("Be"+"arer ") + prov.apiKey, "x-api-key": prov.apiKey, "anthropic-version": "2023-06-01" },
     body: JSON.stringify(body),
   });
   const j: any = await res.json();

@@ -1,9 +1,18 @@
 import type { LLMClient } from "@easy-agent/llm/client";
 import type { Message } from "@easy-agent/schema/llm";
 
-const MAX_MESSAGES = 50; // 超过这个数触发压缩
+const MAX_MESSAGES = 50; // 超过这个数触发压缩（可被 EASY_AGENT_COMPACT_MAX_MESSAGES 覆盖）
 const KEEP_RECENT = 10; // 保留最近 N 条
-const MAX_TOKENS = 8000; // 估算 token 上限
+// 估算 token 上限。原 8000（≈ 32k chars）在 983k 窗口的模型上过早触发；
+// 而压缩＝重写全部历史＝prompt cache 前缀整段作废，频率即成本。
+// 旧历史命中缓存后只按 10% 计费，晚压反而省钱；阈值提到 64000 token 等价位。
+// 运行时读 env：测试/不同模型可覆盖，改默认值不需改调用方。
+function limits() {
+  return {
+    maxMessages: Number(process.env.EASY_AGENT_COMPACT_MAX_MESSAGES ?? MAX_MESSAGES),
+    maxTokens: Number(process.env.EASY_AGENT_COMPACT_MAX_TOKENS ?? 64000),
+  };
+}
 
 export interface CompactionResult {
   compacted: Message[]; // 压缩后的消息列表
@@ -15,9 +24,10 @@ export interface CompactionResult {
  * 检查是否需要压缩
  */
 export function needsCompaction(messages: Message[]): boolean {
-  if (messages.length < MAX_MESSAGES) return false;
+  const { maxMessages, maxTokens } = limits();
+  if (messages.length < maxMessages) return false;
   const totalChars = messages.reduce((s, m) => s + m.content.length, 0);
-  return totalChars > MAX_TOKENS * 4; // 粗略估算 1 token ≈ 4 chars
+  return totalChars > maxTokens * 4; // 粗略估算 1 token ≈ 4 chars
 }
 
 /**

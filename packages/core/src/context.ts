@@ -6,6 +6,11 @@ import type { Message } from "@easy-agent/schema/llm";
  *   不需要每次都重读全部历史输出（token 消耗大头）
  * - 单条消息超过 maxChars 截断加省略标记
  * 注意：只作用于发给 LLM 的副本，数据库存储保持完整。
+ *
+ * 缓存经济学（2026-10-22 分析修正）：窗口每轮右移时只有「跨界那一条」被改写成
+ * stub，且 stub 很短（≈40 token），对缓存发散区影响微乎其实；真正的全价成本是
+ * 窗口内原始工具结果（每条可至 maxChars）。keepLast 越小全价尾巴越短，勿盲目
+ * 调大；整体重写的大成本在 compactIfNeeded（阈值已调高以降低触发频率）。
  */
 export function pruneToolResults(
   messages: Message[],
