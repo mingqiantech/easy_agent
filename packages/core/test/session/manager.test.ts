@@ -266,3 +266,80 @@ describe("任意步 abort + 排队持久化", () => {
     expect(msgs.filter((m: any) => m.role === "assistant" && m.content.includes("未返回内容")).length).toBe(1);
   });
 });
+
+describe("步数封顶收口（跑完工具没回复修复）", () => {
+  const toolReg = () => {
+    const reg = new ToolRegistry();
+    reg.register({
+      name: "tick",
+      description: "计数工具",
+      inputSchema: z.object({}),
+      execute: async () => ({ output: "ok" }),
+    });
+    return reg;
+  };
+
+  it("20 步卡在工具轮 → 补一次无工具收口，终文落库且返回", async () => {
+    let calls = 0;
+    const stub: any = {
+      generate: async () => {
+        calls++;
+        if (calls > 20)
+          return { content: "阶段总结：已查明部分事实", toolCalls: [], finishReason: "stop" };
+        return {
+          content: "",
+          toolCalls: [{ id: `t${calls}`, name: "tick", input: {} }],
+          finishReason: "tool_calls",
+        };
+      },
+      stream: async function* () {},
+    };
+    const sm = new SessionManager(stub, { defaultModel: "test/model" });
+    const s = sm.create({});
+    const out = await sm.run(s.id, "查个复杂问题", { toolRegistry: toolReg() });
+    expect(calls).toBe(21); // 20 工具轮 + 1 次收口
+    expect(out).toContain("阶段总结");
+    const last = sm.getMessages(s.id).slice(-1)[0] as any;
+    expect(last.role).toBe("assistant");
+    expect(last.content).toContain("阶段总结");
+  });
+
+  it("收口也空 → 落‘步数已达上限’占位，返回值非空避免误报空响应", async () => {
+    let calls = 0;
+    const stub: any = {
+      generate: async () => {
+        calls++;
+        if (calls > 20) return { content: "", toolCalls: [], finishReason: "stop" };
+        return {
+          content: "",
+          toolCalls: [{ id: `t${calls}`, name: "tick", input: {} }],
+          finishReason: "tool_calls",
+        };
+      },
+      stream: async function* () {},
+    };
+    const sm = new SessionManager(stub, { defaultModel: "test/model" });
+    const s = sm.create({});
+    const out = await sm.run(s.id, "go", { toolRegistry: toolReg() });
+    expect(out).toContain("步数已达上限");
+    expect(sm.getMessages(s.id).slice(-1)[0].content).toContain("继续");
+  });
+
+  it("正常最终文本轮不触发收口（无多余调用）", async () => {
+    let calls = 0;
+    const stub: any = {
+      generate: async () => {
+        calls++;
+        return calls === 1
+          ? { content: "", toolCalls: [{ id: "t1", name: "tick", input: {} }], finishReason: "tool_calls" }
+          : { content: "最终答案", toolCalls: [], finishReason: "stop" };
+      },
+      stream: async function* () {},
+    };
+    const sm = new SessionManager(stub, { defaultModel: "test/model" });
+    const s = sm.create({});
+    const out = await sm.run(s.id, "go", { toolRegistry: toolReg() });
+    expect(calls).toBe(2);
+    expect(out).toBe("最终答案");
+  });
+});

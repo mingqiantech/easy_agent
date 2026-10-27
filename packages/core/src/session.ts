@@ -503,6 +503,9 @@ export class SessionManager {
         let savedAssistant = false;
         let emptyRetries = 0;
         let endedEmpty = false;
+        // 步数封顶标记：最后一轮以工具调用结束时为 true → 循环后补一次无工具收口，
+        // 否则用户看到“工具跑完但没有任何回复”（2026-10-27 症状修复）
+        let cappedOnTools = false;
 
         for (let step = 0; step < 20; step++) {
           db.prepare(
@@ -600,7 +603,11 @@ export class SessionManager {
           fullResponse += response.content ?? "";
           options?.onText?.(response.content);
 
-          if (!response.toolCalls?.length || !options?.toolRegistry) break;
+          if (!response.toolCalls?.length || !options?.toolRegistry) {
+            cappedOnTools = false;
+            break;
+          }
+          cappedOnTools = true;
           for (const tc of response.toolCalls) {
             options.onToolCall?.(tc.name, tc.input);
             const result = await options.toolRegistry.execute(tc.name, tc.input, {
@@ -644,6 +651,66 @@ export class SessionManager {
             content:
               "⚠️ 模型本轮未返回内容（已重试一次，可能网关流中断/安全过滤），请重发或换个说法。",
           });
+        }
+
+        // 20 步工具轮次用尽且最后一步停在工具上 → 无工具收口调用：
+        // 把当前进展总结成正式回复（流式透出），否则前端只有工具卡片没有终文
+        if (!turnAborted && !ctrl.signal.aborted && cappedOnTools) {
+          try {
+            await this.compactIfNeeded(sessionId);
+            const wrapMessages = pruneToolResults(this.getMessages(sessionId));
+            const wrapReq: LLMRequest = {
+              model: session.model,
+              messages: [
+                ...wrapMessages,
+                {
+                  role: "user",
+                  content:
+                    "（系统内部指令，勿展示给用户）本轮工具调用步数已达上限。不要再请求任何工具，基于上方已有信息给出阶段性总结：完成了什么、还缺什么、建议下一步。用用户语言。",
+                },
+              ],
+              signal: ctrl.signal,
+            };
+            const wrap = options?.onEvent
+              ? await this.stepStream(wrapReq, options.onEvent)
+              : await this.llm.generate(wrapReq);
+            if (wrap.usage) {
+              const costUsd = estimateCostUsd(session.model, wrap.usage);
+              db.prepare(
+                `INSERT INTO token_usage (session_id, model, prompt_tokens, completion_tokens, total_tokens, cached_read_tokens, cached_write_tokens, cost_usd, created_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              ).run(
+                sessionId,
+                session.model,
+                wrap.usage.promptTokens ?? 0,
+                wrap.usage.completionTokens ?? 0,
+                wrap.usage.totalTokens ?? 0,
+                wrap.usage.cacheReadTokens ?? 0,
+                wrap.usage.cacheWriteTokens ?? 0,
+                costUsd ?? null,
+                now(),
+              );
+            }
+            if (wrap.content) {
+              this.addMessage(sessionId, { role: "assistant", content: wrap.content });
+              fullResponse += wrap.content;
+            } else {
+              const ph = "⏸ 本轮工具步数已达上限（20），收口总结未返回内容。回复“继续”可接着跑。";
+              this.addMessage(sessionId, {
+                role: "assistant",
+                content: ph,
+              });
+              fullResponse += ph;
+            }
+          } catch {
+            const ph = "⏸ 本轮工具步数已达上限（20）。回复“继续”可接着跑。";
+            if (!savedAssistant)
+              this.addMessage(sessionId, {
+                role: "assistant",
+                content: ph,
+              });
+            fullResponse += ph;
+          }
         }
 
         // 队列尾部：本轮答完后仍有排队消息 → 作为下一用户轮继续运行

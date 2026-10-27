@@ -41,6 +41,8 @@ export async function runStream(
   const toolDefs = options?.toolRegistry?.getDefinitions();
   const workDir = options.workDir ?? process.cwd();
   let fullResponse = "";
+  // 步数封顶标记（同 session.run 修复）：卡在工具轮上结束时补一次无工具收口
+  let cappedOnTools = false;
 
   for (let step = 0; step < 20; step++) {
     // Week5 Step 2：长对话自动压缩（先压缩再取消息）
@@ -92,9 +94,11 @@ export async function runStream(
 
     // 没有工具调用 → 结束
     if (!toolCalls.length || !options?.toolRegistry) {
+      cappedOnTools = false;
       options.onDone?.();
       break;
     }
+    cappedOnTools = true;
 
     // 解析工具输入
     for (const tc of toolCalls) {
@@ -122,5 +126,37 @@ export async function runStream(
       });
     }
   }
+
+  // 20 步用尽卡在工具轮 → 无工具收口：流式总结当前进展，保证 onDone 必达，
+  // 否则前端永远停在“跑完工具没有回复”
+  if (cappedOnTools) {
+    let wrapText = "";
+    try {
+      await sessions.compactIfNeeded(sessionId);
+      const wrapMessages: Array<{ role: string; content: string }> = [
+        ...sessions.getMessages(sessionId),
+        {
+          role: "user",
+          content:
+            "（系统内部指令，勿展示给用户）本轮工具调用步数已达上限。不要再请求任何工具，基于上方已有信息给出阶段性总结：完成了什么、还缺什么、建议下一步。用用户语言。",
+        },
+      ];
+      for await (const event of sessions["llm"].stream({
+        model: session.model,
+        messages: wrapMessages as never,
+      })) {
+        if (event.type === "text" && event.text) {
+          wrapText += event.text;
+          options.onText?.(event.text);
+        }
+      }
+    } catch {
+      // 收口失败落入占位
+    }
+    const finalText = wrapText || "⏸ 本轮工具步数已达上限（20）。回复“继续”可接着跑。";
+    sessions.addMessage(sessionId, { role: "assistant", content: finalText });
+    fullResponse += finalText;
+  }
+  options.onDone?.();
   return fullResponse;
 }
