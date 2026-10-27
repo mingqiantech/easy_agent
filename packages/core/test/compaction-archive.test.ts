@@ -81,3 +81,62 @@ describe("compactIfNeeded 归档（不删除历史）", () => {
     expect(fullAfter.length).toBe(fullBefore + 1);
   });
 });
+
+describe("摘要质量闸门（空壳摘要回归防护 2026-10-27）", () => {
+  beforeAll(() => {
+    process.env.EASY_AGENT_COMPACT_MAX_TOKENS = "2000"; // 8k 字符即触发（消息数仍要 >50）
+  });
+  const big = (_s: string) => "x".repeat(1600);
+  function seedMany(sm: any, id: string) {
+    for (let i = 0; i < 52; i++) {
+      sm.addMessage(id, { role: i % 4 === 0 ? "user" : i % 4 === 1 ? "assistant" : i % 4 === 2 ? "tool" : "assistant",
+        content: i % 4 === 2
+          ? JSON.stringify({ toolCallId: `t${i}`, toolName: "webfetch", result: big(String(i)) })
+          : i % 4 === 1
+            ? JSON.stringify({ text: `第${i}步：查到了价格 12345 元，准备汇总`, toolCalls: [{ id: `t${i}`, name: "bash", input: {} }] })
+            : `第${i}轮消息内容，足够长以填充预算`.repeat(20) });
+    }
+  }
+
+  it("LLM 摘要返回空 → 抽取式兕底，摘要不为空壳", async () => {
+    const stub: any = { generate: async () => ({ content: "" }), stream: async function* () {} };
+    const sm = new SessionManager(stub, { defaultModel: "test/model" });
+    const s = sm.create({});
+    seedMany(sm, s.id);
+    await sm.compactIfNeeded(s.id);
+    const sys = sm.getMessages(s.id).filter((m: any) => m.role === "system" && String(m.content).includes("[对话摘要]")) as any[];
+    expect(sys.length).toBe(1);
+    expect(sys[0].content.length).toBeGreaterThan(30); // 不再是 7 字符空壳
+    expect(sys[0].content).toContain("用户诉求"); // 抽取式骨架三段至少成头一段
+  });
+
+  it("摘要输入清洗：tool 大段 JSON 不进摘要提示词，只留动作行", async () => {
+    let seenPrompt = "";
+    const stub: any = {
+      generate: async (req: any) => { seenPrompt = req.messages[0].content; return { content: "## 用户诉求\n查价\n## 已完成/已查明\n价格 12345 元\n## 待办/下一步\n汇总回复" }; },
+      stream: async function* () {},
+    };
+    const sm = new SessionManager(stub, { defaultModel: "test/model" });
+    const s = sm.create({});
+    seedMany(sm, s.id);
+    await sm.compactIfNeeded(s.id);
+    expect(seenPrompt).not.toContain("xxxxxxxx"); // 原始 HTML/结果正文被剔除
+    expect(seenPrompt).toContain("已执行 webfetch");
+    expect(seenPrompt.length).toBeLessThan(20000); // 13k×条数的原始体量不会再压垮小模型
+  });
+
+  it("摘要过短（<20 字）→ 重试一次成功则采用", async () => {
+    let calls = 0;
+    const stub: any = {
+      generate: async () => { calls++; return { content: calls === 1 ? "短" : "## 用户诉求\n好摘要第二次返回，长度足够通过闸门校验" }; },
+      stream: async function* () {},
+    };
+    const sm = new SessionManager(stub, { defaultModel: "test/model" });
+    const s = sm.create({});
+    seedMany(sm, s.id);
+    await sm.compactIfNeeded(s.id);
+    expect(calls).toBe(2);
+    const sys = sm.getMessages(s.id).filter((m: any) => m.role === "system" && String(m.content).includes("[对话摘要]")) as any[];
+    expect(sys[0].content).toContain("好摘要第二次返回");
+  });
+});

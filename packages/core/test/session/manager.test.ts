@@ -343,3 +343,68 @@ describe("步数封顶收口（跑完工具没回复修复）", () => {
     expect(out).toBe("最终答案");
   });
 });
+
+describe("同轮多工具并行执行", () => {
+  it("两个慢工具并发跑（总耗时≈单个而非两倍），结果按原序落库", async () => {
+    let calls = 0;
+    const stub: any = {
+      generate: async () => {
+        calls++;
+        return calls === 1
+          ? { content: "", toolCalls: [
+              { id: "a", name: "slow", input: {} },
+              { id: "b", name: "slower", input: {} },
+            ], finishReason: "tool_calls" }
+          : { content: "done", toolCalls: [], finishReason: "stop" };
+      },
+      stream: async function* () {},
+    };
+    const sm = new SessionManager(stub, { defaultModel: "test/model" });
+    const reg = new ToolRegistry();
+    const started: string[] = [];
+    reg.register({ name: "slow", description: "慢A", inputSchema: z.object({}),
+      execute: async () => { started.push("slow"); await new Promise((r) => setTimeout(r, 60)); return { output: "A" }; } });
+    reg.register({ name: "slower", description: "慢B", inputSchema: z.object({}),
+      execute: async () => { started.push("slower"); await new Promise((r) => setTimeout(r, 60)); return { output: "B" }; } });
+    const s = sm.create({});
+    const t0 = Date.now();
+    const out = await sm.run(s.id, "go", { toolRegistry: reg });
+    const dt = Date.now() - t0;
+    expect(out).toBe("done");
+    expect(dt).toBeLessThan(110); // 串行要 ≥120ms
+    expect(started.length).toBe(2);
+    const toolMsgs = sm.getMessages(s.id).filter((m: any) => m.role === "tool") as any[];
+    expect(toolMsgs.length).toBe(2);
+    // 原序：a 在前 b 在后（并行完成顺序无所谓，落库跟随 toolCalls 顺序）
+    expect(JSON.parse(toolMsgs[0].content).toolCallId).toBe("a");
+    expect(JSON.parse(toolMsgs[1].content).toolCallId).toBe("b");
+  });
+
+  it("单个工具抛异常不连坐同批其他工具（catch 成 error 字段落库）", async () => {
+    let calls = 0;
+    const stub: any = {
+      generate: async () => {
+        calls++;
+        return calls === 1
+          ? { content: "", toolCalls: [
+              { id: "x", name: "boom", input: {} },
+              { id: "y", name: "fine", input: {} },
+            ], finishReason: "tool_calls" }
+          : { content: "ok", toolCalls: [], finishReason: "stop" };
+      },
+      stream: async function* () {},
+    };
+    const sm = new SessionManager(stub, { defaultModel: "test/model" });
+    const reg = new ToolRegistry();
+    reg.register({ name: "boom", description: "炸", inputSchema: z.object({}), execute: async () => { throw new Error("kapow"); } });
+    reg.register({ name: "fine", description: "好", inputSchema: z.object({}), execute: async () => ({ output: "good" }) });
+    const s = sm.create({});
+    const out = await sm.run(s.id, "go", { toolRegistry: reg });
+    expect(out).toBe("ok");
+    const toolMsgs = sm.getMessages(s.id).filter((m: any) => m.role === "tool") as any[];
+    expect(toolMsgs.length).toBe(2);
+    // registry 自带 catch（error 字段），并行 wrapper 的 catch 仅兜底注册器漏网异常
+    expect(JSON.parse(toolMsgs[0].content).error).toContain("kapow");
+    expect(JSON.parse(toolMsgs[1].content).result.output).toBe("good");
+  });
+});

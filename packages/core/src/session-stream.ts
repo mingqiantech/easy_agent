@@ -107,13 +107,20 @@ export async function runStream(
       } catch {}
     }
 
-    // 执行工具
-    for (const tc of toolCalls) {
-      const result = await options.toolRegistry!.execute(tc.name, tc.input, {
-        sessionId,
-        agentId: session.agentId,
-        workDir,
-      });
+    // 执行工具（同轮并行，结果按原序落库；与 session.run 一致）
+    for (const tc of toolCalls) options.onToolCall?.(tc.name, tc.input);
+    const results = await Promise.all(
+      toolCalls.map((tc) =>
+        options.toolRegistry!.execute(tc.name, tc.input, {
+          sessionId,
+          agentId: session.agentId,
+          workDir,
+        }).catch((e: any) => ({ output: null, error: String(e?.message ?? e) })),
+      ),
+    );
+    for (let ti = 0; ti < toolCalls.length; ti++) {
+      const tc = toolCalls[ti];
+      const result = results[ti];
       options.onToolResult?.(tc.name, result.output ?? result.error);
       sessions.addMessage(sessionId, {
         role: "tool",

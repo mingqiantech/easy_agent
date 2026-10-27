@@ -608,14 +608,23 @@ export class SessionManager {
             break;
           }
           cappedOnTools = true;
-          for (const tc of response.toolCalls) {
-            options.onToolCall?.(tc.name, tc.input);
-            const result = await options.toolRegistry.execute(tc.name, tc.input, {
-              sessionId,
-              agentId: session.agentId,
-              workDir,
-              abortSignal: ctrl.signal,
-            });
+          // 同轮多工具并行执行（互不依赖；典型如同时查 3 个网页/关键词），
+          // 结果仍按 toolCalls 原序落库保持与 assistant 消息对应；单轮耗时从 N×降到 ~1×，
+          // 也直接减少撞 20 步封顶的概率
+          for (const tc of response.toolCalls) options.onToolCall?.(tc.name, tc.input);
+          const results = await Promise.all(
+            response.toolCalls.map((tc) =>
+              options.toolRegistry!.execute(tc.name, tc.input, {
+                sessionId,
+                agentId: session.agentId,
+                workDir,
+                abortSignal: ctrl.signal,
+              }).catch((e: any) => ({ output: null, error: String(e?.message ?? e) })),
+            ),
+          );
+          for (let ti = 0; ti < response.toolCalls.length; ti++) {
+            const tc = response.toolCalls[ti];
+            const result = results[ti];
             options.onToolResult?.(tc.name, result.output ?? result.error);
             // 密钥屏蔽：工具输出落库前替换已知密钥值，模型/界面/历史都不见明文
             this.addMessage(sessionId, {
