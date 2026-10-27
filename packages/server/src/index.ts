@@ -35,6 +35,7 @@ import {
   lightDreaming,
   remDreaming,
   deepDreaming,
+  loadDreamingConfig,
 } from "@easy-agent/memory/dreaming";
 import { BackupManager } from "@easy-agent/core/backup/index";
 import { getDatabase } from "@easy-agent/core/database";
@@ -286,6 +287,22 @@ async function main() {
   const dreamDeps = {
     db,
     shortTerm,
+    dreaming: loadDreamingConfig((config as any).dreaming),
+    // L2 主题档案：workspace/memory/topics/*.md，随 reindex 周期自动进检索索引
+    topicStore: {
+      read: async (name: string) => {
+        try {
+          return await fs.readFile(path.join(memoryDir, "topics", name), "utf-8");
+        } catch {
+          return null;
+        }
+      },
+      write: async (name: string, content: string) => {
+        const dir = path.join(memoryDir, "topics");
+        await fs.mkdir(dir, { recursive: true });
+        await fs.writeFile(path.join(dir, name), content, "utf-8");
+      },
+    },
     llmGenerate: async (prompt: string) =>
       (
         await llm.generate({
@@ -457,9 +474,10 @@ async function main() {
         entries: counts.map((r) => ({ source: r.source, chunks: r.c, files: r.f })),
         reindexIntervalMinutes: msCfg.reindexIntervalMinutes ?? 10,
         shortTerm: {
-          active: sm("promoted_at IS NULL AND forgotten_at IS NULL"),
+          active: sm("promoted_at IS NULL AND forgotten_at IS NULL AND dormant_at IS NULL"),
           promoted: sm("promoted_at IS NOT NULL"),
           forgotten: sm("forgotten_at IS NOT NULL"),
+          dormant: sm("dormant_at IS NOT NULL"),
         },
         dreaming: { lightAt: st("light"), remAt: st("rem"), deepAt: st("deep") },
         memoryMdBytes: (() => { try { return statSync(path.join(workspaceDir, "MEMORY.md")).size; } catch { return 0; } })(),

@@ -104,7 +104,8 @@ function initializeSchema(db: Database): void {
       last_recalled_at INTEGER,
       created_at INTEGER NOT NULL,
       promoted_at INTEGER,
-      forgotten_at INTEGER
+      forgotten_at INTEGER,
+      dormant_at INTEGER
     );
 
     CREATE INDEX IF NOT EXISTS idx_stm_active
@@ -334,6 +335,12 @@ function initializeSchema(db: Database): void {
   // 首页会话：每个 agent 置顶且不可删除的会话
   if (!cols.some((c) => c.name === "pinned")) {
     db.exec("ALTER TABLE sessions ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0");
+  }
+
+  // 2026-10-27 Dreaming 分层改造：软休眠列（行永不删，被召回可复活）
+  const stmCols = db.prepare("PRAGMA table_info(short_term_memory)").all() as Array<{ name: string }>;
+  if (!stmCols.some((c) => c.name === "dormant_at")) {
+    db.exec("ALTER TABLE short_term_memory ADD COLUMN dormant_at INTEGER");
   }
 
   // 旧库的 memory_entries 缺 content_hash/created_at 两列（IncrementalIndex 依赖）→ 补齐

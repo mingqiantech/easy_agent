@@ -95,6 +95,23 @@ export const ConfigSchema = z.object({
     }),
   stateDir: z.string().default(""),
   workspaceDir: z.string().default("."),
+  /** Dreaming 参数覆盖（缺省用 packages/memory/src/dreaming.ts DEFAULT_DREAMING_CONFIG）；
+   * env EASY_AGENT_DREAM_* 优先级更高 */
+  dreaming: z
+    .object({
+      halfLifeDays: z.number().min(1).optional(),
+      reviewIntervals: z.array(z.number().min(1)).optional(),
+      reviewQueueMax: z.number().int().min(1).optional(),
+      themeWindowDays: z.number().min(1).optional(),
+      forgetDays: z.number().min(0).optional(),
+      dormancyScoreFloor: z.number().min(0).max(1).optional(),
+      lightMaxMsgs: z.number().int().min(10).optional(),
+      memoryBudgetChars: z.number().int().min(2000).optional(),
+      distillAgeDays: z.number().min(1).optional(),
+      distillEnabled: z.boolean().optional(),
+      l2MergeThresholdChars: z.number().int().min(4000).optional(),
+    })
+    .optional(),
   // Week 6: 渠道配置（可选）
   telegram: z
     .object({

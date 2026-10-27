@@ -8,7 +8,8 @@ export interface Settings {
 }
 
 export const DEFAULT_SETTINGS: Settings = {
-  dreaming: { enabled: false, intervalMinutes: 360 },
+  // 2026-10-27：分层改造后梦境默认开启；周期 360→120 分钟（重活成本主要在 deep 的 LLM，频率仍可控）
+  dreaming: { enabled: true, intervalMinutes: 120 },
   backup: { enabled: true, intervalHours: 24, keep: 7 },
 };
 

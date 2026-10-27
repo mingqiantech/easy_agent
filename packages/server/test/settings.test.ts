@@ -14,9 +14,10 @@ describe("settings 存储（梦境调度配置）", () => {
     dir = fs.mkdtempSync(path.join(os.tmpdir(), "ea-settings-"));
   });
 
-  it("无文件返回默认值（默认关闭定时梦境）", () => {
+  it("无文件返回默认值（2026-10-27 分层改造后梦境默认开启）", () => {
     expect(loadSettings(dir)).toEqual(DEFAULT_SETTINGS);
-    expect(DEFAULT_SETTINGS.dreaming.enabled).toBe(false);
+    expect(DEFAULT_SETTINGS.dreaming.enabled).toBe(true);
+    expect(DEFAULT_SETTINGS.dreaming.intervalMinutes).toBe(120);
   });
 
   it("保存后读回一致", () => {

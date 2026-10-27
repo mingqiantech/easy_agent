@@ -38,6 +38,8 @@ export class ShortTermMemory {
     const id = ulid();
     const now = Date.now();
     const today = new Date().toISOString().slice(0, 10);
+    // [重要] 前缀是 L1 pinned 保护（蒸馏/降级不迁移）的识别信号：内部兜底保证存在
+    const finalText = text.startsWith("[重要]") ? text : `[重要] ${text}`;
     this.db
       .prepare(
         `
@@ -46,7 +48,7 @@ export class ShortTermMemory {
       VALUES (?, ?, ?, 3, 2, ?, ?, ?)
     `,
       )
-      .run(id, text, origin ?? null, JSON.stringify([today]), now, now);
+      .run(id, finalText, origin ?? null, JSON.stringify([today]), now, now);
     return id;
   }
 
@@ -59,7 +61,7 @@ export class ShortTermMemory {
              last_recalled_at as lastRecalledAt, created_at as createdAt,
              promoted_at as promotedAt, forgotten_at as forgottenAt
       FROM short_term_memory
-      WHERE promoted_at IS NULL AND forgotten_at IS NULL
+      WHERE promoted_at IS NULL AND forgotten_at IS NULL AND dormant_at IS NULL
       ORDER BY created_at DESC
     `,
       )
@@ -73,6 +75,15 @@ export class ShortTermMemory {
   incrementRecall(filePath: string): void {
     const today = new Date().toISOString().slice(0, 10);
     const now = Date.now();
+    // 软休眠复活：检索再命中即回活跃池（时间只排序不判死）
+    this.db
+      .prepare(
+        `
+      UPDATE short_term_memory SET dormant_at = NULL
+      WHERE origin LIKE ? AND dormant_at IS NOT NULL AND promoted_at IS NULL
+    `,
+      )
+      .run(`%${filePath}%`);
     this.db
       .prepare(
         `
@@ -97,7 +108,7 @@ export class ShortTermMemory {
   count(): number {
     const r = this.db
       .prepare(
-        "SELECT COUNT(*) as c FROM short_term_memory WHERE promoted_at IS NULL AND forgotten_at IS NULL",
+        "SELECT COUNT(*) as c FROM short_term_memory WHERE promoted_at IS NULL AND forgotten_at IS NULL AND dormant_at IS NULL",
       )
       .get() as any;
     return r?.c ?? 0;

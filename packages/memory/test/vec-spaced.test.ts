@@ -96,7 +96,7 @@ describe("REM spaced-reinforcement 复习调度", () => {
     expect(row.c).toBe(2); // 复习合成召回
     expect(JSON.parse(row.d).length).toBeGreaterThanOrEqual(1); // 间隔日期被记录
     const after = JSON.parse((db.prepare("SELECT state FROM dreaming_state WHERE phase='rem'").get() as any).state).reviews[id];
-    expect(after.step).toBe(2); // 下一档 4 天
+    expect(after.step).toBe(2); // 新默认五档 [1,3,7,16,35]：step1→2
   });
 
   it("已达标条目不入队；晋升/遗忘条目自动退队", async () => {
@@ -124,13 +124,13 @@ describe("REM spaced-reinforcement 复习调度", () => {
     db.prepare("DELETE FROM dreaming_state WHERE phase='rem'").run();
     const id = seedRecalled("毕业测试条目内容，间隔训练", 1);
     await remDreaming(depsFor("无")); // 入队 step0
-    // 手动置为到期最后一级 step=3
+    // 手动置为到期最后一级 step=4（五档：1/3/7/16/35）
     db.prepare("UPDATE dreaming_state SET state=? WHERE phase='rem'").run(
-      JSON.stringify({ reviews: { [id]: { step: 3, due: Date.now() - 1 } } }),
+      JSON.stringify({ reviews: { [id]: { step: 4, due: Date.now() - 1 } } }),
     );
     await remDreaming(depsFor("无"));
     const state = JSON.parse((db.prepare("SELECT state FROM dreaming_state WHERE phase='rem'").get() as any).state);
-    expect(state.reviews[id]).toBeUndefined(); // 四级练完毕业
+    expect(state.reviews[id]).toBeUndefined(); // 五级练完毕业
     const row = db.prepare("SELECT recall_count c FROM short_term_memory WHERE id=?").get(id) as any;
     expect(row.c).toBe(2); // 1 + 毕业复习 1 次
   });
