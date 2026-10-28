@@ -99,6 +99,9 @@
     .set-row select,.usage-head select{padding:6px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);font-size:13px;color:var(--fg)}
     .hint{font-size:12px;color:var(--muted);margin-top:10px;line-height:1.7}
     .tool-chip{display:inline-block;font-size:11px;padding:2px 8px;margin:3px 6px 0 0;border-radius:999px;background:var(--accent-soft);color:var(--accent)}
+    .live-steps{margin-top:4px}
+    .live-step{font:12px/1.7 ui-monospace,Menlo,Consolas,monospace;color:var(--muted);border-left:2px solid var(--border);padding:1px 0 1px 8px;margin:2px 0}
+    .live-step b{color:var(--accent);font-weight:700}
     .live-text{white-space:pre-wrap;word-break:break-word}
     /* Markdown 渲染样式 */
     .md{white-space:normal}
@@ -1151,7 +1154,7 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
       const c=document.getElementById('messages');
       if(c.querySelector('.empty'))c.innerHTML='';
       const wrap=document.createElement('div');
-      wrap.innerHTML='<div class="message assistant"><div class="avatar">🤖</div><div><div class="bubble"><div class="live-text md"></div><div class="live-chips"></div></div></div>';
+      wrap.innerHTML='<div class="message assistant"><div class="avatar">🤖</div><div><div class="bubble"><div class="live-text md"></div><div class="live-steps"></div></div></div>';
       c.appendChild(wrap.firstElementChild);
       live=c.lastElementChild;liveRaw='';c.scrollTop=c.scrollHeight;return live;
     }
@@ -1159,8 +1162,8 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
       if(!e||e.sessionId!==sid)return;
       if(e.type==='run_start'){ensureLive();return;}
       if(e.type==='text'){ensureLive();appendLive(e.text||'');return;}
-      if(e.type==='tool_start'){ensureLive().querySelector('.live-chips').insertAdjacentHTML('beforeend',`<span class="tool-chip">⏳ ${esc(e.name)}</span>`);return;}
-      if(e.type==='tool_end'){if(!live||!document.contains(live))return;const chips=live.querySelectorAll('.tool-chip');for(let i=chips.length-1;i>=0;i--){if((chips[i].textContent||'').includes(e.name)){chips[i].innerHTML=`✅ ${esc(e.name)} <small style="color:var(--muted)">${esc((e.preview||'').slice(0,70))}</small>`;break;}}return;}
+      if(e.type==='tool_start'){ensureLive();{const ls=live.querySelector('.live-steps');const d=document.createElement('div');d.className='live-step';d.dataset.tool=e.name||'tool';d.innerHTML=`⏳ <b>${esc(e.name||'tool')}</b> <span class="ls-state">执行中…</span>`;ls.appendChild(d);}return;}
+      if(e.type==='tool_end'){if(!live||!document.contains(live))return;const steps=live.querySelectorAll('.live-steps .live-step');for(let i=0;i<steps.length;i++){const s=steps[i];if(s.dataset.tool===(e.name||'tool')&&s.querySelector('.ls-state')){s.querySelector('.ls-state').innerHTML=`✅ <small style="color:var(--muted)">${esc((e.preview||'').replace(/\s+/g,' ').slice(0,70))}</small>`;break;}}return;}
       if(e.type==='run_end'){setSendMode(false);if(e.error&&live&&document.contains(live)){appendLive('\n❌ '+e.error,true);}else if(e.error){loadMessages();}finalizeRun();return;}
       if(e.type==='aborted'){ensureLive();appendLive('\n⏹ 已中断',true);return;}
     }

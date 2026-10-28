@@ -506,6 +506,8 @@ export class SessionManager {
         // 步数封顶标记：最后一轮以工具调用结束时为 true → 循环后补一次无工具收口，
         // 否则用户看到“工具跑完但没有任何回复”（2026-10-27 症状修复）
         let cappedOnTools = false;
+        // 本轮已执行工具台账：中断收口时列出“跑到哪了”，避免只剩工具卡片
+        const toolsRun: string[] = [];
 
         for (let step = 0; step < 20; step++) {
           db.prepare(
@@ -625,6 +627,7 @@ export class SessionManager {
           for (let ti = 0; ti < response.toolCalls.length; ti++) {
             const tc = response.toolCalls[ti];
             const result = results[ti];
+            toolsRun.push(tc.name);
             options.onToolResult?.(tc.name, result.output ?? result.error);
             // 密钥屏蔽：工具输出落库前替换已知密钥值，模型/界面/历史都不见明文
             this.addMessage(sessionId, {
@@ -646,11 +649,32 @@ export class SessionManager {
         }
 
         if (turnAborted || ctrl.signal.aborted) {
-          if (!savedAssistant)
+          // 收口保证：中断前若已跑过工具（末条停在 tool/工具轮），必须补一条确定性总结，
+          // 否则用户只看到一串工具卡片没有任何下文（2026-10-28 elf 点单）
+          const msgs = this.getMessages(sessionId);
+          const last = [...msgs].reverse().find((m) => m.role !== "system");
+          const endsOnToolChain =
+            !!toolsRun.length &&
+            (!last ||
+              last.role === "tool" ||
+              (last.role === "assistant" &&
+                typeof last.content === "string" &&
+                last.content.startsWith("{") &&
+                /"toolCalls"/.test(last.content)));
+          if (endsOnToolChain) {
+            const counts = new Map<string, number>();
+            for (const n of toolsRun) counts.set(n, (counts.get(n) ?? 0) + 1);
+            const ledger = [...counts].map(([n, c]) => `${n}×${c}`).join("、");
+            this.addMessage(sessionId, {
+              role: "assistant",
+              content: `⏹ 已中断。本轮共执行 ${toolsRun.length} 次工具调用（${ledger}），结果见上方卡片；任务未完成，回复“继续”可从中断处接着跑。`,
+            });
+          } else if (!savedAssistant) {
             this.addMessage(sessionId, {
               role: "assistant",
               content: "⏹ 已中断",
             });
+          }
           break; // 不再消费队列尾部：剩余排队消息保留在库中下次续跑
         }
         // 本轮终文为空（重试后仍空，非中断）→ 补占位 assistant，避免“没有下文”

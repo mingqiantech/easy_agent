@@ -129,6 +129,39 @@ describe("任意步 abort + 排队持久化", () => {
     expect(sm.abort("nope")).toBe(false);
   });
 
+  it("abort 停在工具链上 → 补确定性收口（工具台账+继续提示）", async () => {
+    let execs = 0;
+    const stub: any = {
+      generate: async () => ({
+        content: "",
+        toolCalls: [{ id: "t" + (execs + 1), name: "boom", input: {} }],
+        usage: undefined,
+        finishReason: "tool_calls",
+      }),
+      stream: async function* () {},
+    };
+    const sm = new SessionManager(stub, { defaultModel: "test/model" });
+    const reg = new ToolRegistry();
+    const s = sm.create({});
+    reg.register({
+      name: "boom",
+      description: "第二次执行中请求中断",
+      inputSchema: z.object({}),
+      execute: async (_i: any, ctx: any) => {
+        if (++execs === 2) sm.abort(ctx.sessionId);
+        return { output: "ok" };
+      },
+    });
+    await sm.run(s.id, "go", { toolRegistry: reg });
+    expect(execs).toBe(2);
+    const msgs = sm.getMessages(s.id);
+    const last = msgs[msgs.length - 1]!;
+    expect(last.role).toBe("assistant");
+    expect(String(last.content)).toContain("已中断");
+    expect(String(last.content)).toContain("boom×2"); // 工具台账可追溯
+    expect(String(last.content)).toContain("继续");
+  });
+
   it("pending 落库：run 启动预载遗留行并作为转向消息消费，消费后删行", async () => {
     const stub: any = {
       generate: async () => ({
