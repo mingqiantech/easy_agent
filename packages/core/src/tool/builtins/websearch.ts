@@ -3,14 +3,19 @@ import type { Tool } from "../types.js";
 
 /**
  * 网页搜索工具：provider 可配置。
- * - 配置了 tavily/brave/bocha 任一 key → 用对应 API（auto 按 tavily>brave>bocha 优先级）
+ * - 配置了 tavily/brave/bocha 任一 key → 用对应 API（auto 按 tavily>brave>bocha>ollama 优先级）
+ * - ollama：本地 Ollama 宿主的 web_search 代理（免 key，需 `ollama signin`），复用 baseUrl
  * - 都没配置 / API 失败 → 回退 Bing 抓取（cn.bing.com，免密钥，原实现保留）
  */
 export interface WebsearchConfig {
-  provider?: "auto" | "tavily" | "brave" | "bocha" | "bing";
+  provider?: "auto" | "tavily" | "brave" | "bocha" | "ollama" | "bing";
   tavilyApiKey?: string;
   braveApiKey?: string;
   bochaApiKey?: string;
+  /** Ollama 宿主地址（缺省 http://172.18.32.1:11434） */
+  ollamaBaseUrl?: string;
+  /** 仅直连 ollama.com 云时需要 */
+  ollamaApiKey?: string;
 }
 
 interface SearchResult {
@@ -19,6 +24,8 @@ interface SearchResult {
   snippet: string;
 }
 
+const OLLAMA_DEFAULT_BASE = "http://172.18.32.1:11434";
+
 export function createWebsearchTool(cfg: WebsearchConfig = {}): Tool {
   const pick = () => {
     const p = cfg.provider ?? "auto";
@@ -26,13 +33,14 @@ export function createWebsearchTool(cfg: WebsearchConfig = {}): Tool {
     if (cfg.tavilyApiKey) return "tavily" as const;
     if (cfg.braveApiKey) return "brave" as const;
     if (cfg.bochaApiKey) return "bocha" as const;
-    return "bing" as const;
+    // 本地 Ollama 宿主免 key 可用（需已 signin），排在 Bing 前
+    return "ollama" as const;
   };
 
   const tool: Tool = {
     name: "websearch",
     description:
-      "网页搜索。返回标题/URL/摘要列表。超时 15s。后端取决于配置（Tavily/Brave/Bocha API，或免密钥 Bing 抓取）。",
+      "网页搜索。返回标题/URL/摘要列表。超时 15s。后端取决于配置（Tavily/Brave/Bocha API、本地 Ollama web_search 代理，或免密钥 Bing 抓取）。",
     inputSchema: z.object({
       query: z.string().describe("搜索关键词"),
       count: z.number().optional().describe("结果条数（默认 8，最多 20）"),
@@ -46,11 +54,27 @@ export function createWebsearchTool(cfg: WebsearchConfig = {}): Tool {
         if (primary === "tavily") results = await tavilySearch(q, count, cfg.tavilyApiKey!);
         else if (primary === "brave") results = await braveSearch(q, count, cfg.braveApiKey!);
         else if (primary === "bocha") results = await bochaSearch(q, count, cfg.bochaApiKey!);
+        else if (primary === "ollama") results = await ollamaSearch(q, count, cfg);
         else results = await bingSearch(q, count);
         if (results) return { query: q, provider: primary, results };
         throw new Error("empty");
       } catch (e: any) {
         if (primary === "bing") return { error: e?.message, query: q };
+        // ollama 失败（未 signin/宿主不通）→ 先试 ollama.com 云直连再退 Bing
+        if (
+          primary === "ollama" &&
+          cfg.ollamaApiKey &&
+          !String(cfg.ollamaBaseUrl ?? "").includes("ollama.com")
+        ) {
+          try {
+            const cloud = await ollamaSearch(q, count, {
+              ...cfg,
+              ollamaBaseUrl: "https://ollama.com",
+            });
+            if (cloud)
+              return { query: q, provider: "ollama (cloud)", results: cloud };
+          } catch {}
+        }
         // API 失败 → 回退 Bing 抓取
         try {
           const fallback = await bingSearch(q, count);
@@ -71,6 +95,39 @@ export function createWebsearchTool(cfg: WebsearchConfig = {}): Tool {
 
 /** 默认实例（无配置 = Bing 抓取） */
 export const websearchTool = createWebsearchTool();
+
+/* ── Ollama Web Search：本地宿主代理（免 key，需 ollama signin）或 ollama.com 云（需 key） ── */
+async function ollamaSearch(
+  query: string,
+  count: number,
+  cfg: WebsearchConfig,
+): Promise<SearchResult[] | null> {
+  const base = (cfg.ollamaBaseUrl ?? OLLAMA_DEFAULT_BASE).replace(/\/+$/, "");
+  const isCloud = /ollama\.com/i.test(base);
+  const path = isCloud ? "/api/web_search" : "/api/experimental/web_search";
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (cfg.ollamaApiKey) headers.Authorization = `Bearer ${cfg.ollamaApiKey}`;
+  const res = await fetch(base + path, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ query, max_results: count }),
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (res.status === 401)
+    throw new Error("Ollama web search 未授权（本地宿主跑一下 `ollama signin`）");
+  if (!res.ok) throw new Error(`ollama web_search HTTP ${res.status}`);
+  const data: any = await res.json().catch(() => null);
+  const raw = Array.isArray(data?.results) ? data.results : [];
+  const out = raw
+    .filter((r: any) => r?.url)
+    .slice(0, count)
+    .map((r: any) => ({
+      title: String(r.title ?? r.url),
+      url: String(r.url),
+      snippet: String(r.content ?? r.snippet ?? "").slice(0, 500),
+    }));
+  return out.length ? out : null;
+}
 
 /* ── Tavily（agent 专用搜索 API） ── */
 async function tavilySearch(

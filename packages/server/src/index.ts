@@ -200,9 +200,17 @@ async function main() {
     }),
   );
 
-  // websearch：按配置选后端（Tavily/Brave/Bocha key，无 key 回退 Bing 抓取），覆盖内置默认实例
+  // websearch：按配置选后端（Tavily/Brave/Bocha key → Ollama 本地代理 → Bing 抓取兜底），覆盖内置默认实例
   tools.register(
-    createWebsearchTool((config as any).websearch ?? {}),
+    createWebsearchTool({
+      ...(((config as any).websearch ?? {}) as object),
+      ollamaBaseUrl:
+        (config as any).websearch?.ollamaBaseUrl ??
+        (config as any).providers?.ollama?.baseUrl,
+      ollamaApiKey:
+        (config as any).websearch?.ollamaApiKey ??
+        (config as any).providers?.ollama?.apiKey,
+    }),
   );
 
   // Week5 Step 3：子 Agent 工具
