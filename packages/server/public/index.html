@@ -67,6 +67,7 @@
     .input-area textarea{flex:1;background:var(--bg);color:var(--fg);border:1px solid var(--border);border-radius:14px;padding:12px 14px;font-size:16px;font-family:inherit;resize:none;min-height:46px;max-height:180px}
     .input-area textarea:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
     .send-btn{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;border:none;border-radius:14px;padding:12px 26px;cursor:pointer;font-size:14px;font-weight:600}
+    .stop-btn{background:var(--tool);color:#b3564b;border:1px solid #c26d64;border-radius:14px;padding:12px 18px;cursor:pointer;font-size:14px;font-weight:600}
     .attach-btn{background:var(--hover);border:1px solid var(--border);border-radius:14px;height:46px;padding:0 14px;cursor:pointer;font-size:16px}
     .attach-btn:hover{background:var(--accent-soft)}
     .img-strip{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px}
@@ -263,6 +264,7 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
         <textarea id="input" rows="1" placeholder="输入消息…（Enter 发送 / Shift+Enter 换行 / 可粘图）" style="height:46px;overflow-y:auto"
           oninput="this.style.height='46px';this.style.height=Math.min(this.scrollHeight,180)+'px'"
           onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();send()}"></textarea>
+        <button class="stop-btn" id="stopBtn" hidden onclick="abortRun()" title="停止当前任务（工具跑到一半会自动续跑；再点为真停）">■ 停止</button>
         <button class="send-btn" id="sendBtn" onclick="send()">发送</button>
       </div>
     </div>
@@ -836,7 +838,9 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
       setTimeout(()=>msg.classList.remove('flash'),2600);
     }
 
-    function setSendMode(run){const b=document.getElementById('sendBtn');if(run){b.textContent='\u25a0 \u505c\u6b62';b.onclick=abortRun;}else{b.textContent='\u53d1\u9001';b.onclick=send;}b.disabled=false;b.title='';}
+    function setSendMode(run){/* 发送/停止双按钮各司其职：运行中仍可发送（=插话转向），不再把发送钮变成停止钮 */
+      const s=document.getElementById('stopBtn');if(s){s.hidden=!run;if(!run)s.disabled=false;}
+      const b=document.getElementById('sendBtn');b.disabled=false;b.title=run?'任务进行中——发送将作为插话并入当前任务':'';}
     /* ── 图片附件：📎 选择或输入框粘贴，base64 随消息 POST；历史消息用 /uploads/ 缩略图 ── */
     let pendingImgs=[]; // {name,mimeType,dataBase64}
     const MAX_IMG=5*1024*1024, MAX_IMGS=4;
@@ -862,11 +866,13 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
       const items=[...(e.clipboardData&&e.clipboardData.items||[])].filter(i=>i.kind==='file'&&i.type.startsWith('image/'));
       if(items.length){e.preventDefault();pickImages(items.map(i=>i.getAsFile()));}
     });
-    async function abortRun(){const b=document.getElementById('sendBtn');b.disabled=true;b.title='\u4e2d\u65ad\u4e2d\u2026';try{await fetch(`${API}/api/sessions/${sid}/abort`,{method:'POST'});}catch(e){b.disabled=false;}}
+    async function abortRun(){const b=document.getElementById('stopBtn');b.disabled=true;b.title='中断中…';try{await fetch(`${API}/api/sessions/${sid}/abort`,{method:'POST'});}catch(e){b.disabled=false;b.title='';}}
     async function send(){
       const input=document.getElementById('input'),text=input.value.trim();
       if(!text&&!pendingImgs.length)return;
       if(!sid)await newSession();
+      const running=!document.getElementById('stopBtn').hidden; // 任务进行中：发送即插话
+      if(running&&pendingImgs.length){alert('图片消息请等当前任务结束后再发');return;}
       input.value='';input.style.height='46px';
       setSendMode(true);
       const c=document.getElementById('messages');
