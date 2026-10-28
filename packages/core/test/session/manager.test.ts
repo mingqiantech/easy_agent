@@ -86,7 +86,7 @@ describe("SessionManager", () => {
 });
 
 describe("任意步 abort + 排队持久化", () => {
-  it("abort 命中运行中会话：步骤边界即停，不再二次调用模型", async () => {
+  it("abort 停在工具链 → 自动续跑一次，不等用户回复继续", async () => {
     let calls = 0;
     const stub: any = {
       generate: async () => {
@@ -116,8 +116,11 @@ describe("任意步 abort + 排队持久化", () => {
       },
     });
     const out = await sm.run(s.id, "go", { toolRegistry: reg });
-    expect(calls).toBe(1); // 第二步前在边界停下
-    expect(out).toBe("第一段");
+    expect(calls).toBe(2); // 步骤边界停下 → 自动续跑再进一轮
+    expect(out).toContain("第一段");
+    const msgs = sm.getMessages(s.id);
+    const note = msgs.find((m) => String(m.content).includes("自动续跑"));
+    expect(note).toBeTruthy(); // 台账提示落库（含工具账+再点停止为真停）
     expect(sm.isBusy(s.id)).toBe(false);
     expect(sm.abort(s.id)).toBe(false); // run 结束后无 controller
   });
@@ -129,15 +132,26 @@ describe("任意步 abort + 排队持久化", () => {
     expect(sm.abort("nope")).toBe(false);
   });
 
-  it("abort 停在工具链上 → 补确定性收口（工具台账+继续提示）", async () => {
+  it("abort 停在工具链上 → 自动续跑后真完成（不落在台账消息）", async () => {
     let execs = 0;
+    let gens = 0;
     const stub: any = {
-      generate: async () => ({
-        content: "",
-        toolCalls: [{ id: "t" + (execs + 1), name: "boom", input: {} }],
-        usage: undefined,
-        finishReason: "tool_calls",
-      }),
+      generate: async () => {
+        gens++;
+        if (gens <= 2)
+          return {
+            content: "",
+            toolCalls: [{ id: "t" + gens, name: "boom", input: {} }],
+            usage: undefined,
+            finishReason: "tool_calls",
+          };
+        return {
+          content: "最终总结完成",
+          toolCalls: undefined,
+          usage: undefined,
+          finishReason: "stop",
+        };
+      },
       stream: async function* () {},
     };
     const sm = new SessionManager(stub, { defaultModel: "test/model" });
@@ -152,14 +166,13 @@ describe("任意步 abort + 排队持久化", () => {
         return { output: "ok" };
       },
     });
-    await sm.run(s.id, "go", { toolRegistry: reg });
-    expect(execs).toBe(2);
+    const out = await sm.run(s.id, "go", { toolRegistry: reg });
+    expect(out).toContain("最终总结完成"); // 续跑真把任务跑完
     const msgs = sm.getMessages(s.id);
     const last = msgs[msgs.length - 1]!;
-    expect(last.role).toBe("assistant");
-    expect(String(last.content)).toContain("已中断");
-    expect(String(last.content)).toContain("boom×2"); // 工具台账可追溯
-    expect(String(last.content)).toContain("继续");
+    expect(String(last.content)).toBe("最终总结完成");
+    expect(msgs.some((m) => String(m.content).includes("自动续跑"))).toBe(true);
+    expect(msgs.some((m) => String(m.content).includes("回复“继续”"))).toBe(false);
   });
 
   it("pending 落库：run 启动预载遗留行并作为转向消息消费，消费后删行", async () => {

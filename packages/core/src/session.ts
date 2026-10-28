@@ -462,6 +462,9 @@ export class SessionManager {
 
     const db = getDatabase();
     const workDir = options?.workDir ?? process.cwd();
+    // 中断自动续跑额度（每次 run 最多 1 次）：停在工具链上时自己接着跑完，
+    // 不等用户回复“继续”（2026-10-28 elf 点单）；续跑期间再点停=真停
+    let autoResumes = 0;
 
     this.running.add(sessionId);
     // 轮次台账：崩溃时 finally 不执行，残留行供重启后恢复
@@ -471,7 +474,7 @@ export class SessionManager {
        ON CONFLICT(session_id) DO UPDATE SET started_at = excluded.started_at,
          last_step_at = excluded.last_step_at, steps_done = 0`,
     ).run(sessionId, now(), now(), sessionId);
-    const ctrl = new AbortController();
+    let ctrl = new AbortController();
     this.controllers.set(sessionId, ctrl);
     let fullResponse = "";
     try {
@@ -665,6 +668,20 @@ export class SessionManager {
             const counts = new Map<string, number>();
             for (const n of toolsRun) counts.set(n, (counts.get(n) ?? 0) + 1);
             const ledger = [...counts].map(([n, c]) => `${n}×${c}`).join("、");
+            if (autoResumes < 1) {
+              // 自动续跑：换新 controller（旧 signal 已 aborted，不换新无法继续），
+              // 以系统恢复指令开新一轮，模型基于已有工具结果接着跑完并总结
+              autoResumes++;
+              this.addMessage(sessionId, {
+                role: "assistant",
+                content: `⏹ 已中断（本轮已执行 ${toolsRun.length} 次工具：${ledger}），自动续跑中……（再点一次停止为真停）`,
+              });
+              ctrl = new AbortController();
+              this.controllers.set(sessionId, ctrl);
+              nextText =
+                "【系统自动续跑】上一轮被中断。请基于上方已完成的工具结果继续把任务跑完，不要重复已完成的步骤；若信息已足够，直接给出最终总结。";
+              continue;
+            }
             this.addMessage(sessionId, {
               role: "assistant",
               content: `⏹ 已中断。本轮共执行 ${toolsRun.length} 次工具调用（${ledger}），结果见上方卡片；任务未完成，回复“继续”可从中断处接着跑。`,
