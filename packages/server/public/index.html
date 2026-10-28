@@ -882,11 +882,12 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
         const r=await fetch(`${API}/api/sessions/${sid}/messages`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(sending.length?{text,images:sending}:{text})});
         const j=await r.json();
         if(j.status==='queued'){
-          clearLive();
-          thinking.innerHTML=bubbleHtml({role:'assistant',content:'⏳ 已排队——当前任务进行中，这条消息会自动并入上下文（转向），稍后刷新会话可见完整回复',createdAt:Date.now()});
-          await new Promise(res=>setTimeout(res,4000));
-          thinking.innerHTML=bubbleHtml({role:'assistant',content:'⏳ 已并入当前任务，继续对话请等待本轮完成后刷新',createdAt:Date.now()});
+          // 转向插话：任务仍在跑——不清 live 气泡、不翻转停止按钮；占位条短暂提示后自动移除
+          thinking.innerHTML=bubbleHtml({role:'assistant',content:'⏳ 已插入当前任务（下一条工具轮开始时生效），本轮完成后会自动刷新完整回复',createdAt:Date.now()});
+          await new Promise(res=>setTimeout(res,5000));
+          thinking.remove();
           loadSessions();
+          return; // 保持 setSendMode(true)，接流由 SSE run_end 接管
         }else if(j.error){
           clearLive();
           thinking.innerHTML=bubbleHtml({role:'assistant',content:'❌ '+j.error,createdAt:Date.now()});
