@@ -127,7 +127,7 @@
     .md tr:nth-child(even) td{background:rgba(91,122,140,.04)}
     /* 长文本折叠：超过高度自动收起来，渐变遮罩 + 展开全部 */
     .bubble.long{cursor:default}
-    .clipped{position:relative;max-height:340px;overflow:hidden}
+    .clipped{position:relative;max-height:680px;overflow:hidden}
     .clipped::after{content:'';position:absolute;left:0;right:0;bottom:0;height:64px;background:linear-gradient(to bottom,transparent,var(--assistant))}
     .message.toolchip .clipped::after{background:linear-gradient(to bottom,transparent,var(--tool))}
     .expand-btn{display:inline-block;margin-top:6px;font-size:12px;color:var(--accent);cursor:pointer;user-select:none;border:1px solid var(--border);border-radius:8px;padding:2px 10px;background:var(--card)}
@@ -742,12 +742,12 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
       const h=e.target.closest&&e.target.closest('.message .thead, .toolgroup-body .thead');
       if(h&&!h.closest('.toolgroup-head'))h.closest('.titem').classList.toggle('open');
     });
-    /* 长文本溢出检测：内容高过 ~420px 就折叠 + 渐变遮罩 + 展开/收起按钮 */
+    /* 长文本溢出检测：内容高过 ~840px 就折叠 + 渐变遮罩 + 展开/收起按钮（2026-10-28 elf 点单翻倍） */
     function applyCollapse(){
       document.querySelectorAll('#messages .clippable').forEach(el=>{
         if(el.dataset.clChecked)return;
         el.dataset.clChecked='1';
-        if(el.scrollHeight<=420)return;
+        if(el.scrollHeight<=840)return;
         el.classList.add('clipped');
         const btn=document.createElement('span');
         btn.className='expand-btn';btn.textContent='展开全部 ▾';
