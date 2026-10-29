@@ -9,7 +9,7 @@ process.env.EASY_AGENT_DB_PATH = path.join(TEST_DIR, "state", "agent.db");
 
 import { freshDatabase } from "@easy-agent/core/database";
 import { ShortTermMemory } from "../src/short-term.js";
-import { lightDreaming, deepDreaming } from "../src/dreaming.js";
+import { lightDreaming, deepDreaming, remDreaming } from "../src/dreaming.js";
 
 const xdb = freshDatabase(process.env.EASY_AGENT_DB_PATH!);
 
@@ -109,5 +109,69 @@ describe("Dreaming 闭环：lightDreaming 提取 → 晋升", () => {
     // 游标没动：新消息下个周期还能被取到
     const after = db.prepare("SELECT state FROM dreaming_state WHERE phase='light'").get() as any;
     expect(JSON.parse(after?.state ?? "{}")?.cursor ?? 0).toBe(prevCursor);
+  });
+});
+
+describe("REM 主题积累去重（2026-10-29 修复）", () => {
+  it("再现主题原地更新单行不插新行；已晋升后不再积累", async () => {
+    const db = xdb;
+    const shortTerm = new ShortTermMemory(db);
+    // 4 条活跃条目触发主题反思
+    shortTerm.add("remd-A 用户偏好 bun 跑 TypeScript", "test:remd:a");
+    shortTerm.add("remd-B 动态网页抓取困难", "test:remd:b");
+    shortTerm.add("remd-C 需要视频生成功能", "test:remd:c");
+    shortTerm.add("remd-D 配置需重启生效", "test:remd:d");
+    let memory = "# Long-Term Memory\n";
+    const deps: any = {
+      db,
+      shortTerm,
+      llmGenerate: async (p: string) =>
+        p.includes("归纳以下") ? "开发工具偏好|倾向使用 bun 运行 TypeScript" : "整合段",
+      readMemory: async () => memory,
+      writeMemory: async (c: string) => { memory = c; },
+      maskSecret: (t: string) => t,
+    };
+    const countRows = () =>
+      (db.prepare("SELECT COUNT(*) n FROM short_term_memory WHERE origin='rem:theme:开发工具偏好'").get() as any).n;
+
+    await remDreaming(deps); // 首次：只观察
+    expect(countRows()).toBe(1);
+    const first = db.prepare("SELECT text FROM short_term_memory WHERE origin='rem:theme:开发工具偏好'").get() as any;
+    expect(first.text).toStartWith("主题：");
+
+    await remDreaming(deps); // 再现：原地升级为 [重要] 计数 2，不插新行
+    expect(countRows()).toBe(1);
+    const second = db.prepare("SELECT text, recall_count FROM short_term_memory WHERE origin='rem:theme:开发工具偏好'").get() as any;
+    expect(second.text).toContain("主题积累（第2次）");
+    expect(second.text).toStartWith("[重要]");
+    expect(second.recall_count).toBe(3);
+
+    // 模拟已晋升 → 再现完全跳过（MEMORY.md 已有结论，不再喂重复行）
+    db.prepare("UPDATE short_term_memory SET promoted_at=? WHERE origin='rem:theme:开发工具偏好'").run(Date.now());
+    await remDreaming(deps);
+    expect(countRows()).toBe(1);
+    const third = db.prepare("SELECT text FROM short_term_memory WHERE origin='rem:theme:开发工具偏好'").get() as any;
+    expect(third.text).toContain("第2次"); // 没被改写成第3次
+    // 清理本测试的行
+    db.prepare("DELETE FROM short_term_memory WHERE origin LIKE 'test:remd:%' OR origin='rem:theme:开发工具偏好'").run();
+  });
+
+  it("deep 对已逐字在 L1 的 pinned 条目跳过写入（仍标记晋升）", async () => {
+    const db = xdb;
+    const shortTerm = new ShortTermMemory(db);
+    shortTerm.addImportant("重复条目X 用户偏好 bun");
+    let memory = "# Long-Term Memory\n\n## Promoted (2026-01-01)\n\n- [重要] 重复条目X 用户偏好 bun\n";
+    const deps: any = {
+      db, shortTerm,
+      llmGenerate: async () => "不应该被调用",
+      readMemory: async () => memory,
+      writeMemory: async (c: string) => { memory = c; },
+      maskSecret: (t: string) => t,
+    };
+    const r = await deepDreaming(deps);
+    expect(r.promoted).toBe(1); // DB 侧照常标记
+    // 不再新增重复段：Promoted 段仍只有种子里那一个
+    expect((memory.match(/## Promoted/g) || []).length).toBe(1);
+    expect((memory.match(/重复条目X/g) || []).length).toBe(1);
   });
 });

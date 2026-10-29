@@ -348,7 +348,32 @@ export async function remDreaming(
         );
         if (prior) {
           prior.count++; prior.last = now;
-          deps.shortTerm.addImportant(`[重要] 主题积累（第${prior.count}次）：${name} — ${conclusion}`, `rem:theme:${name}`);
+          const text = `[重要] 主题积累（第${prior.count}次）：${name} — ${conclusion}`;
+          const origin = `rem:theme:${name}`;
+          // 同一主题只允许一行参与晋升（2026-10-29 修）：旧实现每次再现都
+          // addImportant 插新行 → 预热即达标 → 天天重复晋升同一条结论，且 [重要]
+          // pinned 永不迁出 → MEMORY.md 被同一事实灌满。现在：
+          //   已晋升（L1 已有结论）→ 不再积累；未晋升旧行 → 原地更新计数+预热
+          const existing = deps.db
+            .prepare(
+              `SELECT id, promoted_at FROM short_term_memory
+               WHERE origin = ? ORDER BY created_at DESC LIMIT 1`,
+            )
+            .get(origin) as any;
+          if (existing?.promoted_at) {
+            // 主题结论已沉淀进 MEMORY.md，后续再现只刷新历史计数，不再入库
+          } else if (existing) {
+            const today2 = new Date().toISOString().slice(0, 10);
+            deps.db
+              .prepare(
+                `UPDATE short_term_memory SET text = ?, recall_count = 3,
+                   unique_queries = 2, recall_days = ?, last_recalled_at = ?
+                 WHERE id = ?`,
+              )
+              .run(text, JSON.stringify([today2]), now, existing.id);
+          } else {
+            deps.shortTerm.addImportant(text, origin);
+          }
         } else {
           history.push({ name, first: now, last: now, count: 1 });
           deps.shortTerm.add(`主题：${name} — ${conclusion}`, `rem:theme:${name}`);
@@ -582,24 +607,37 @@ export async function deepDreaming(
   // [重要] = pinned：不经 LLM 整合（会丢细节/丢前缀），原文直写；预算挤压也最后动它们
   const pinnedEntries = entries.filter((e) => e.text.startsWith("[重要]"));
   const normalEntries = entries.filter((e) => !e.text.startsWith("[重要]"));
-  const parts: string[] = [];
-  if (normalEntries.length) {
-    const prompt = `将以下记忆整合为简洁的长期记忆段落：\n\n${normalEntries.map((e) => `- ${deps.maskSecret(e.text)}`).join("\n")}`;
-    parts.push(deps.maskSecret(await deps.llmGenerate(prompt)));
-  }
-  if (pinnedEntries.length)
-    parts.push(pinnedEntries.map((e) => `- ${deps.maskSecret(e.text)}`).join("\n"));
-  const section = parts.filter(Boolean).join("\n\n");
 
   const current = await deps.readMemory();
   const today = new Date().toISOString().slice(0, 10);
   // 占位行不清除会让 buildSystemPrompt 的 "No memories yet" 判断误杀整份记忆 → 永远不注入
   const cleaned = current.replace(/_No memories yet\._\n?/g, "").trimEnd();
-  const { content: final, migrated } = await applyBudget(
-    deps,
-    cleaned + `\n\n## Promoted (${today})\n\n${section}`,
-    now,
+  // 双重闸：pinned 条目若已逐字在 L1（历史重复晋升/手改回归），只标记不再写入
+  const freshPinned = pinnedEntries.filter(
+    (e) => !cleaned.includes(deps.maskSecret(e.text)),
   );
+  const dupSkipped = pinnedEntries.length - freshPinned.length;
+  const parts: string[] = [];
+  if (normalEntries.length) {
+    const prompt = `将以下记忆整合为简洁的长期记忆段落：\n\n${normalEntries.map((e) => `- ${deps.maskSecret(e.text)}`).join("\n")}`;
+    parts.push(deps.maskSecret(await deps.llmGenerate(prompt)));
+  }
+  if (freshPinned.length)
+    parts.push(freshPinned.map((e) => `- ${deps.maskSecret(e.text)}`).join("\n"));
+  const section = parts.filter(Boolean).join("\n\n");
+
+  let final = cleaned;
+  let migrated = 0;
+  if (section.trim()) {
+    ({ content: final, migrated } = await applyBudget(
+      deps,
+      cleaned + `\n\n## Promoted (${today})\n\n${section}`,
+      now,
+    ));
+  } else {
+    // 全部重复跳过：不新增空段，但仍老化维护预算
+    ({ content: final, migrated } = await applyBudget(deps, cleaned, now));
+  }
 
   await deps.writeMemory(final);
 
@@ -615,7 +653,7 @@ export async function deepDreaming(
     )
     .run(
       now,
-      JSON.stringify({ promoted: entries.length, forgotten, migrated }),
+      JSON.stringify({ promoted: entries.length, forgotten, migrated, dupSkipped }),
       now,
     );
 
