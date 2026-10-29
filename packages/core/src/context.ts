@@ -17,9 +17,26 @@ import type { Message } from "@easy-agent/schema/llm";
  * 125% 写一次、旧前缀 10% 读），前缀失效从每轮一次降到每 keepLast 轮一次。
  * 多出来的全文旧结果都在已缓存前缀里，读价 10%，比缓存作废便宜得多。
  */
+/** 轮首水位快照：当前消息集下 pruneToolResults 会修剪的条数（供调用方冻结传入） */
+export function pruneWatermark(messages: Message[], keepLast = 6): number {
+  const batch = Math.max(
+    1,
+    Number(process.env.EASY_AGENT_PRUNE_BATCH ?? 2) || 2,
+  );
+  const toolCount = messages.filter((m) => m.role === "tool").length;
+  if (keepLast <= 0) return toolCount;
+  return Math.max(
+    0,
+    Math.min(
+      toolCount - keepLast,
+      keepLast * Math.floor(Math.max(0, toolCount - keepLast) / (keepLast * batch)),
+    ),
+  );
+}
+
 export function pruneToolResults(
   messages: Message[],
-  opts?: { keepLast?: number; maxChars?: number },
+  opts?: { keepLast?: number; maxChars?: number; pruneCount?: number },
 ): Message[] {
   // 批量因子（额外窗口倍数）：完整尾巴允许在 keepLast ~ keepLast*batch 间浮动，
   // env 可调（测试/调优用）；1 ≈ 逐轮滑动（每轮多 1 条完整就修剪）
@@ -35,14 +52,16 @@ export function pruneToolResults(
   // 量化水位线：修剪条数只能是 keepLast 的整数倍，随工具结果总数单调不降——
   // 两次跳变之间的追加不改变任何旧消息（前缀冻结，缓存持续命中）；
   // keepLast=0 特殊：每轮全修剪（调用方显式要求，不管稳定性）
+  // opts.pruneCount：调用方冻结的水位（轮首快照，工具循环内不随新结果摆动）
   const pruneCount =
-    keepLast <= 0
+    opts?.pruneCount ??
+    (keepLast <= 0
       ? toolIdx.length
       : Math.min(
           toolIdx.length - keepLast,
           keepLast * Math.floor(Math.max(0, toolIdx.length - keepLast) / (keepLast * batch)),
-        );
-  const prunable = new Set(toolIdx.slice(0, Math.max(0, pruneCount)));
+        ));
+  const prunable = new Set(toolIdx.slice(0, Math.max(0, Math.min(pruneCount, toolIdx.length))));
   return messages.map((m, i) => {
     if (m.role === "tool" && prunable.has(i)) {
       const head = m.content.slice(0, 80).replace(/\s+/g, " ");

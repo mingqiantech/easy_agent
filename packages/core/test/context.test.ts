@@ -1,5 +1,5 @@
 import { describe, it, expect } from "bun:test";
-import { pruneToolResults } from "../src/context.js";
+import { pruneToolResults, pruneWatermark } from "../src/context.js";
 import type { Message } from "@easy-agent/schema/llm";
 
 const msg = (role: Message["role"], content: string): Message => ({
@@ -74,6 +74,28 @@ describe("pruneToolResults（上下文工程）", () => {
     const at10 = pruneToolResults(mk(10), { keepLast: 2 });
     expect(at10[3].content.startsWith("[旧工具结果已修剪")).toBe(true);
     expect(at10[0].content).toBe(at6[0].content); // 更早的 stub 不回退
+  });
+
+  it("pruneWatermark + 冻结 pruneCount：轮内新工具结果只追加，旧消息零改写", () => {
+    const turn1 = [
+      msg("tool", "A".repeat(200)), msg("tool", "B".repeat(200)),
+      msg("tool", "C".repeat(200)), msg("tool", "D".repeat(200)),
+      msg("tool", "E".repeat(200)), msg("tool", "F".repeat(200)),
+    ];
+    const base = pruneWatermark(turn1, 2); // 6 条、keepLast=2、周期 4 → 修 2 条
+    expect(base).toBe(2);
+    const step1 = pruneToolResults(turn1, { keepLast: 2, pruneCount: base });
+    // 工具循环内新增 3 条结果（即使总数越过下个跳变点），水位仍冻结在 base
+    const grow = [...turn1, msg("assistant", "x"), msg("tool", "G".repeat(200)), msg("tool", "H".repeat(200)), msg("tool", "I".repeat(200))];
+    const step2 = pruneToolResults(grow, { keepLast: 2, pruneCount: base });
+    for (let i = 0; i < 6; i++) expect(step2[i].content).toBe(step1[i].content);
+    expect(step2[6].content).toBe("x");
+    expect(step2[7].content).toBe("G".repeat(200)); // 新结果全文保留，纯追加
+    expect(step2[9].content).toBe("I".repeat(200));
+    // 下一轮开头：9 条未达下个跳变点（水位升需 toolCount-keepLast ≥ 周期 4×2=8），仍是 2；
+    // 满 10 条才升到 4
+    expect(pruneWatermark(grow, 2)).toBe(2);
+    expect(pruneWatermark([...grow, msg("tool", "J".repeat(200))], 2)).toBe(4);
   });
 
   it("EASY_AGENT_PRUNE_BATCH=1 退回逐轮滑动行为", () => {

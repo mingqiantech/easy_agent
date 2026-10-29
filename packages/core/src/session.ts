@@ -10,7 +10,7 @@ import type {
   ToolDefinition,
 } from "@easy-agent/schema/llm";
 import type { ToolRegistry } from "./tool/registry.js";
-import { pruneToolResults } from "./context.js";
+import { pruneToolResults, pruneWatermark } from "./context.js";
 
 /** 行→Message 的 metadata 反序列化：空/坏 JSON 当无 metadata，不阻断历史加载 */
 function parseMetadata(raw: unknown): Record<string, any> | null {
@@ -501,6 +501,9 @@ export class SessionManager {
           }
         }
 
+        // 轮首水位快照：本轮（含整个工具循环）发给模型的修剪深度固定，
+        // 新工具结果只追加——已缓存前缀在轮内不再被中部改写（2026-10-29 命中率优化）
+        const turnPruneBase = pruneWatermark(this.getMessages(sessionId));
         const toolDefs = options?.toolRegistry?.getDefinitions();
         let turnAborted = false;
         let savedAssistant = false;
@@ -528,7 +531,11 @@ export class SessionManager {
           }
 
           await this.compactIfNeeded(sessionId);
-          const messages = pruneToolResults(this.getMessages(sessionId));
+          // 轮内冻结水位（见上方 turnPruneBase）：工具循环内新结果只追加不动旧，
+          // 避免每个 step 滑窗导致已缓存前缀中部改写（命中率大头）
+          const messages = pruneToolResults(this.getMessages(sessionId), {
+            pruneCount: turnPruneBase,
+          });
           // extraSystem 插入位置：头部连续 system 块之后（基础 prompt 前缀不变，
           // 开关/提示切换只失效到 hint 层，不连坐底层 system 缓存）
           const reqMessages = options?.extraSystem
@@ -708,7 +715,7 @@ export class SessionManager {
         if (!turnAborted && !ctrl.signal.aborted && cappedOnTools) {
           try {
             await this.compactIfNeeded(sessionId);
-            const wrapMessages = pruneToolResults(this.getMessages(sessionId));
+            const wrapMessages = pruneToolResults(this.getMessages(sessionId), { pruneCount: turnPruneBase });
             const wrapReq: LLMRequest = {
               model: session.model,
               messages: [
