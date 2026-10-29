@@ -46,6 +46,18 @@
     .agent-sw{border:1px solid var(--border);background:var(--card);border-radius:9px;font-size:13px;padding:5px 8px;cursor:pointer;line-height:1}
     .agent-sw:hover{background:var(--hover)}
     .agent-sw.off{opacity:.45;filter:grayscale(.8)}
+    /* 上下文占用小部件（顶栏） */
+    .ctx-chip{position:relative}
+    .ctx-chip summary{list-style:none;cursor:pointer;border:1px solid var(--border);background:var(--card);border-radius:9px;font-size:12px;padding:5px 9px;line-height:1;color:var(--muted);white-space:nowrap}
+    .ctx-chip summary::-webkit-details-marker{display:none}
+    .ctx-chip[open] summary{background:var(--accent-soft);color:var(--accent)}
+    .ctx-pop{position:absolute;right:0;top:calc(100% + 6px);width:270px;background:var(--card);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow);padding:12px;font-size:12px;z-index:30;text-align:left;color:var(--muted)}
+    .ctx-bar{height:6px;border-radius:3px;background:var(--hover);margin:6px 0 4px;overflow:hidden}
+    .ctx-bar span{display:block;height:100%;background:var(--accent);border-radius:3px}
+    .ctx-row{display:flex;justify-content:space-between;gap:10px;padding:2px 0}
+    .ctx-row b{color:var(--fg);font-weight:600}
+    .ctx-title{font-weight:700;color:var(--fg);margin:8px 0 2px}
+    .ctx-sep{border-top:1px solid var(--border);margin:8px 0}
     .model-pick select{width:auto;min-width:76px}
     .action-btn{padding:7px 14px;border:1px solid var(--border);border-radius:10px;background:var(--card);cursor:pointer;font-size:13px;color:var(--fg)}
     .action-btn:hover{border-color:var(--accent);color:var(--accent)}
@@ -250,6 +262,10 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
         </select>
         <label>模型</label>
         <select id="modelSel" onchange="switchModel(this.value)"></select>
+        <details class="ctx-chip" id="ctxChip" hidden>
+          <summary id="ctxSum" title="会话上下文占用">–</summary>
+          <div class="ctx-pop" id="ctxPop"></div>
+        </details>
         <button id="traeSw" class="agent-sw" onclick="toggleTrae()" title="当前 Agent 是否可用外部编码工具 trae_agent/acp_agent">🤖</button>
         <button class="action-btn" onclick="summarize()" id="summBtn">📝 总结本会话</button>
       </div>
@@ -473,6 +489,7 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
     async function switchModel(ref){
       if(!sid){alert('请先选择会话');return;}
       await fetch(`${API}/api/sessions/${sid}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:ref})});
+      loadCtxChip();
     }
 
     /* ── 消息 ── */
@@ -761,6 +778,37 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
       });
     }
 
+    /* ── 上下文占用小部件：顶栏胶囊 + 点击弹层（窗口/最新一轮/会话累计）── */
+    async function loadCtxChip(){
+      const el=document.getElementById('ctxChip');
+      if(!el)return;
+      if(!sid){el.hidden=true;return;}
+      try{
+        const r=await fetch(`${API}/api/sessions/${sid}/context`);
+        const j=await r.json();
+        if(!r.ok||j.error||!j.usedTokens){el.hidden=true;return;}
+        el.hidden=false;
+        const cur=j.lastRun||{}, tot=j.sessionTotal||{};
+        const pct=j.contextWindow?Math.min(100,Math.round(j.usedTokens/j.contextWindow*100)):null;
+        document.getElementById('ctxSum').textContent=(pct!=null?pct+'%':fmtK(j.usedTokens))+' 上下文';
+        const hitPct=cur.prompt>0&&cur.cacheRead!=null?Math.round(cur.cacheRead/cur.prompt*100):null;
+        const usd=v=>v!=null?'$'+v.toFixed(4):'–';
+        let h=`<div class="ctx-title">上下文窗口</div>`;
+        h+=`<div class="ctx-row"><span>占用</span><b>${fmtK(j.usedTokens)}${j.contextWindow?' / '+fmtK(j.contextWindow):''}${pct!=null?'（'+pct+'%）':''}</b></div>`;
+        if(pct!=null)h+=`<div class="ctx-bar"><span style="width:${Math.max(pct,1)}%"></span></div>`;
+        h+=`<div class="ctx-title ctx-sep">最新运行（${cur.calls||0} 次调用）</div>`;
+        h+=`<div class="ctx-row"><span>输入（含缓存）</span><b>${fmtK(cur.prompt)}</b></div>`;
+        h+=`<div class="ctx-row"><span>输出</span><b>${fmtK(cur.completion)}</b></div>`;
+        h+=`<div class="ctx-row"><span>缓存读${hitPct!=null&&cur.cacheRead>0?' · 命中 '+hitPct+'%':''}</span><b>${fmtK(cur.cacheRead)}</b></div>`;
+        h+=`<div class="ctx-row"><span>缓存写</span><b>${fmtK(cur.cacheWrite)}</b></div>`;
+        h+=`<div class="ctx-row"><span>预估成本</span><b>${usd(cur.cost)}</b></div>`;
+        h+=`<div class="ctx-title ctx-sep">本会话累计</div>`;
+        h+=`<div class="ctx-row"><span>${tot.calls||0} 次 · tokens</span><b>${fmtK((tot.prompt||0)+(tot.completion||0))}</b></div>`;
+        h+=`<div class="ctx-row"><span>成本</span><b>${usd(tot.cost)}</b></div>`;
+        h+=`<div class="ctx-row" style="margin-top:6px"><span>模型</span><b>${esc((j.model||'').split('/').pop())}</b></div>`;
+        document.getElementById('ctxPop').innerHTML=h;
+      }catch(e){el.hidden=true;}
+    }
     async function loadMessages(){
       if(!sid)return;
       const r=await fetch(`${API}/api/sessions/${sid}/messages`);
@@ -773,6 +821,7 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
       applyCollapse();
       c.scrollTop=c.scrollHeight;
       flashMatch();
+      loadCtxChip();
     }
 
     /* ── 全文搜索（侧栏内）：输入即搜历史消息，结果替换会话列表；点结果跳回原文闪烁定位 ── */

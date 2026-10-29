@@ -688,6 +688,58 @@ export function createApp(deps: ServerDeps): Hono {
   });
 
   // ── Token 用量 ──
+  // 会话上下文占用：最新 prompt=当前上下文长度；末条用户消息后的 usage=最新一轮；
+  // contextWindow 来自 provider 模型目录（查不到则只报 token 数）
+  app.get("/api/sessions/:id/context", async (c) => {
+    const id = c.req.param("id");
+    const session = deps.sessions.get(id);
+    if (!session) return c.json({ error: "not found" }, 404);
+    const db2 = getDatabase();
+    const model = session.model ?? deps.config.defaultModel;
+    const info = await deps.llm.modelInfo(model);
+    const last = db2
+      .prepare(
+        `SELECT prompt_tokens p, completion_tokens o, cached_read_tokens cr, cached_write_tokens cw,
+                cost_usd cost, created_at FROM token_usage
+         WHERE session_id=? ORDER BY created_at DESC LIMIT 1`,
+      )
+      .get(id) as any;
+    const lastUser = db2
+      .prepare(
+        `SELECT created_at FROM messages WHERE session_id=? AND role='user'
+         ORDER BY created_at DESC LIMIT 1`,
+      )
+      .get(id) as any;
+    const run = db2
+      .prepare(
+        `SELECT COUNT(*) calls, COALESCE(SUM(prompt_tokens),0) prompt,
+                COALESCE(SUM(completion_tokens),0) completion,
+                COALESCE(SUM(cached_read_tokens),0) cacheRead,
+                COALESCE(SUM(cached_write_tokens),0) cacheWrite, SUM(cost_usd) cost
+         FROM token_usage WHERE session_id=? AND created_at>=?`,
+      )
+      .get(id, lastUser?.created_at ?? 0) as any;
+    const total = db2
+      .prepare(
+        `SELECT COUNT(*) calls, COALESCE(SUM(prompt_tokens),0) prompt,
+                COALESCE(SUM(completion_tokens),0) completion, SUM(cost_usd) cost
+         FROM token_usage WHERE session_id=?`,
+      )
+      .get(id) as any;
+    const round = (v: any) => (v != null ? Math.round(v * 1e6) / 1e6 : null);
+    run.cost = round(run.cost);
+    total.cost = round(total.cost);
+    return c.json({
+      model,
+      contextWindow: info?.contextWindow ?? null,
+      // 当前上下文占用：最近一次调用的全量输入（含缓存读/写段）
+      usedTokens: last?.p ?? null,
+      lastRunAt: last?.created_at ?? null,
+      lastRun: run,
+      sessionTotal: total,
+    });
+  });
+
   app.get("/api/usage", (c) => {
     const db2 = getDatabase();
     const days = Math.min(Math.max(Number(c.req.query("days") ?? 30), 1), 365);

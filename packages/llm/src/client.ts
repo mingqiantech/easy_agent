@@ -20,6 +20,26 @@ export class LLMClient {
     this.config = config;
   }
 
+  /** 模型信息（上下文窗口等）：走 provider 静态目录，结果缓存；查不到返回 null */
+  private modelInfoCache = new Map<string, { contextWindow: number; maxOutputTokens?: number } | null>();
+  async modelInfo(model: string): Promise<{ contextWindow: number; maxOutputTokens?: number } | null> {
+    if (this.modelInfoCache.has(model)) return this.modelInfoCache.get(model)!;
+    try {
+      const { provider, model: id } = parseModelString(model);
+      const cfg = this.config.providers[provider];
+      if (!cfg) return null;
+      const list = await getProvider(provider, cfg).listModels();
+      const hit = list.find((m) => m.id === id);
+      const out = hit
+        ? { contextWindow: hit.contextWindow, maxOutputTokens: hit.maxOutputTokens }
+        : null;
+      this.modelInfoCache.set(model, out);
+      return out;
+    } catch {
+      return null;
+    }
+  }
+
   /** 请求模型 + 配置的 fallback 链 */
   private chainFor(model: string): string[] {
     const fb = this.config.fallbacks?.[model];
