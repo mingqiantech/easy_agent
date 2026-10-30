@@ -269,6 +269,20 @@ export function createApp(deps: ServerDeps): Hono {
       // 实际运行模型：以最近活跃会话的 model 为准（会话可单独切换，配置默认会过时）
       const effectiveModel = tasks.find((t: any) => t.model)?.model ?? a.model;
       const runningNow = (tasks ?? []).filter((t: any) => turnMap.has(t.id));
+      // 工作主题：本轮最后一条用户消息文本（长文本卸载引用取预览）；脱敏后截断
+      const subjectOf = (sessionId: string): string => {
+        const m = db
+          .prepare(
+            `SELECT content FROM messages WHERE session_id = ? AND role = 'user'
+             ORDER BY rowid DESC LIMIT 1`,
+          )
+          .get(sessionId) as any;
+        let t = String(m?.content ?? "").trim();
+        const lt = /\[长文本已存文件：[^\]]*\]--- 前 400 字预览 ---/.exec(t);
+        if (lt) t = t.slice(lt.index + lt[0].length);
+        t = t.replace(/\s+/g, " ");
+        return maskSecrets(t).slice(0, 48);
+      };
       return {
         name: a.name,
         model: effectiveModel,
@@ -283,6 +297,7 @@ export function createApp(deps: ServerDeps): Hono {
           return {
             sessionId: t.id,
             title: t.title ?? "untitled",
+            subject: subjectOf(t.id),
             step: tr.steps_done,
             tool: tr.current_tool ?? null,
             sinceSec: Math.max(0, Math.round((nowTs - tr.started_at) / 1000)),
