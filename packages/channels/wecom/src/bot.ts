@@ -195,10 +195,15 @@ export class WeComAdapter implements ChannelAdapter {
     if (frame) {
       // 会话内流式回复：一次成型的最终帧
       const streamId = generateReqId("stream");
-      await this.client.replyStream(frame, streamId, text, true);
-      return;
+      try {
+        await this.client.replyStream(frame, streamId, text, true);
+        return;
+      } catch (e: any) {
+        // 回复窗口可能已过期（桥接侧长耗时），降级为主动推送
+        console.warn("wecom replyStream 失败，降级 sendMessage:", String(e?.message).slice(0, 120));
+      }
     }
-    // 无上下文帧（主动推送场景）：markdown 直发
+    // 无上下文帧/降级（主动推送场景）：markdown 直发
     await this.client.sendMessage(chatId, {
       msgtype: "markdown",
       markdown: { content: text },

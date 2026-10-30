@@ -133,6 +133,8 @@ export const ConfigSchema = z.object({
       secret: z.string().default(""),
       /** 白名单 userid；空 = 放行全部 */
       allowedUserIds: z.array(z.string()).default([]),
+      /** 默认接入的网关 agent（会话内可用「切换 <name>」改） */
+      agentId: z.string().default("default"),
     })
     .optional(),
   /** 多 Agent 定义："名字" -> { model?, workspaceDir?, description?, thinking?, tools? } */
