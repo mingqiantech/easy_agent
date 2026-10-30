@@ -1032,10 +1032,20 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
     function renderTopoCards(t){
       document.getElementById('topoCards').innerHTML=(t.nodes??[]).map(n=>`
         <div class="agent-card">
-          <h4><span class="dot ${n.busy?'busy':''}"></span>${esc(n.name)}</h4>
+          <h4><span class="dot ${n.busy?'busy':''}"></span><a href="javascript:void(0)" onclick="openAgentHome('${esc(n.name)}')" style="color:inherit;text-decoration:none" title="进入该 Agent">${esc(n.name)}</a></h4>
           <div class="sub" title="运行模型：${esc(n.model||'?')}${n.configModel&&n.model!==n.configModel?'（配置默认 '+esc(n.configModel)+'，会话已切换）':''}">${esc(n.description)} · ${esc((n.model||'').split('/').pop())}${n.configModel&&n.model!==n.configModel?' ⇄':''}${n.thinking&&n.thinking!=='off'?' · 💭'+esc(n.thinking):''} · 派生子任务 ${n.subAgentCalls}</div>
-          ${n.currentTasks.map(tk=>`<div class="task"><b>${esc(tk.title)}</b> · ${tk.msgCount} 条 · ${tk.ageSec<60?tk.ageSec+'秒前':Math.round(tk.ageSec/60)+'分钟前'}</div>`).join('')||'<div class="task" style="color:var(--muted)">暂无活动会话</div>'}
+          ${n.currentTasks.map(tk=>`<div class="task" style="cursor:pointer" onclick="openTaskSession('${esc(n.name)}','${esc(tk.id)}')" title="点击进入该会话"><b>${esc(tk.title)}</b> · ${tk.msgCount} 条 · ${tk.ageSec<60?tk.ageSec+'秒前':Math.round(tk.ageSec/60)+'分钟前'}</div>`).join('')||'<div class="task" style="color:var(--muted)">暂无活动会话</div>'}
         </div>`).join('');
+    }
+    // 拓扑页点任务/agent 名直接跳回聊天页对应会话（此前卡片是纯展示，点了没反应）
+    async function openTaskSession(agentName, sessionId){
+      if(agentName!==agent){agent=agentName;document.getElementById('agentSel').value=agentName;updateThinkSel();}
+      sid=sessionId;openEvents(sessionId);showView('chat');
+      await loadSessions();await loadMessages();
+    }
+    async function openAgentHome(agentName){
+      if(agentName!==agent){agent=agentName;document.getElementById('agentSel').value=agentName;updateThinkSel();}
+      sid=null;closeEvents();showView('chat');await loadSessions();
     }
     function pickAgentByName(name){
       document.getElementById('agentSel').value=name;switchAgent();showView('chat');
