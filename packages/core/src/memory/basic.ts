@@ -131,6 +131,28 @@ triggers: [示例]
     }
   }
 
+  /**
+   * 近 N 天日报里的教训段落（含「教训/复盘/真因/坑/红线」的 2~4 级标题及其正文）。
+   * days 默认 7（env EASY_AGENT_LESSON_DAYS 覆盖，0=禁用）；从昨天往前数，今天全文另注入。
+   * 总量上限 4000 字，按天均摊防单篇日报吃掉全部预算。
+   */
+  async recentLessons(todayIso: string, days?: number): Promise<string> {
+    const window =
+      days ?? (Number(process.env.EASY_AGENT_LESSON_DAYS ?? 7) || 0);
+    if (window <= 0) return "";
+    const perDayCap = Math.floor(4000 / window);
+    const out: string[] = [];
+    const base = Date.parse(`${todayIso}T00:00:00Z`);
+    for (let i = 1; i <= window; i++) {
+      const day = new Date(base - i * 86400000).toISOString().slice(0, 10);
+      const md = await this.readIfExists(`memory/${day}.md`);
+      if (!md?.trim()) continue;
+      const lessons = extractLessonSections(md);
+      if (lessons) out.push(`### [${day}]\n${lessons.slice(0, perDayCap)}`);
+    }
+    return out.join("\n\n");
+  }
+
   async buildSystemPrompt(): Promise<string> {
     let prompt = `You are a helpful AI assistant with tools. Be direct and concise.
 Current date: ${new Date().toISOString().slice(0, 10)}
@@ -152,6 +174,13 @@ Respond in the user's language.`;
     const today = new Date().toISOString().slice(0, 10);
     const diary = await this.readIfExists(`memory/${today}.md`);
     if (diary?.trim()) sections.push(["diary_today", `Today's Diary (${today})`, diary]);
+
+    // 教训区：扫描近 N 天（默认 7）日报里带「教训/复盘/真因/坑/红线」标题的段落。
+    // 背景（2026-10-30 误诊复盘）：之前只注入当日 diary，写进昨天日报的教训隔天就出不了
+    // 上下文，同类故障隔天必重踩。今天那份已全文注入，这里从昨天往前数。
+    const lessons = await this.recentLessons(today);
+    if (lessons)
+      sections.push(["recent_lessons", "Recent Lessons（近几天复盘沉淀，同类问题先对照此清单）", lessons]);
 
     // TOOLS.md 是自动生成的清单，模型也能用 tool 列表看到；只取前 2000 字符防重叠膨胀
     const toolsMd = await this.readIfExists("TOOLS.md");
@@ -184,4 +213,40 @@ Respond in the user's language.`;
 
     return prompt;
   }
+}
+
+const LESSON_TITLE_RE = /教训|复盘|真因|坑|红线/;
+
+/**
+ * 提取 markdown 里 2~4 级、标题含教训信号词（教训/复盘/真因/坑/红线）的小节，
+ * 小节范围 = 标题行到下一个同级或更浅级标题（fence 内的 # 不算标题）。
+ * 无命中返回空串。
+ */
+export function extractLessonSections(md: string): string {
+  const lines = md.split(/\r?\n/);
+  const out: string[] = [];
+  let inFence = false;
+  let i = 0;
+  while (i < lines.length) {
+    const fence = /^\s*(```|~~~)/.test(lines[i]);
+    if (fence) inFence = !inFence;
+    const m = inFence ? null : /^(#{2,4})\s+(.*)$/.exec(lines[i]);
+    if (m && LESSON_TITLE_RE.test(m[2])) {
+      const level = m[1].length;
+      const body = [lines[i]];
+      let j = i + 1;
+      let fence2 = false;
+      for (; j < lines.length; j++) {
+        if (/^\s*(```|~~~)/.test(lines[j])) fence2 = !fence2;
+        const h = fence2 ? null : /^(#{1,4})\s+/.exec(lines[j]);
+        if (h && h[1].length <= level) break;
+        body.push(lines[j]);
+      }
+      out.push(body.join("\n").trim());
+      i = j;
+      continue;
+    }
+    i++;
+  }
+  return out.join("\n\n");
 }
