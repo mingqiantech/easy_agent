@@ -293,6 +293,10 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
 
     <div class="view" id="knowView" hidden>
       <div class="know-bar">
+        <select id="knowAgent" onchange="this.dataset.touched='1';loadKnowledge()" title="知识作用域（工作区已按 agent 隔离）">
+          <option value="">本 agent</option>
+          <option value="all">🌐 全部 agent</option>
+        </select>
         <input id="knowQ" type="text" placeholder="🔍 语义检索：输入问题/关键词，回车看命中知识网络（留空=全图）" onkeydown="if(event.key==='Enter')loadKnowledge()">
         <select id="knowSim" onchange="loadKnowledge()" title="相似度边阈值">
           <option value="0.3">宽泛连接</option><option value="0.35" selected>标准连接</option><option value="0.5">紧密连接</option>
@@ -427,6 +431,8 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
       document.getElementById('messages').innerHTML='<div class="empty">选择或创建一个会话</div>';
       updateThinkSel();syncHash();
       loadSessions();
+      // 知识作用域跟随顶栏 agent：正在看知识图时切 agent 即时重绘
+      if(curView==='know')loadKnowledge();
     }
 
     /* ── Sessions（持久对话：自动选中最近会话，不强制每次问答新建） ── */
@@ -1065,9 +1071,13 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
       if(!svg)return;
       const q=(document.getElementById('knowQ').value||'').trim();
       const sim=document.getElementById('knowSim').value||'0.35';
+      // 作用域：下拉显式选择（空=跟随顶栏当前 agent；工作区隔离后知识按 agent 分家）
+      const sel=document.getElementById('knowAgent');
+      if(!sel.dataset.touched)sel.value='';
+      const scope=sel.value===''?agent:sel.value;
       svg.innerHTML='<text x="16" y="30" font-size="12" fill="#8b93a3">加载中…</text>';
       let g;
-      try{g=await (await fetch(`${API}/api/knowledge/graph?q=${encodeURIComponent(q)}&minSim=${sim}`)).json();}catch(e){svg.innerHTML='<text x="16" y="30" font-size="12" fill="#c26d64">加载失败</text>';return;}
+      try{g=await (await fetch(`${API}/api/knowledge/graph?q=${encodeURIComponent(q)}&minSim=${sim}&agent=${encodeURIComponent(scope)}`)).json();}catch(e){svg.innerHTML='<text x="16" y="30" font-size="12" fill="#c26d64">加载失败</text>';return;}
       if(g.error){svg.innerHTML=`<text x="16" y="30" font-size="12" fill="#c26d64">${esc(g.error)}</text>`;return;}
       window.__know=g;
       drawKnowGraph(g);

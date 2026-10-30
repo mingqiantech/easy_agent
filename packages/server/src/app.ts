@@ -852,6 +852,8 @@ export function createApp(deps: ServerDeps): Hono {
     const db2 = getDatabase();
     const q = String(c.req.query("q") ?? "").trim();
     const minSim = Math.min(Math.max(Number(c.req.query("minSim") ?? 0.35), 0), 0.99);
+    // 隔离后的作用域（2026-10-30）：agent=<name> 只看该 agent 的知识/会话；缺省/all=全局
+    const agentScope = String(c.req.query("agent") ?? "").trim();
     const MAX_ENTRIES = 150;
 
     const cos=(a:Float32Array,b:Float32Array)=>{
@@ -861,11 +863,13 @@ export function createApp(deps: ServerDeps): Hono {
       return na&&nb?dot/Math.sqrt(na*nb):0;
     };
 
-    // 1) 知识点节点（memory_entries 最新 N 条 + 向量）
-    const entries = db2.prepare(
-      `SELECT id, source, file_path, excerpt, updated_at FROM memory_entries
-       ORDER BY updated_at DESC LIMIT ?`,
-    ).all(MAX_ENTRIES) as any[];
+    // 1) 知识点节点（memory_entries 最新 N 条 + 向量）；作用域内先滤（多取候选再裁）
+    const entries = db2
+      .prepare(
+        `SELECT id, source, file_path, excerpt, updated_at FROM memory_entries
+         ORDER BY updated_at DESC LIMIT ?`,
+      )
+      .all(agentScope && agentScope !== "all" ? MAX_ENTRIES * 4 : MAX_ENTRIES) as any[];
     const vecMap = new Map<number, Float32Array>();
     try {
       for (const r of db2.prepare("SELECT id, embedding FROM memory_vec").all() as any[]) {
@@ -896,7 +900,17 @@ export function createApp(deps: ServerDeps): Hono {
 
     const nodes: any[] = [];
     const edges: any[] = [];
-    for (const a of agentList) {
+    const ownerOfEntry = (fp: string): string | null => {
+      const corpus = String(fp).match(/session-corpus\/([0-9a-f]{12})\.md$/);
+      return corpus ? corpusOwner.get(corpus[1])?.agent ?? ownerOf(String(fp)) : ownerOf(String(fp));
+    };
+    const scoped =
+      !agentScope || agentScope === "all"
+        ? entries
+        : entries.filter((e: any) => ownerOfEntry(e.file_path) === agentScope).slice(0, MAX_ENTRIES);
+    const shownAgents =
+      !agentScope || agentScope === "all" ? agentList : agentList.filter((a: any) => a.name === agentScope);
+    for (const a of shownAgents) {
       nodes.push({ id: `a:${a.name}`, type: "agent", label: a.name, sub: (a.model || "").split("/").pop() });
     }
     const entryLabel = (e: any, _i: number) => {
@@ -909,13 +923,13 @@ export function createApp(deps: ServerDeps): Hono {
       const base = String(e.file_path).split("/").pop() ?? "?";
       return `${base.replace(/\.md$/, "")}#${e.id}`;
     };
-    let kept = entries;
+    let kept = scoped;
 
     if (q && deps.embedding) {
       // 检索模式：query 为中心，只展 top 命中 + 命中间相似边
       try {
         const qv = await deps.embedding.embed(q);
-        const scored = entries
+        const scored = scoped
           .map((e) => ({ e, s: vecMap.has(e.id) ? cos(qv, vecMap.get(e.id)!) : 0 }))
           .filter((x) => x.s >= 0.15)
           .sort((x, y) => y.s - x.s)
@@ -933,7 +947,7 @@ export function createApp(deps: ServerDeps): Hono {
     const involvedAgents = new Set<string>();
     for (const e of kept) {
       const corpus = String(e.file_path).match(/session-corpus\/([0-9a-f]{12})\.md$/);
-      const owner = corpus ? corpusOwner.get(corpus[1])?.agent ?? ownerOf(String(e.file_path)) : ownerOf(String(e.file_path));
+      const owner = ownerOfEntry(String(e.file_path));
       if (owner) involvedAgents.add(owner);
       nodes.push({
         id: `m${e.id}`, type: "memory", label: entryLabel(e, 0),
@@ -975,7 +989,7 @@ export function createApp(deps: ServerDeps): Hono {
     }
 
     // 4) 会话节点（全图/检索模式都显示，挂在各自 agent 下）
-    for (const a of agentList) {
+    for (const a of shownAgents) {
       const sess = db2.prepare(
         `SELECT id, title, model, updated_at FROM sessions
          WHERE agent_id = ? AND status = 'active' ORDER BY updated_at DESC LIMIT 3`,
@@ -988,7 +1002,8 @@ export function createApp(deps: ServerDeps): Hono {
 
     return c.json({
       query: q || null,
-      agents: agentList.map((a) => a.name),
+      scope: agentScope || "all",
+      agents: shownAgents.map((a) => a.name),
       entryTotal: db2.prepare("SELECT COUNT(*) n FROM memory_entries").get(),
       nodes, edges,
     });
