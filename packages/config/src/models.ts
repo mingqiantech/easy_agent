@@ -77,6 +77,8 @@ export interface ResolvedAgent {
   toolsDisable: string[];
   /** 每轮动态注入 system 区的附加提示词 */
   toolHint?: string;
+  /** 关联 agent：memory_search 主检索后用索引词二次检索其工作区 */
+  relatedAgents: string[];
 }
 
 /**
@@ -117,6 +119,7 @@ export function resolveAgents(config: Config): ResolvedAgent[] {
       thinking: effectiveThinking(config, defaultModel, dflt?.thinking),
       toolsDisable: dflt?.tools?.disable ?? [],
       toolHint: dflt?.toolHint,
+      relatedAgents: dflt?.relatedAgents ?? [],
     },
   ];
   for (const [name, a] of Object.entries(config.agents ?? {})) {
@@ -133,6 +136,7 @@ export function resolveAgents(config: Config): ResolvedAgent[] {
       thinking: effectiveThinking(config, model, a.thinking),
       toolsDisable: (a as any).tools?.disable ?? [],
       toolHint: (a as any).toolHint,
+      relatedAgents: (a as any).relatedAgents ?? [],
     });
   }
   return out;

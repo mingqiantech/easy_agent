@@ -58,31 +58,38 @@ export class HybridSearch {
 
   async search(
     query: string,
-    options: HybridSearchOptions = {},
+    options: HybridSearchOptions & { prefixes?: string[] } = {},
   ): Promise<{ hits: HybridHit[]; mode: "hybrid" | "text-only" }> {
     const limit = options.limit ?? 10;
     const vw = options.vectorWeight ?? 0.7;
     const tw = options.textWeight ?? 0.3;
+    // 作用域：多工作区隔离后默认只查本工作区（构造绑定的 workDir）；
+    // 关联 agent 二次检索由调用方传 prefixes。⚠️ 归一化尾斜杠：裸前缀
+    // "…/workspace" 会误匹 "…/workspaces/tech" 下的文件
+    const rawP = options.prefixes ?? (this.workDir ? [this.workDir] : undefined);
+    const prefixes = rawP?.map((p) => (p.endsWith("/") ? p : p + "/"));
 
     // 1. 关键词通道：FTS5 BM25 优先（索引存在时），退回文件行扫描
     const src = options.source === "session" ? "session" : "memory";
-    let textHits: Array<SearchHit & { ts?: number }> = [];
+    let textHits: Array<SearchHit & { ts?: number; fpath?: string }> = [];
     if (this.fts?.ok) {
       textHits = this.fts
-        .search(query, { limit: limit * 3, source: src })
+        .search(query, { limit: limit * 3, source: src, prefixes })
         .map((h) => ({
           path: h.path,
           excerpt: h.excerpt,
           score: h.score,
           ts: h.ts,
+          fpath: (h as any).fpath,
           source: src as SearchHit["source"],
         }));
       // BM25 命中同样喂 Dreaming recall 统计（与文件扫描通道行为对齐）
       if (textHits.length && this.textSearcher.onHit) {
         for (const h of textHits.slice(0, limit)) {
           try {
+            // 跨工作区（related 二次检索）时用索引里的绝对 fpath，不拼自己 workDir
             this.textSearcher.onHit(
-              this.workDir ? path.join(this.workDir, h.path) : h.path,
+              h.fpath || (this.workDir ? path.join(this.workDir, h.path) : h.path),
             );
           } catch {}
         }
@@ -104,6 +111,7 @@ export class HybridSearch {
           query,
           limit * 3,
           src,
+          prefixes,
         );
       } catch {
         vectorHits = [];
@@ -207,7 +215,15 @@ export class HybridSearch {
    * 向量通道：query 算一次 embedding，与 memory_vec 预存向量逐一余弦。
    * 无预存向量的条目跳过（首次索引完成前自动退化为 text-only）。
    */
-  private async vectorSearch(query: string, limit: number, source?: string) {
+  private async vectorSearch(
+    query: string,
+    limit: number,
+    source?: string,
+    prefixes?: string[],
+  ) {
+    const norm = prefixes?.map((p) => (p.endsWith("/") ? p : p + "/"));
+    const inScope = (p: string) =>
+      !norm?.length || norm.some((px) => p.startsWith(px));
     const { getDatabase } = await import("@easy-agent/core/database");
     const db = this.database ?? this.vec?.db ?? getDatabase();
     const embedding = this.embedding!;
@@ -223,7 +239,7 @@ export class HybridSearch {
         const out: Array<{ key: string; score: number; excerpt: string; path: string; ts?: number }> = [];
         for (const r of knn) {
           const info = getInfo.get(r.id) as any;
-          if (!info) continue;
+          if (!info || !inScope(String(info.path))) continue;
           out.push({ key: String(r.id), score: r.score, excerpt: info.excerpt, path: info.path, ts: Number(info.ts) || undefined });
         }
         if (out.length) return out;
@@ -244,6 +260,7 @@ export class HybridSearch {
       const vec = new Float32Array(r.blob.buffer, r.blob.byteOffset, r.blob.byteLength / 4);
       // 维度不一致（换过 embedding 模型）→ 跳过，交给重索引修复
       if (vec.length !== queryVec.length) continue;
+      if (!inScope(String(r.path))) continue;
       scored.push({ key: String(r.id), score: cosine(queryVec, vec), excerpt: r.excerpt, path: r.path, ts: Number(r.ts) || undefined });
     }
     scored.sort((a, b) => b.score - a.score);

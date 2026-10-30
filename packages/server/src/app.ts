@@ -59,6 +59,8 @@ export interface AgentRuntime {
   workspaceDir: string;
   thinking: string;
   memory: BasicMemory;
+  /** 关联 agent：memory_search 二次索引其工作区（PATCH 可改+持久化） */
+  relatedAgents?: string[];
 }
 
 export interface ServerDeps {
@@ -512,6 +514,11 @@ export function createApp(deps: ServerDeps): Hono {
     if (typeof body.toolHint === "string" && body.toolHint.length > 2000)
       return c.json({ error: "toolHint 最长 2000 字符" }, 400);
     if (hasToolHint) (agent as any).toolHint = body.toolHint ?? undefined;
+    // 关联 agent（二次索引对象名单）：数组=替换语义，自动剔除自身
+    const hasRelated = body.relatedAgents !== undefined;
+    if (hasRelated && (!Array.isArray(body.relatedAgents) || body.relatedAgents.some((x: any) => typeof x !== "string")))
+      return c.json({ error: "relatedAgents 必须是字符串数组" }, 400);
+    if (hasRelated) (agent as any).relatedAgents = (body.relatedAgents as string[]).filter((n) => n !== name);
     try {
       const dir = deps.config.stateDir;
       fs.mkdirSync(dir, { recursive: true });
@@ -527,6 +534,7 @@ export function createApp(deps: ServerDeps): Hono {
           ...(typeof body.thinking === "string" && body.thinking ? { thinking: body.thinking } : {}),
           ...(hasToolsDisable ? { tools: { disable: body.toolsDisable } } : {}),
           ...(hasToolHint ? { toolHint: body.toolHint } : {}),
+          ...(hasRelated ? { relatedAgents: (body.relatedAgents as string[]).filter((n) => n !== name) } : {}),
         },
       };
       fs.writeFileSync(file, JSON.stringify(data, null, 2));
@@ -900,6 +908,13 @@ export function createApp(deps: ServerDeps): Hono {
 
     const nodes: any[] = [];
     const edges: any[] = [];
+    // 关联边：agent 配了 relatedAgents 则在图上可视化（如 tech→default 二查通道）
+    for (const a of agentList) {
+      for (const r of ((a as any).relatedAgents ?? [])) {
+        if (r !== a.name && agentList.some((x: any) => x.name === r))
+          edges.push({ from: `a:${a.name}`, to: `a:${r}`, kind: "related" });
+      }
+    }
     const ownerOfEntry = (fp: string): string | null => {
       const corpus = String(fp).match(/session-corpus\/([0-9a-f]{12})\.md$/);
       return corpus ? corpusOwner.get(corpus[1])?.agent ?? ownerOf(String(fp)) : ownerOf(String(fp));

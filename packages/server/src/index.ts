@@ -229,12 +229,21 @@ async function main() {
     }, minutes * 60000);
   }, 5000);
 
-  // memory_search：按 ctx.workDir 分发到该 agent 工作区的检索资源（完全隔离）
+  // memory_search：按 ctx.workDir 分发到该 agent 工作区的检索资源（完全隔离）；
+  // 关联 agent 二次索引：主检索命中→提索引词→去 relatedAgents 工作区二查
   tools.register(
     createMemorySearchTool(searcher, {
       hybrid,
       weights: msCfg.hybrid,
       forWorkDir: (wd) => resourcesFor(wd),
+      resolveRelated: (agentId?: string) => {
+        const a = (agents as Record<string, any>)[agentId ?? ""];
+        if (!a?.relatedAgents?.length) return [];
+        return (a.relatedAgents as string[])
+          .map((n) => (agents as Record<string, any>)[n])
+          .filter(Boolean)
+          .map((x: any) => ({ name: x.name as string, ...resourcesFor(x.workspaceDir as string) }));
+      },
     }),
   );
 
@@ -320,6 +329,7 @@ async function main() {
       thinking: a.thinking,
       toolsDisable: a.toolsDisable,
       toolHint: a.toolHint,
+      relatedAgents: a.relatedAgents,
       memory: mem,
     };
   }

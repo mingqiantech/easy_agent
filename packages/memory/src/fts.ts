@@ -78,37 +78,43 @@ export class FtsIndex {
   /** BM25 检索；match 语法自动转 bigram OR 查询 */
   search(
     query: string,
-    opts: { limit?: number; source?: string } = {},
-  ): Array<FtsHit & { ts?: number }> {
+    opts: { limit?: number; source?: string; prefixes?: string[] } = {},
+  ): Array<FtsHit & { ts?: number; fpath?: string }> {
     if (!this.available) return [];
     const tokens = tokenizeQuery(query);
     if (!tokens.length) return [];
     const match = tokens.map((t) => `"${t.replace(/"/g, "")}"`).join(" OR ");
     const limit = opts.limit ?? 10;
+    // 作用域过滤（2026-10-30 多工作区隔离）：memory_fts.path 是各自工作区相对路径，
+    // 跨 agent 会重名——必须 join memory_entries 用绝对 file_path 前缀筛
     try {
-      const rows = (opts.source
-        ? this.db
-            .prepare(
-              `SELECT f.path AS path, f.excerpt AS excerpt, -bm25(memory_fts) AS score, e.updated_at AS ts
-               FROM memory_fts f JOIN memory_entries e ON e.id = f.rowid
-               WHERE memory_fts MATCH ? AND e.source = ?
-               ORDER BY score DESC LIMIT ?`,
-            )
-            .all(match, opts.source, limit)
-        : this.db
-            .prepare(
-              `SELECT path, excerpt, -bm25(memory_fts) AS score
-               FROM memory_fts WHERE memory_fts MATCH ?
-               ORDER BY score DESC LIMIT ?`,
-            )
-            .all(match, limit)) as any[];
-
+      const joinCond = [] as string[];
+      const args: Array<string | number> = [match];
+      if (opts.source) joinCond.push("e.source = ?");
+      args.push(...(opts.source ? [opts.source] : []));
+      if (opts.prefixes?.length) {
+        // 归一化尾斜杠防前缀误匹（workspace vs workspaces/x）
+        const ps = opts.prefixes.map((p) => (p.endsWith("/") ? p : p + "/"));
+        joinCond.push("(" + ps.map(() => "instr(e.file_path, ?) = 1").join(" OR ") + ")");
+        args.push(...ps);
+      }
+      args.push(limit);
+      const rows = (this.db
+        .prepare(
+          `SELECT f.path AS path, f.excerpt AS excerpt, -bm25(memory_fts) AS score,
+                  e.updated_at AS ts, e.file_path AS fpath
+           FROM memory_fts f JOIN memory_entries e ON e.id = f.rowid
+           WHERE memory_fts MATCH ?${joinCond.length ? " AND " + joinCond.join(" AND ") : ""}
+           ORDER BY score DESC LIMIT ?`,
+        )
+        .all(...args) as any[]);
       if (!rows.length) return [];
       const max = Math.max(...rows.map((r) => Number(r.score)), 0.000001);
       return rows.map((r) => ({
         path: String(r.path),
         excerpt: String(r.excerpt),
         ts: Number(r.ts) || undefined,
+        fpath: String(r.fpath ?? ""),
         score: Math.min(1, Math.max(0.05, Number(r.score) / max)), // 顶部归一，保相对序
       }));
     } catch {

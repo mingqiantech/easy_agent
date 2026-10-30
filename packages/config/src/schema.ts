@@ -153,6 +153,9 @@ export const ConfigSchema = z.object({
         /** 附加提示词：每轮动态注入 system 区（开关切换即时生效）；
          *  与内置 trae 使用引导叠加，自定义文案优先 */
         toolHint: z.string().max(2000).optional(),
+        /** 关联 agent（2026-10-30）：memory_search 主检索命中后用索引词二查
+         *  这些 agent 的工作区知识（典型：新隔离 agent 关联 default 拿历史记忆） */
+        relatedAgents: z.array(z.string()).optional(),
       }),
     )
     .default({}),

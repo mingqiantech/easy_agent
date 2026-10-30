@@ -15,6 +15,38 @@ export interface MemorySearchToolOpts {
    * 提供时优先于顶层 searcher/hybrid（每次 execute 现取）。
    */
   forWorkDir?: (workDir: string) => { searcher: MemorySearcher; hybrid?: HybridSearch };
+  /**
+   * 关联 agent 二次索引（2026-10-30 elf 点单）：按 ctx.agentId 取其配置的
+   * relatedAgents 对应检索资源；主检索命中后提索引词去关联工作区二查，
+   * 结果打 from 标签附在 hits 尾部。
+   */
+  resolveRelated?: (agentId?: string) => Array<{ name: string; searcher: MemorySearcher; hybrid?: HybridSearch }>;
+}
+
+/**
+ * 从主检索命中的摘录提取"索引词"：CJK 连续串（2~8 字）+ 英文词（≥3 字母），
+ * 过滤掉已在查询里的词，按出现频次降序取 top N。用作二次检索的钥匙。
+ */
+export function extractIndexTerms(excerpts: string[], query: string, max = 6): string[] {
+  const freq = new Map<string, number>();
+  // 查询自身切词（与提取同一把尺），用于双向包含过滤（"偏好" 要能拦下 "用户偏好使用"）
+  const qTerms = (query.match(/[\u4e00-\u9fff]{2,8}|[A-Za-z][A-Za-z0-9+.#-]{2,}/g) ?? [])
+    .map((t) => (/[\u4e00-\u9fff]/.test(t) ? t : t.toLowerCase()));
+  const inQuery = (t: string) => qTerms.some((q) => t.includes(q) || q.includes(t));
+  for (const text of excerpts) {
+    const chunks = text.match(/[\u4e00-\u9fff]{2,8}|[A-Za-z][A-Za-z0-9+.#-]{2,}/g) ?? [];
+    for (const raw of chunks) {
+      const t = /[\u4e00-\u9fff]/.test(raw) ? raw : raw.toLowerCase();
+      if (inQuery(t)) continue; // 查询已含的词不重复带路
+      // 高频虚词/格式词不当钥匙
+      if (/^(用户|决定|问题|相关|进行|使用|通过|当前|之后|之前|如果|可以|需要|内容|方案|markdown|http|https|www)$/.test(t)) continue;
+      freq.set(t, (freq.get(t) ?? 0) + 1);
+    }
+  }
+  return [...freq.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .slice(0, max)
+    .map(([t]) => t);
 }
 
 export function createMemorySearchTool(
@@ -36,6 +68,7 @@ export function createMemorySearchTool(
       const res = opts.forWorkDir?.(ctx.workDir) ?? { searcher, hybrid: opts.hybrid };
       const hybrid = res.hybrid;
       const corpus = input.corpus ?? "all";
+      const primary = await (async () => {
       if (hybrid && corpus !== "all") {
         const r = await hybrid.search(input.query, {
           limit: input.maxResults,
@@ -74,7 +107,51 @@ export function createMemorySearchTool(
         corpus,
       });
       opts.onStatus?.({ mode: "text-only", hits: r.hits.length });
-      return r;
+      return { mode: "text-only" as const, hits: r.hits ?? [] };
+      })();
+
+      // ── 关联 agent 二次索引：主命中 excerpt → 索引词 → 去关联工作区检索 ──
+      const related = opts.resolveRelated?.(ctx.agentId) ?? [];
+      let secondary: Array<Record<string, unknown>> = [];
+      let usedTerms: string[] = [];
+      if (related.length && (primary.hits?.length ?? 0) > 0) {
+        usedTerms = extractIndexTerms(
+          (primary.hits as any[]).slice(0, 5).map((h) => String(h.excerpt ?? "")),
+          String(input.query ?? ""),
+        );
+        if (usedTerms.length) {
+          const q2 = usedTerms.join(" ");
+          const caps: number[] = [];
+          for (const rel of related) {
+            try {
+              if (rel.hybrid) {
+                const rr = await rel.hybrid.search(q2, {
+                  limit: 3,
+                  source: "memory",
+                  vectorWeight: opts.weights?.vectorWeight,
+                  textWeight: opts.weights?.textWeight,
+                });
+                caps.push(rr.hits.length);
+                secondary.push(...rr.hits.map((h) => ({ ...h, from: rel.name })));
+              } else {
+                const rr = await rel.searcher.search(q2, { maxResults: 3, corpus: "memory" });
+                caps.push(rr.hits.length);
+                secondary.push(...(rr.hits ?? []).map((h) => ({ ...h, from: rel.name })));
+              }
+            } catch {
+              caps.push(0);
+            }
+          }
+        }
+      }
+      opts.onStatus?.({ mode: String(primary.mode), hits: (primary.hits?.length ?? 0) + secondary.length });
+      return {
+        mode: primary.mode,
+        hits: [...(primary.hits ?? []), ...secondary],
+        ...(usedTerms.length
+          ? { related: { terms: usedTerms, agents: related.map((x) => x.name), hits: secondary.length } }
+          : {}),
+      };
     },
   };
 }

@@ -38,6 +38,7 @@ describe("resolveAgents（多 Agent）", () => {
       description: "默认助手",
       thinking: "off",
       toolsDisable: [],
+      relatedAgents: [],
     });
   });
 
