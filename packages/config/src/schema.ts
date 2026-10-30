@@ -126,6 +126,15 @@ export const ConfigSchema = z.object({
       allowedUserIds: z.array(z.string()).default([]),
     })
     .optional(),
+  /** 企业微信智能机器人（@wecom/aibot-node-sdk 长连接，无需公网回调） */
+  wecom: z
+    .object({
+      botId: z.string().default(""),
+      secret: z.string().default(""),
+      /** 白名单 userid；空 = 放行全部 */
+      allowedUserIds: z.array(z.string()).default([]),
+    })
+    .optional(),
   /** 多 Agent 定义："名字" -> { model?, workspaceDir?, description?, thinking?, tools? } */
   agents: z
     .record(
