@@ -239,7 +239,11 @@ async function main() {
       resolveRelated: (agentId?: string) => {
         const a = (agents as Record<string, any>)[agentId ?? ""];
         if (!a?.relatedAgents?.length) return [];
-        return (a.relatedAgents as string[])
+        // 通配符 "*"：扩展为全部其他 agent（全索引型 agent，如 elf 配的检索汇总者）
+        const names = (a.relatedAgents as string[]).includes("*")
+          ? Object.keys(agents).filter((n) => n !== a.name)
+          : (a.relatedAgents as string[]);
+        return names
           .map((n) => (agents as Record<string, any>)[n])
           .filter(Boolean)
           .map((x: any) => ({ name: x.name as string, ...resourcesFor(x.workspaceDir as string) }));

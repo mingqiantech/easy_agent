@@ -500,11 +500,15 @@ export function createApp(deps: ServerDeps): Hono {
       return c.json({ error: "toolsDisable 必须是字符串数组" }, 400);
     if (hasToolsDisable && body.toolsDisable.some((x: any) => typeof x !== "string"))
       return c.json({ error: "toolsDisable 元素必须是字符串" }, 400);
+    // 关联 agent（二次索引对象名单，支持通配符 "*"=全部）：数组=替换语义，自动剔除自身
+    const hasRelated = body.relatedAgents !== undefined;
+    if (hasRelated && (!Array.isArray(body.relatedAgents) || body.relatedAgents.some((x: any) => typeof x !== "string")))
+      return c.json({ error: 'relatedAgents 必须是字符串数组（"*"=全部其他 agent）' }, 400);
     if (typeof body.thinking === "string" && body.thinking) {
       if (!levels.includes(body.thinking))
         return c.json({ error: "thinking 必须是 off|low|medium|high" }, 400);
       agent.thinking = body.thinking;
-    } else if (!hasToolsDisable && body.toolHint === undefined) {
+    } else if (!hasToolsDisable && body.toolHint === undefined && !hasRelated) {
       return c.json({ error: "thinking 必须是字符串" }, 400);
     }
     if (hasToolsDisable) (agent as any).toolsDisable = body.toolsDisable;
@@ -908,9 +912,14 @@ export function createApp(deps: ServerDeps): Hono {
 
     const nodes: any[] = [];
     const edges: any[] = [];
-    // 关联边：agent 配了 relatedAgents 则在图上可视化（如 tech→default 二查通道）
+    // 关联边：agent 配了 relatedAgents 则在图上可视化（如 tech→default 二查通道；
+    // 通配符 "*" = 全索引型 agent，展开到全部其他 agent）
     for (const a of agentList) {
-      for (const r of ((a as any).relatedAgents ?? [])) {
+      const relRaw = ((a as any).relatedAgents ?? []) as string[];
+      const rel = relRaw.includes("*")
+        ? agentList.map((x: any) => x.name).filter((n: string) => n !== a.name)
+        : relRaw;
+      for (const r of rel) {
         if (r !== a.name && agentList.some((x: any) => x.name === r))
           edges.push({ from: `a:${a.name}`, to: `a:${r}`, kind: "related" });
       }
