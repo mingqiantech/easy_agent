@@ -203,6 +203,9 @@ async function main() {
         ];
         for (const f of targets) {
           if (!(await fs.stat(f).then(() => true, () => false))) continue;
+          // 模板占位不入库（新工作区 MEMORY/USER 初建就带 chunk 是纯索引噪声）
+          const txt = await Bun.file(f).text().catch(() => "");
+          if (txt.includes("_No memories yet._") || /- \*\*Name:\*\*\n- \*\*Timezone:\*\*/.test(txt)) continue;
           const src = f.includes(".dreams") ? "session" as const : "memory" as const;
           const rel = path.relative(ws, f);
           chunks += await memIndex.indexFile(f, src, rel);

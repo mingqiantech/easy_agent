@@ -126,7 +126,9 @@ export class SubAgentManager {
           const result = await this.tools.execute(tc.name, tc.input, {
             sessionId,
             agentId: config.parentAgent ?? "sub-agent",
-            workDir: process.cwd(),
+            // 继承发起方 agent 的隔离工作区（memory_search 分发/文件工具都靠它）；
+            // 缺旧行为 process.cwd() 会把子任务打到仓库目录（2026-10-30 体检发现）
+            workDir: config.workDir ?? process.cwd(),
           });
           toolCallLog.push({
             name: tc.name,
