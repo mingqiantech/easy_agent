@@ -8,6 +8,12 @@ import { startRepl } from "./repl.js";
 import { SessionManager } from "../../core/src";
 
 async function main() {
+  // easy-agent config <show|get|set|unset>：bash 可脚本化改配置（无需手编 JSON）
+  if (process.argv[2] === "config") {
+    const { runConfigCli } = await import("./config-cli.js");
+    process.exit(runConfigCli(process.argv.slice(3)));
+  }
+
   // Week10: bun run dev mcp serve — 以 MCP stdio 模式启动工具服务
   if (process.argv[2] === "mcp" && process.argv[3] === "serve") {
     const { ToolRegistry } = await import("@easy-agent/core/tool/registry");
