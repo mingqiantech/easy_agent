@@ -96,6 +96,30 @@ describe("relatedAgents 二次索引：主检索→索引词→关联工作区",
     expect(r.related).toBeUndefined();
     expect(r.hits.every((h: any) => !h.from)).toBe(true);
   });
+  it("主检索零命中（新空区全索引型）→ 查询词自身做钥匙二查", async () => {
+    const emptyWs = path.join(TEST_DIR, "emptyws");
+    fs.mkdirSync(path.join(emptyWs, "memory"), { recursive: true });
+    const s = new MemorySearcher(emptyWs, path.join(emptyWs, "memory"));
+    let capturedQ2 = "";
+    const fakeRel = {
+      name: "default",
+      searcher: s,
+      hybrid: {
+        search: async (q: string) => {
+          capturedQ2 = q;
+          return { mode: "hybrid" as const, hits: [{ path: "MEMORY.md", excerpt: "bun 偏好历史知识", source: "memory" as const, vectorScore: 0.6, textScore: 0.4, combinedScore: 0.9 }] };
+        },
+      } as any,
+    };
+    const tool = createMemorySearchTool(s, { resolveRelated: () => [fakeRel] });
+    const r: any = await tool.execute({ query: "TypeScript 运行工具 偏好", maxResults: 5 }, {
+      sessionId: "s", agentId: "work", workDir: emptyWs,
+    });
+    expect(r.hits.length).toBe(0 + 1); // 只有跨区命中
+    expect(r.hits[0].from).toBe("default");
+    expect(capturedQ2.toLowerCase()).toContain("typescript");
+    expect(r.related.agents).toEqual(["default"]);
+  });
 });
 
 describe("HybridSearch prefixes 作用域（真实索引）", () => {

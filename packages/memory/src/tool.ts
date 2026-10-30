@@ -114,11 +114,17 @@ export function createMemorySearchTool(
       const related = opts.resolveRelated?.(ctx.agentId) ?? [];
       let secondary: Array<Record<string, unknown>> = [];
       let usedTerms: string[] = [];
-      if (related.length && (primary.hits?.length ?? 0) > 0) {
+      if (related.length) {
         usedTerms = extractIndexTerms(
           (primary.hits as any[]).slice(0, 5).map((h) => String(h.excerpt ?? "")),
           String(input.query ?? ""),
         );
+        // 主检索空命中（新工作区/全索引型 agent 常态）：用查询自身切词当二查钥匙，
+        // 否则空区 agent 永远触发不了关联检索
+        if (!usedTerms.length && !(primary.hits?.length ?? 0)) {
+          const qt = String(input.query ?? "").match(/[\u4e00-\u9fff]{2,8}|[A-Za-z][A-Za-z0-9+.#-]{2,}/g) ?? [];
+          usedTerms = [...new Set(qt.map((t) => (/[\u4e00-\u9fff]/.test(t) ? t : t.toLowerCase())))].slice(0, 6);
+        }
         if (usedTerms.length) {
           const q2 = usedTerms.join(" ");
           const caps: number[] = [];

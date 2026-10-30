@@ -518,10 +518,6 @@ export function createApp(deps: ServerDeps): Hono {
     if (typeof body.toolHint === "string" && body.toolHint.length > 2000)
       return c.json({ error: "toolHint 最长 2000 字符" }, 400);
     if (hasToolHint) (agent as any).toolHint = body.toolHint ?? undefined;
-    // 关联 agent（二次索引对象名单）：数组=替换语义，自动剔除自身
-    const hasRelated = body.relatedAgents !== undefined;
-    if (hasRelated && (!Array.isArray(body.relatedAgents) || body.relatedAgents.some((x: any) => typeof x !== "string")))
-      return c.json({ error: "relatedAgents 必须是字符串数组" }, 400);
     if (hasRelated) (agent as any).relatedAgents = (body.relatedAgents as string[]).filter((n) => n !== name);
     try {
       const dir = deps.config.stateDir;
