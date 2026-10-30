@@ -1,3 +1,4 @@
+import path from "node:path";
 import type { Config } from "./schema.js";
 
 /**
@@ -98,8 +99,9 @@ function effectiveThinking(
 
 /**
  * 解析全部 Agent（多 Agent 支持，OpenClaw 式）：
- * default 始终存在 = 主模型 + 全局工作区；配置里 agents.* 逐个叠加，
- * model/workspaceDir/thinking 缺省继承 default。
+ * default 始终存在 = 主模型 + 全局工作区（历史共享记忆的家，不搬家）；
+ * 配置里 agents.* 逐个叠加；2026-10-30 完全隔离：非 default agent 未显式配
+ * workspaceDir 时默认独立到 <stateDir>/workspaces/<name>（记忆/日记/工具产出互不串味）。
  */
 export function resolveAgents(config: Config): ResolvedAgent[] {
   const primary = modelChain(config)[0];
@@ -118,11 +120,15 @@ export function resolveAgents(config: Config): ResolvedAgent[] {
     },
   ];
   for (const [name, a] of Object.entries(config.agents ?? {})) {
+    // default 已由上方特殫处理（继承全局工作区）；避免 agents["default"] 再叠一条抢掉 workspaceDir
+    if (name === "default") continue;
     const model = a.model ? resolveRef(config, a.model) : primary;
     out.push({
       name,
       model,
-      workspaceDir: a.workspaceDir ?? config.workspaceDir,
+      workspaceDir:
+        a.workspaceDir ??
+        path.join(config.stateDir || config.workspaceDir, "workspaces", name),
       description: a.description ?? name,
       thinking: effectiveThinking(config, model, a.thinking),
       toolsDisable: (a as any).tools?.disable ?? [],

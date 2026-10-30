@@ -17,16 +17,16 @@ export interface ShortTermEntry {
 export class ShortTermMemory {
   constructor(private db: Database) {}
 
-  add(text: string, origin?: string): string {
+  add(text: string, origin?: string, agent?: string): string {
     const id = ulid();
     this.db
       .prepare(
         `
-      INSERT INTO short_term_memory (id, text, origin, created_at)
-      VALUES (?, ?, ?, ?)
+      INSERT INTO short_term_memory (id, text, origin, agent, created_at)
+      VALUES (?, ?, ?, ?, ?)
     `,
       )
-      .run(id, text, origin ?? null, Date.now());
+      .run(id, text, origin ?? null, agent ?? null, Date.now());
     return id;
   }
 
@@ -34,7 +34,7 @@ export class ShortTermMemory {
    * 重要事实：直接满足晋升门槛（recall/unique 预热），不等被检索命中。
    * 轻眠（lightDreaming）提取时标 [重要] 的条目走这里，形成提取→晋升闭环。
    */
-  addImportant(text: string, origin?: string): string {
+  addImportant(text: string, origin?: string, agent?: string): string {
     const id = ulid();
     const now = Date.now();
     const today = new Date().toISOString().slice(0, 10);
@@ -43,29 +43,30 @@ export class ShortTermMemory {
     this.db
       .prepare(
         `
-      INSERT INTO short_term_memory (id, text, origin, recall_count, unique_queries,
+      INSERT INTO short_term_memory (id, text, origin, agent, recall_count, unique_queries,
         recall_days, last_recalled_at, created_at)
-      VALUES (?, ?, ?, 3, 2, ?, ?, ?)
+      VALUES (?, ?, ?, ?, 3, 2, ?, ?, ?)
     `,
       )
-      .run(id, finalText, origin ?? null, JSON.stringify([today]), now, now);
+      .run(id, finalText, origin ?? null, agent ?? null, JSON.stringify([today]), now, now);
     return id;
   }
 
-  getActive(): ShortTermEntry[] {
+  getActive(agent?: string): ShortTermEntry[] {
     return this.db
       .prepare(
         `
-      SELECT id, text, origin, recall_count as recallCount,
+      SELECT id, text, origin, agent, recall_count as recallCount,
              unique_queries as uniqueQueries, recall_days as recallDays,
              last_recalled_at as lastRecalledAt, created_at as createdAt,
              promoted_at as promotedAt, forgotten_at as forgottenAt
       FROM short_term_memory
       WHERE promoted_at IS NULL AND forgotten_at IS NULL AND dormant_at IS NULL
+        AND (? IS NULL OR agent = ?)
       ORDER BY created_at DESC
     `,
       )
-      .all()
+      .all(agent ?? null, agent ?? null)
       .map((r: any) => ({
         ...r,
         recallDays: JSON.parse(r.recallDays || "[]"),

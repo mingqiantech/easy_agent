@@ -94,6 +94,8 @@ export interface DreamingDeps {
   llmGenerate: (prompt: string) => Promise<string>;
   readMemory: () => Promise<string>;
   writeMemory: (content: string) => Promise<void>;
+  /** 多工作区隔离（2026-10-30）：按 agent 分区短期池与 dreaming 游标；缺省全局（单测兼容） */
+  agent?: string;
   /**
    * 密钥掩码函数（必传）：所有送 LLM 的文本先过它。
    * 用依赖注入而非直接 import core 的 maskSecrets 单例：
@@ -114,6 +116,10 @@ export interface DreamingDeps {
 
 const cfgOf = (deps: DreamingDeps): DreamingConfig =>
   deps.dreaming ?? DEFAULT_DREAMING_CONFIG;
+
+/** 分 agent 的 dreaming_state phase 键（'light' → 'light:tech'） */
+const pk = (deps: DreamingDeps, phase: string): string =>
+  deps.agent ? `${phase}:${deps.agent}` : phase;
 
 /** 轻眠提取提示词：只提值得长记的事，[重要] 前缀的条目直接进晋升候选。
  * 示例用无关微型对话隔离，防小模型把示例文本拄袭进真实输出 */
@@ -143,9 +149,10 @@ export async function lightDreaming(
   const persist = (cursor: number, processed: number, extracted: number) =>
     deps.db
       .prepare(
-        `INSERT OR REPLACE INTO dreaming_state (phase, last_run_at, state, updated_at) VALUES ('light', ?, ?, ?)`,
+        `INSERT OR REPLACE INTO dreaming_state (phase, last_run_at, state, updated_at) VALUES (?, ?, ?, ?)`,
       )
       .run(
+        pk(deps, "light"),
         now,
         JSON.stringify({ cursor, processed, extracted }),
         now,
@@ -154,18 +161,35 @@ export async function lightDreaming(
   let cursor = 0;
   try {
     const row = deps.db
-      .prepare("SELECT state FROM dreaming_state WHERE phase='light'")
-      .get() as any;
+      .prepare("SELECT state FROM dreaming_state WHERE phase=?")
+      .get(pk(deps, "light")) as any;
     cursor = Number(JSON.parse(row?.state ?? "{}")?.cursor ?? 0);
+    // 分 agent 首次运行（无游标）：从旧全局 'light' 游标继位，防止全量重扫重复提取
+    if (!cursor && deps.agent) {
+      const legacy = deps.db
+        .prepare("SELECT state FROM dreaming_state WHERE phase='light'")
+        .get() as any;
+      cursor = Number(JSON.parse(legacy?.state ?? "{}")?.cursor ?? 0);
+    }
   } catch {}
 
-  const msgs = deps.db
-    .prepare(
-      `SELECT rowid AS rid, session_id AS sessionId, role, content FROM messages
-       WHERE rowid > ? AND role IN ('user','assistant')
-       ORDER BY rowid LIMIT ?`,
-    )
-    .all(cursor, opts.maxMsgs ?? cfg.lightMaxMsgs) as any[];
+  // agent 分区：只扫该 agent 会话的消息（rowid 全局单调，游标语义不变）
+  const msgs = deps.agent
+    ? (deps.db
+        .prepare(
+          `SELECT m.rowid AS rid, m.session_id AS sessionId, m.role, m.content FROM messages m
+           JOIN sessions s ON s.id = m.session_id
+           WHERE m.rowid > ? AND m.role IN ('user','assistant') AND s.agent_id = ?
+           ORDER BY m.rowid LIMIT ?`,
+        )
+        .all(cursor, deps.agent, opts.maxMsgs ?? cfg.lightMaxMsgs) as any[])
+    : (deps.db
+        .prepare(
+          `SELECT rowid AS rid, session_id AS sessionId, role, content FROM messages
+           WHERE rowid > ? AND role IN ('user','assistant')
+           ORDER BY rowid LIMIT ?`,
+        )
+        .all(cursor, opts.maxMsgs ?? cfg.lightMaxMsgs) as any[]);
   if (!msgs.length) return { processed: 0, extracted: 0 };
   const maxRid = msgs[msgs.length - 1].rid as number;
 
@@ -204,8 +228,8 @@ export async function lightDreaming(
     if (/缩进.{0,12}(tab|空格)|tab.{0,8}缩进/.test(fact)) continue; // 格式示例原文拄袭兕底
     const origin = `light:msg#${maxRid}`;
     // [重要] 前缀保留入库：deep 逐条保真 + L1 降级时 pinned 保护都靠它识别
-    if (important) deps.shortTerm.addImportant(`[重要] ${fact}`, origin);
-    else deps.shortTerm.add(fact, origin);
+    if (important) deps.shortTerm.addImportant(`[重要] ${fact}`, origin, deps.agent);
+    else deps.shortTerm.add(fact, origin, deps.agent);
     extracted++;
   }
 
@@ -230,14 +254,14 @@ function manageSpacedReviews(
   let graduated: string[] = [];
   try {
     const row = deps.db
-      .prepare("SELECT state FROM dreaming_state WHERE phase='rem'")
-      .get() as any;
+      .prepare("SELECT state FROM dreaming_state WHERE phase=?")
+      .get(pk(deps, "rem")) as any;
     const parsed = JSON.parse(row?.state ?? "{}");
     reviews = parsed?.reviews ?? {};
     graduated = parsed?.graduated ?? [];
   } catch {}
 
-  const active = deps.shortTerm.getActive();
+  const active = deps.shortTerm.getActive(deps.agent);
   const activeIds = new Set(active.map((e) => e.id));
   for (const id of Object.keys(reviews))
     if (!activeIds.has(id)) delete reviews[id]; // 已晋升/已休眠 → 退队
@@ -264,7 +288,7 @@ function manageSpacedReviews(
   }
 
   // 新入队：被检索命中过(recall>=1)但门槛未达且不在队列/已毕业
-  for (const e of deps.shortTerm.getActive()) {
+  for (const e of deps.shortTerm.getActive(deps.agent)) {
     if (reviews[e.id] || graduated.includes(e.id) || e.recallCount < 1) continue;
     if (
       e.recallCount >= PROMOTION.minRecallCount &&
@@ -290,7 +314,7 @@ export async function remDreaming(
   const cfg = cfgOf(deps);
   const now = Date.now();
   const { reviews, graduated } = manageSpacedReviews(deps, now);
-  const entries = deps.shortTerm.getActive(); // 复习 bump 后重取，评分含新间隔信号
+  const entries = deps.shortTerm.getActive(deps.agent); // 复习 bump 后重取，评分含新间隔信号
   const scored = entries.map((e) => ({
     ...e,
     score: calcScore(e, now, cfg.halfLifeDays),
@@ -308,8 +332,8 @@ export async function remDreaming(
     let history: Array<{ name: string; first: number; last: number; count: number }> = [];
     try {
       const row = deps.db
-        .prepare("SELECT state FROM dreaming_state WHERE phase='rem'")
-        .get() as any;
+        .prepare("SELECT state FROM dreaming_state WHERE phase=?")
+        .get(pk(deps, "rem")) as any;
       history = JSON.parse(row?.state ?? "{}")?.themes ?? [];
     } catch {}
 
@@ -372,11 +396,11 @@ export async function remDreaming(
               )
               .run(text, JSON.stringify([today2]), now, existing.id);
           } else {
-            deps.shortTerm.addImportant(text, origin);
+            deps.shortTerm.addImportant(text, origin, deps.agent);
           }
         } else {
           history.push({ name, first: now, last: now, count: 1 });
-          deps.shortTerm.add(`主题：${name} — ${conclusion}`, `rem:theme:${name}`);
+          deps.shortTerm.add(`主题：${name} — ${conclusion}`, `rem:theme:${name}`, deps.agent);
         }
       }
     } catch {
@@ -385,9 +409,10 @@ export async function remDreaming(
     history = history.slice(-24); // 主题历史有界
     deps.db
       .prepare(
-        `INSERT OR REPLACE INTO dreaming_state (phase, last_run_at, state, updated_at) VALUES ('rem', ?, ?, ?)`,
+        `INSERT OR REPLACE INTO dreaming_state (phase, last_run_at, state, updated_at) VALUES (?, ?, ?, ?)`,
       )
       .run(
+        pk(deps, "rem"),
         now,
         JSON.stringify({
           candidateCount: candidates.length,
@@ -402,9 +427,10 @@ export async function remDreaming(
 
   deps.db
     .prepare(
-      `INSERT OR REPLACE INTO dreaming_state (phase, last_run_at, state, updated_at) VALUES ('rem', ?, ?, ?)`,
+      `INSERT OR REPLACE INTO dreaming_state (phase, last_run_at, state, updated_at) VALUES (?, ?, ?, ?)`,
     )
     .run(
+      pk(deps, "rem"),
       now,
       JSON.stringify({ candidateCount: candidates.length, reviews, graduated }),
       now,
@@ -585,7 +611,7 @@ export async function deepDreaming(
   const cfg = cfgOf(deps);
   const now = Date.now();
   const entries = deps.shortTerm
-    .getActive()
+    .getActive(deps.agent)
     .map((e) => ({ ...e, score: calcScore(e, now, cfg.halfLifeDays) }))
     .filter(
       (e) =>
@@ -649,9 +675,10 @@ export async function deepDreaming(
   const forgotten = executeForget(deps, now);
   deps.db
     .prepare(
-      `INSERT OR REPLACE INTO dreaming_state (phase, last_run_at, state, updated_at) VALUES ('deep', ?, ?, ?)`,
+      `INSERT OR REPLACE INTO dreaming_state (phase, last_run_at, state, updated_at) VALUES (?, ?, ?, ?)`,
     )
     .run(
+      pk(deps, "deep"),
       now,
       JSON.stringify({ promoted: entries.length, forgotten, migrated, dupSkipped }),
       now,
@@ -686,9 +713,10 @@ function executeForget(deps: DreamingDeps, nowMs: number): number {
               last_recalled_at AS lastRecalledAt, created_at AS createdAt
        FROM short_term_memory
        WHERE promoted_at IS NULL AND forgotten_at IS NULL
-         AND dormant_at IS NULL AND created_at < ?`,
+         AND dormant_at IS NULL AND created_at < ?
+         AND (? IS NULL OR agent = ?)`,
     )
-    .all(cutoff) as any[];
+    .all(cutoff, deps.agent ?? null, deps.agent ?? null) as any[];
   const mark = deps.db.prepare(
     "UPDATE short_term_memory SET dormant_at = ? WHERE id = ?",
   );

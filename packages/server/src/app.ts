@@ -67,6 +67,8 @@ export interface ServerDeps {
   tools: ToolRegistry;
   searcher: MemorySearcher;
   memory: BasicMemory;
+  /** 多工作区隔离：按工作区目录取检索资源（index.ts 注入） */
+  resourcesFor?: (wsDir: string) => { searcher: MemorySearcher };
   config: any;
   /** 多 Agent：name -> 运行时（模型/工作区/记忆） */
   agents: Record<string, AgentRuntime>;
@@ -413,6 +415,8 @@ export function createApp(deps: ServerDeps): Hono {
     try {
       const response = await deps.sessions.run(id, body.text ?? "", {
         toolRegistry,
+        // 工具有效工作目录 = 会话所属 agent 的隔离工作区（memory_search 分发也靠它）
+        workDir: agent?.workspaceDir,
         extraSystem: extraSystem || undefined,
         ...(imageRefs.length ? { images: imageRefs } : {}),
         thinking: agent?.thinking as
@@ -507,16 +511,24 @@ export function createApp(deps: ServerDeps): Hono {
     });
   });
 
+  // 记忆资源按 agent 归属（多工作区隔离）；缺省 default 旧共享区
+  const memFor = (agent?: string) =>
+    (agent && deps.agents[agent]?.memory) || deps.memory;
+  const searcherFor = (agent?: string) => {
+    const wd = agent ? deps.agents[agent]?.workspaceDir : undefined;
+    return (wd && deps.resourcesFor?.(wd).searcher) || deps.searcher;
+  };
+
   app.get("/api/memory/search", async (c) => {
     const q = c.req.query("q");
     if (!q) return c.json({ error: "missing q" }, 400);
-    return c.json(await deps.searcher.search(q));
+    return c.json(await searcherFor(c.req.query("agent")).search(q));
   });
 
   app.get("/api/memory/file", async (c) => {
     const p = c.req.query("path");
     if (!p) return c.json({ error: "missing path" }, 400);
-    return c.json(await deps.memory.readMemory());
+    return c.json(await memFor(c.req.query("agent")).readMemory());
   });
 
   // ── 设置：梦境调度 + 记忆（Web 设置页） ──
@@ -677,13 +689,13 @@ export function createApp(deps: ServerDeps): Hono {
 
   // MEMORY.md 读写（设置页记忆编辑器）
   app.get("/api/memory/content", async (c) =>
-    c.json({ content: await deps.memory.readMemory() }),
+    c.json({ content: await memFor(c.req.query("agent")).readMemory() }),
   );
   app.put("/api/memory/content", async (c) => {
     const body = await c.req.json().catch(() => ({}) as any);
     if (typeof body.content !== "string")
       return c.json({ error: "content 必须是字符串" }, 400);
-    await deps.memory.writeMemory(body.content);
+    await memFor(c.req.query("agent")).writeMemory(body.content);
     return c.json({ ok: true });
   });
 

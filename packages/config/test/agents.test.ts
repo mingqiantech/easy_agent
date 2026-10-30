@@ -54,7 +54,8 @@ describe("resolveAgents（多 Agent）", () => {
     const coder = list[1];
     expect(coder.model).toBe("openai/qwen3.8-max");
     expect(coder.description).toBe("编程助手");
-    expect(coder.workspaceDir).toBe("/home/dia/.easy-agent/workspace"); // 继承
+    // 2026-10-30 完全隔离：未显式配 workspaceDir 的 agent 默认独立工作区（不再继承共享）
+    expect(coder.workspaceDir).toBe("/home/dia/.easy-agent/workspace/workspaces/coder");
 
     const writer = list[2];
     expect(writer.model).toBe("openai/qwen3.8-flash"); // 继承主模型

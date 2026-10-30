@@ -76,7 +76,10 @@ async function main() {
   const searcher = new MemorySearcher(workspaceDir, memoryDir);
   const shortTerm = new ShortTermMemory(db);
 
-  // 搜索命中 -> 短期记忆 recall 统计（Dreaming 晋升依据）
+  // 多工作区完全隔离（2026-10-30）：每 agent 一套检索资源（searcher 绑定各自目录）；
+  // 向量/FTS 索引表全局共用，靠 file_path 绝对路径天然隔离
+  const wsResources = new Map<string, { searcher: MemorySearcher; hybrid?: HybridSearch }>();
+  wsResources.set(workspaceDir, { searcher });
   searcher.onHit = (filePath) => shortTerm.incrementRecall(filePath);
 
   // ── 向量/混合检索（config.memorySearch 可配）──
@@ -109,13 +112,32 @@ async function main() {
         ? `openai:${embCfg.model ?? "text-embedding-3-small"}`
         : "simple",
   );
-  // 会话语料摄取：活跃会话消息 → memory/.dreams/session-corpus/<hash>.md → 索引进知识网
+  // 会话语料摄取：活跃会话消息 → 所属 agent 工作区 memory/.dreams/session-corpus/<hash>.md
   const { SessionIngester } = await import("@easy-agent/memory/ingestion");
-  const sessionIngester = new SessionIngester(db, memoryDir);
+  const wsDirOfSession = new Map<string, string>(); // sessionId → workspaceDir（重检时刷新）
   const hybrid =
     msCfg.hybrid?.enabled !== false
       ? new HybridSearch(searcher, embedding, workspaceDir, memIndex.fts, memIndex.vec, db, msCfg.rerank ?? {})
       : undefined;
+  wsResources.set(workspaceDir, { searcher, hybrid });
+
+  /** 按工作区取检索资源（懒建：新 agent 工作区首次被工具/API 引用时） */
+  function resourcesFor(wsDir: string): { searcher: MemorySearcher; hybrid?: HybridSearch } {
+    let r = wsResources.get(wsDir);
+    if (!r) {
+      const s = new MemorySearcher(wsDir, path.join(wsDir, "memory"));
+      s.onHit = (filePath) => shortTerm.incrementRecall(filePath);
+      r = {
+        searcher: s,
+        hybrid:
+          msCfg.hybrid?.enabled !== false
+            ? new HybridSearch(s, embedding, wsDir, memIndex.fts, memIndex.vec, db, msCfg.rerank ?? {})
+            : undefined,
+      };
+      wsResources.set(wsDir, r);
+    }
+    return r;
+  }
 
   // 索引集与 MemorySearcher 的 corpus 对齐：工作区 md + memory/ + .dreams/session-corpus
   async function collectIndexableMdFiles(dir: string, includeDot = false): Promise<string[]> {
@@ -143,9 +165,18 @@ async function main() {
     let files = 0,
       chunks = 0;
     try {
-      // 先摄取活跃会话语料（失败不阻断文件索引）
+      // 先摄取活跃会话语料到所属 agent 工作区（失败不阻断文件索引）
+      const wsDirs = [...new Set(Object.values(agents).map((a: any) => a.workspaceDir as string))];
+      const ingesters = new Map<string, InstanceType<typeof SessionIngester>>();
       try {
         for (const s of sessions.list(50)) {
+          const ws = (agents[s.agentId ?? "default"] as any)?.workspaceDir ?? workspaceDir;
+          let ing = ingesters.get(ws);
+          if (!ing) {
+            ing = new SessionIngester(db, path.join(ws, "memory"));
+            ingesters.set(ws, ing);
+          }
+          wsDirOfSession.set(s.id, ws);
           const msgs = sessions.getMessages(s.id)
             .filter((m) => m.role === "user" || m.role === "assistant")
             .map((m) => {
@@ -158,22 +189,25 @@ async function main() {
                 return { role: m.role, content: m.content };
               }
             });
-          if (msgs.length) await sessionIngester.ingest(s.id, msgs);
+          if (msgs.length) await ing.ingest(s.id, msgs);
         }
       } catch (e: any) {
         console.warn("📥 会话摄取失败:", String(e?.message).slice(0, 120));
       }
-      const targets = [
-        path.join(workspaceDir, "MEMORY.md"),
-        path.join(workspaceDir, "USER.md"),
-        ...(await collectIndexableMdFiles(memoryDir)),
-      ];
-      for (const f of targets) {
-        if (!(await fs.stat(f).then(() => true, () => false))) continue;
-        const src = f.includes(".dreams") ? "session" as const : "memory" as const;
-        const rel = path.relative(workspaceDir, f);
-        chunks += await memIndex.indexFile(f, src, rel);
-        files++;
+      // 逐工作区索引（完全隔离：每个 agent 的 MEMORY/USER/memory 各自入库）
+      for (const ws of wsDirs) {
+        const targets = [
+          path.join(ws, "MEMORY.md"),
+          path.join(ws, "USER.md"),
+          ...(await collectIndexableMdFiles(path.join(ws, "memory"))),
+        ];
+        for (const f of targets) {
+          if (!(await fs.stat(f).then(() => true, () => false))) continue;
+          const src = f.includes(".dreams") ? "session" as const : "memory" as const;
+          const rel = path.relative(ws, f);
+          chunks += await memIndex.indexFile(f, src, rel);
+          files++;
+        }
       }
     } finally {
       indexBusy = false;
@@ -192,11 +226,12 @@ async function main() {
     }, minutes * 60000);
   }, 5000);
 
-  // memory_search 注册进工具表（混合检索可用时走 向量+全文 融合）
+  // memory_search：按 ctx.workDir 分发到该 agent 工作区的检索资源（完全隔离）
   tools.register(
     createMemorySearchTool(searcher, {
       hybrid,
       weights: msCfg.hybrid,
+      forWorkDir: (wd) => resourcesFor(wd),
     }),
   );
 
@@ -251,6 +286,19 @@ async function main() {
     if (!mem) {
       mem = new BasicMemory(a.workspaceDir);
       const fresh = await mem.initWorkspace();
+      // 新隔离工作区：从旧共享区播种身份/用户档（只补模板位，已存在真内容不覆盖）
+      if (a.workspaceDir !== workspaceDir) {
+        for (const f of ["USER.md", "SOUL.md", "AGENTS.md", "IDENTITY.md"]) {
+          const dst = path.join(a.workspaceDir, f);
+          const src = path.join(workspaceDir, f);
+          try {
+            const cur = await fs.readFile(dst, "utf-8");
+            // initWorkspace 刚建的模板（fresh 列出）或空 → 用共享版初始化；agent 自己改过则保留
+            if (fresh.includes(f) || !cur.trim())
+              await fs.copyFile(src, dst).catch(() => {});
+          } catch {}
+        }
+      }
       // TOOLS.md 自动生成：工具清单落盘到工作区（供 agent/用户阅读）
       await fs.writeFile(
         path.join(a.workspaceDir, "TOOLS.md"),
@@ -292,45 +340,61 @@ async function main() {
   }
 
   // 梦境（Dreaming）：浅眠→REM→深眠，短期记忆提炼晋升；设置页与调度器共用
-  const dreamDeps = {
-    db,
-    shortTerm,
-    dreaming: loadDreamingConfig((config as any).dreaming),
-    // L2 主题档案：workspace/memory/topics/*.md，随 reindex 周期自动进检索索引
-    topicStore: {
-      read: async (name: string) => {
-        try {
-          return await fs.readFile(path.join(memoryDir, "topics", name), "utf-8");
-        } catch {
-          return null;
-        }
+  // 梦境依赖按 agent 工作区隔离（2026-10-30）：短期池/游标/L1/L2 各自一份
+  function dreamDepsFor(a: any) {
+    const memDir = path.join(a.workspaceDir, "memory");
+    return {
+      db,
+      shortTerm,
+      agent: a.name,
+      dreaming: loadDreamingConfig((config as any).dreaming),
+      // L2 主题档案：<agentWs>/memory/topics/*.md，随 reindex 周期自动进检索索引
+      topicStore: {
+        read: async (name: string) => {
+          try {
+            return await fs.readFile(path.join(memDir, "topics", name), "utf-8");
+          } catch {
+            return null;
+          }
+        },
+        write: async (name: string, content: string) => {
+          const dir = path.join(memDir, "topics");
+          await fs.mkdir(dir, { recursive: true });
+          await fs.writeFile(path.join(dir, name), content, "utf-8");
+        },
       },
-      write: async (name: string, content: string) => {
-        const dir = path.join(memoryDir, "topics");
-        await fs.mkdir(dir, { recursive: true });
-        await fs.writeFile(path.join(dir, name), content, "utf-8");
-      },
-    },
-    llmGenerate: async (prompt: string) =>
-      (
-        await llm.generate({
-          model: config.defaultModel,
-          messages: [{ role: "user" as const, content: prompt }],
-        })
-      ).content,
-    readMemory: () => memory.readMemory(),
-    writeMemory: (content: string) => memory.writeMemory(content),
-    maskSecret: maskSecrets,
-  };
+      llmGenerate: async (prompt: string) =>
+        (
+          await llm.generate({
+            model: config.defaultModel,
+            messages: [{ role: "user" as const, content: prompt }],
+          })
+        ).content,
+      readMemory: () => a.memory.readMemory(),
+      writeMemory: (content: string) => a.memory.writeMemory(content),
+      maskSecret: maskSecrets,
+    };
+  }
   let dreamBusy = false;
   async function runDreamingCycle() {
     if (dreamBusy) throw new Error("上一次梦境仍在运行中");
     dreamBusy = true;
     try {
-      const light = await lightDreaming(dreamDeps);
-      const rem = await remDreaming(dreamDeps);
-      const deep = await deepDreaming(dreamDeps);
-      return { light, rem, deep };
+      const acc = { light: { processed: 0, extracted: 0 }, rem: { candidates: 0, themes: [] as string[] }, deep: { promoted: 0, forgotten: 0, migrated: 0 } };
+      for (const a of Object.values(agents) as any[]) {
+        const deps = dreamDepsFor(a);
+        const light = await lightDreaming(deps);
+        const rem = await remDreaming(deps);
+        const deep = await deepDreaming(deps);
+        acc.light.processed += light.processed;
+        acc.light.extracted += light.extracted;
+        acc.rem.candidates += rem.candidates;
+        acc.rem.themes.push(...(rem.themes ?? []).map((t: string) => `${a.name}:${t}`));
+        acc.deep.promoted += deep.promoted;
+        acc.deep.forgotten += deep.forgotten;
+        acc.deep.migrated += deep.migrated;
+      }
+      return acc as unknown as Record<string, unknown>;
     } finally {
       dreamBusy = false;
     }
@@ -443,6 +507,7 @@ async function main() {
     tools,
     searcher,
     memory,
+    resourcesFor,
     config,
     agents,
     embedding,

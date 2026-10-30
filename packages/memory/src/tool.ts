@@ -10,6 +10,11 @@ export interface MemorySearchToolOpts {
   weights?: { vectorWeight?: number; textWeight?: number };
   /** 检索状态回调（mode/命中数展示用） */
   onStatus?: (s: { mode: string; hits: number }) => void;
+  /**
+   * 多工作区隔离（2026-10-30）：按 ctx.workDir 解析该 agent 的检索资源。
+   * 提供时优先于顶层 searcher/hybrid（每次 execute 现取）。
+   */
+  forWorkDir?: (workDir: string) => { searcher: MemorySearcher; hybrid?: HybridSearch };
 }
 
 export function createMemorySearchTool(
@@ -27,9 +32,12 @@ export function createMemorySearchTool(
       corpus: z.enum(["memory", "sessions", "all"]).optional(),
     }),
     async execute(input: any, ctx: ToolContext) {
+      // 分发：本 agent 工作区的资源（无 forWorkDir 时回退顶层单例，单测/旧链路兼容）
+      const res = opts.forWorkDir?.(ctx.workDir) ?? { searcher, hybrid: opts.hybrid };
+      const hybrid = res.hybrid;
       const corpus = input.corpus ?? "all";
-      if (opts.hybrid && corpus !== "all") {
-        const r = await opts.hybrid.search(input.query, {
+      if (hybrid && corpus !== "all") {
+        const r = await hybrid.search(input.query, {
           limit: input.maxResults,
           source: corpus === "sessions" ? "session" : "memory",
           vectorWeight: opts.weights?.vectorWeight,
@@ -38,16 +46,16 @@ export function createMemorySearchTool(
         opts.onStatus?.({ mode: r.mode, hits: r.hits.length });
         return { mode: r.mode, hits: r.hits };
       }
-      if (opts.hybrid && corpus === "all") {
+      if (hybrid && corpus === "all") {
         // all：两通道各查一次再合
         const [m, s] = await Promise.all([
-          opts.hybrid.search(input.query, {
+          hybrid.search(input.query, {
             limit: input.maxResults,
             source: "memory",
             vectorWeight: opts.weights?.vectorWeight,
             textWeight: opts.weights?.textWeight,
           }),
-          opts.hybrid.search(input.query, {
+          hybrid.search(input.query, {
             limit: input.maxResults,
             source: "session",
             vectorWeight: opts.weights?.vectorWeight,

@@ -342,6 +342,11 @@ function initializeSchema(db: Database): void {
   if (!stmCols.some((c) => c.name === "dormant_at")) {
     db.exec("ALTER TABLE short_term_memory ADD COLUMN dormant_at INTEGER");
   }
+  // 2026-10-30 多工作区完全隔离：短期池按 agent 分区；存量无主行归 default（历史共享记忆的家）
+  if (!stmCols.some((c) => c.name === "agent")) {
+    db.exec("ALTER TABLE short_term_memory ADD COLUMN agent TEXT");
+    db.exec("UPDATE short_term_memory SET agent='default' WHERE agent IS NULL");
+  }
 
   // 旧库的 memory_entries 缺 content_hash/created_at 两列（IncrementalIndex 依赖）→ 补齐
   const meCols = db.prepare("PRAGMA table_info(memory_entries)").all() as Array<{ name: string }>;
