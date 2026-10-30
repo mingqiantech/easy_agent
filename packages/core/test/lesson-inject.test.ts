@@ -4,6 +4,9 @@ import path from "node:path";
 import os from "node:os";
 import { BasicMemory, extractLessonSections } from "@easy-agent/core/memory/basic";
 
+// 与实现同源取日期（本地时区）：UTC 日期在 00:00-08:00 CST 会与代码错位
+const localDay = (offset = 0) => BasicMemory.localDate(offset);
+
 const WORK = fs.mkdtempSync(path.join(os.tmpdir(), "easy-agent-lesson-test-"));
 
 describe("教训区注入：近 N 天日报复盘段落进 system prompt", () => {
@@ -35,10 +38,8 @@ describe("教训区注入：近 N 天日报复盘段落进 system prompt", () =>
   });
 
   it("buildSystemPrompt 含昨天日报教训、不含今天（今天全文另注入）", async () => {
-    const today = new Date().toISOString().slice(0, 10);
-    const y = new Date(Date.parse(`${today}T00:00:00Z`) - 86400000)
-      .toISOString()
-      .slice(0, 10);
+    const today = localDay();
+    const y = localDay(1);
     fs.mkdirSync(path.join(WORK, "memory"), { recursive: true });
     fs.writeFileSync(
       path.join(WORK, "memory", `${y}.md`),
@@ -60,10 +61,8 @@ describe("教训区注入：近 N 天日报复盘段落进 system prompt", () =>
   });
 
   it("env=0 禁用；window 外的旧教训不收", async () => {
-    const today = new Date().toISOString().slice(0, 10);
-    const old = new Date(Date.parse(`${today}T00:00:00Z`) - 30 * 86400000)
-      .toISOString()
-      .slice(0, 10);
+    const today = localDay();
+    const old = localDay(30);
     fs.writeFileSync(
       path.join(WORK, "memory", `${old}.md`),
       `## 教训（很久）\n- 30 天前的教训\n`,

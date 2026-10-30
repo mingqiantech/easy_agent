@@ -5,6 +5,12 @@ import { SkillManager } from "../skill/manager.js";
 export class BasicMemory {
   constructor(private workDir: string) {}
 
+  /** 本地时区日期 YYYY-MM-DD（en-CA 格式跟随本地时区）。旧版用 toISOString 的 UTC 日：
+   *  GMT+8 每天 00:00-08:00 会把"今天"算成昨天 → 当日 diary 不注入、教训窗口错位 */
+  static localDate(offsetDays = 0): string {
+    return new Date(Date.now() - offsetDays * 86400000).toLocaleDateString("en-CA");
+  }
+
   /** 发现工作区技能：<workDir>/skills/<name>/SKILL.md */
   async listSkills() {
     return new SkillManager(path.join(this.workDir, "skills")).scan();
@@ -33,7 +39,7 @@ export class BasicMemory {
   async appendDaily(entry: string): Promise<void> {
     const dir = path.join(this.workDir, "memory");
     await fs.mkdir(dir, { recursive: true });
-    const today = new Date().toISOString().slice(0, 10);
+    const today = BasicMemory.localDate();
     const file = path.join(dir, `${today}.md`);
     const time = new Date().toLocaleTimeString("zh-CN", { hour12: false });
     try {
@@ -136,15 +142,14 @@ triggers: [示例]
    * days 默认 7（env EASY_AGENT_LESSON_DAYS 覆盖，0=禁用）；从昨天往前数，今天全文另注入。
    * 总量上限 4000 字，按天均摊防单篇日报吃掉全部预算。
    */
-  async recentLessons(todayIso: string, days?: number): Promise<string> {
+  async recentLessons(days?: number): Promise<string> {
     const window =
       days ?? (Number(process.env.EASY_AGENT_LESSON_DAYS ?? 7) || 0);
     if (window <= 0) return "";
     const perDayCap = Math.floor(4000 / window);
     const out: string[] = [];
-    const base = Date.parse(`${todayIso}T00:00:00Z`);
     for (let i = 1; i <= window; i++) {
-      const day = new Date(base - i * 86400000).toISOString().slice(0, 10);
+      const day = BasicMemory.localDate(i);
       const md = await this.readIfExists(`memory/${day}.md`);
       if (!md?.trim()) continue;
       const lessons = extractLessonSections(md);
@@ -155,7 +160,7 @@ triggers: [示例]
 
   async buildSystemPrompt(): Promise<string> {
     let prompt = `You are a helpful AI assistant with tools. Be direct and concise.
-Current date: ${new Date().toISOString().slice(0, 10)}
+Current date: ${BasicMemory.localDate()}
 Working directory: ${this.workDir}
 Respond in the user's language.`;
 
@@ -170,15 +175,15 @@ Respond in the user's language.`;
     if (mem && !mem.includes("No memories yet"))
       sections.push(["important_context", "Long-Term Memory", mem]);
 
-    // 当日 diary：详细但用到才查 —— 只注入今天那份，控制基线 token
-    const today = new Date().toISOString().slice(0, 10);
+    // 当日 diary：详细但用到才查 —— 只注入今天那份（本地时区日期），控制基线 token
+    const today = BasicMemory.localDate();
     const diary = await this.readIfExists(`memory/${today}.md`);
     if (diary?.trim()) sections.push(["diary_today", `Today's Diary (${today})`, diary]);
 
     // 教训区：扫描近 N 天（默认 7）日报里带「教训/复盘/真因/坑/红线」标题的段落。
     // 背景（2026-10-30 误诊复盘）：之前只注入当日 diary，写进昨天日报的教训隔天就出不了
     // 上下文，同类故障隔天必重踩。今天那份已全文注入，这里从昨天往前数。
-    const lessons = await this.recentLessons(today);
+    const lessons = await this.recentLessons();
     if (lessons)
       sections.push(["recent_lessons", "Recent Lessons（近几天复盘沉淀，同类问题先对照此清单）", lessons]);
 
