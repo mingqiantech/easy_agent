@@ -228,6 +228,11 @@ export function createApp(deps: ServerDeps): Hono {
   app.get("/api/topology", (c) => {
     const db = getDatabase();
     const nowTs = Date.now();
+    // 实时运行台账（轮开始写入/轮末删除）：真·工作状态唯一来源
+    const turnMap = new Map<string, any>(
+      (db.prepare("SELECT session_id, steps_done, current_tool, started_at, last_step_at FROM active_turns").all() as any[])
+        .map((r) => [r.session_id, r]),
+    );
 
     const nodes = Object.values(deps.agents).map((a) => {
       const agg = db
@@ -263,6 +268,7 @@ export function createApp(deps: ServerDeps): Hono {
 
       // 实际运行模型：以最近活跃会话的 model 为准（会话可单独切换，配置默认会过时）
       const effectiveModel = tasks.find((t: any) => t.model)?.model ?? a.model;
+      const runningNow = (tasks ?? []).filter((t: any) => turnMap.has(t.id));
       return {
         name: a.name,
         model: effectiveModel,
@@ -271,7 +277,17 @@ export function createApp(deps: ServerDeps): Hono {
         thinking: a.thinking,
         sessions: agg?.c ?? 0,
         lastActive: agg?.last ?? 0,
-        busy: nowTs - (agg?.last ?? 0) < 120000, // 2 分钟内有更新
+        busy: runningNow.length > 0, // 真·在跑（台账）；此前是"2 分钟内有更新"的猜测
+        working: runningNow.map((t: any) => {
+          const tr = turnMap.get(t.id);
+          return {
+            sessionId: t.id,
+            title: t.title ?? "untitled",
+            step: tr.steps_done,
+            tool: tr.current_tool ?? null,
+            sinceSec: Math.max(0, Math.round((nowTs - tr.started_at) / 1000)),
+          };
+        }),
         subAgentCalls: sub?.n ?? 0,
         runs: (runs ?? []).map((r) => ({
           childSessionId: r.child_session_id,
@@ -290,6 +306,7 @@ export function createApp(deps: ServerDeps): Hono {
           model: t.model,
           msgCount: t.msg_count,
           ageSec: Math.max(0, Math.round((nowTs - t.updated_at) / 1000)),
+          running: turnMap.has(t.id),
         })),
       };
     });

@@ -624,6 +624,11 @@ export class SessionManager {
           // 结果仍按 toolCalls 原序落库保持与 assistant 消息对应；单轮耗时从 N×降到 ~1×，
           // 也直接减少撞 20 步封顶的概率
           for (const tc of response.toolCalls) options.onToolCall?.(tc.name, tc.input);
+          // 实时工作状态台账：拓扑页据此显示“正在跑什么工具”（轮末 finally 删行自然消失）
+          db.prepare("UPDATE active_turns SET current_tool = ? WHERE session_id = ?").run(
+            response.toolCalls.map((tc) => tc.name).join(","),
+            sessionId,
+          );
           const results = await Promise.all(
             response.toolCalls.map((tc) =>
               options.toolRegistry!.execute(tc.name, tc.input, {
@@ -656,6 +661,7 @@ export class SessionManager {
             turnAborted = true;
             break;
           }
+          db.prepare("UPDATE active_turns SET current_tool = NULL WHERE session_id = ?").run(sessionId);
         }
 
         if (turnAborted || ctrl.signal.aborted) {

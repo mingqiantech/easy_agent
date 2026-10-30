@@ -90,7 +90,8 @@ function initializeSchema(db: Database): void {
       started_at INTEGER NOT NULL,
       last_step_at INTEGER NOT NULL,
       steps_done INTEGER NOT NULL DEFAULT 0,
-      resume_count INTEGER NOT NULL DEFAULT 0
+      resume_count INTEGER NOT NULL DEFAULT 0,
+      current_tool TEXT
     );
 
     -- 短期记忆表（Dreaming 晋升来源）
@@ -346,6 +347,12 @@ function initializeSchema(db: Database): void {
   if (!stmCols.some((c) => c.name === "agent")) {
     db.exec("ALTER TABLE short_term_memory ADD COLUMN agent TEXT");
     db.exec("UPDATE short_term_memory SET agent='default' WHERE agent IS NULL");
+  }
+
+  // 2026-10-30 拓扑实时工作状态：台账记执行中的工具名（工具轮开跑写入，完成置 NULL）
+  const atCols = db.prepare("PRAGMA table_info(active_turns)").all() as Array<{ name: string }>;
+  if (!atCols.some((c) => c.name === "current_tool")) {
+    db.exec("ALTER TABLE active_turns ADD COLUMN current_tool TEXT");
   }
 
   // 旧库的 memory_entries 缺 content_hash/created_at 两列（IncrementalIndex 依赖）→ 补齐
