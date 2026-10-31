@@ -74,10 +74,10 @@
     .messages::-webkit-scrollbar-track{background:transparent}
     .messages::-webkit-scrollbar-corner{background:transparent}
     /* 宽表格：气泡内独立横向滚动（不撑破列宽，也不影响整页布局） */
-    .message .clippable.md .md-table-wrap{overflow-x:auto;max-width:100%;scrollbar-width:thin}
-    .message .clippable.md .md-table-wrap::-webkit-scrollbar{height:7px}
+    .message .clippable.md .md-table-wrap{overflow-x:scroll;max-width:100%;scrollbar-width:thin;scrollbar-color:#c3c9d4 transparent}
+    .message .clippable.md .md-table-wrap::-webkit-scrollbar{height:8px}
     .message .clippable.md .md-table-wrap::-webkit-scrollbar-thumb{background:#c3c9d4;border-radius:4px}
-    .message .clippable.md table{width:max-content;min-width:100%}
+    .message .clippable.md .md-table-wrap::-webkit-scrollbar-track{background:rgba(0,0,0,.04);border-radius:4px}
     #chatView{position:relative}
     /* 右侧压缩节点导航：历史摘要minymap，点击跳回原文（2026-10-31 elf 点单） */
     /* 话题轨道：右侧垂直居中小圆点列。
@@ -172,8 +172,8 @@
     .md .circ{margin:8px 0;font-size:16.5px;font-weight:600;color:#2b3038;background:var(--accent-soft);border-left:3px solid var(--accent);border-radius:6px;padding:6px 12px}
     .md ol{margin:6px 0;padding-left:22px}
     .md ol li{margin:2px 0}
-    .md table{border-collapse:collapse;margin:8px 0;font-size:15.5px;display:block;overflow-x:auto;max-width:100%}
-    .md th,.md td{border:1px solid var(--border);padding:6px 12px;text-align:left;white-space:nowrap}
+    .md table{border-collapse:collapse;margin:8px 0;font-size:15.5px;display:table;width:max-content}
+    .md th,.md td{border:1px solid var(--border);padding:6px 12px;text-align:left;white-space:normal;max-width:340px}
     .md th{background:var(--hover);font-weight:600}
     .md tr:nth-child(even) td{background:rgba(91,122,140,.04)}
     /* 长文本折叠：超过高度自动收起来，渐变遮罩 + 展开全部 */
@@ -717,11 +717,12 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
           continue;
         }
         // 表格：当前行含 | 且下一行是分隔行
-        if(ln.trim().startsWith('|')&&i+1<lines.length&&/^\|[\s:|-]+\|?\s*$/.test(lines[i+1].trim())){
+        if((ln.includes('|')&&i+1<lines.length&&/^[\s:|-]*\|[\s:|-]*\|[\s:|-]*$/.test(lines[i+1].trim())&&/-/.test(lines[i+1]))||
+           (ln.trim().startsWith('|')&&i+1<lines.length&&/^\|?[\s:|-]+\|?\s*$/.test(lines[i+1].trim()))){
           closeLists();
           const rows=[];
           let j=i;
-          while(j<lines.length&&lines[j].trim().startsWith('|')){rows.push(lines[j].trim());j++;}
+          while(j<lines.length&&lines[j].includes('|')&&lines[j].trim()){rows.push(lines[j].trim());j++;}
           out+='<div class="md-table-wrap"><table>';
           rows.forEach((r,ri)=>{
             if(ri===1)return; // 分隔行
