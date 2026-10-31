@@ -73,15 +73,19 @@
        悬停卡改为挂在 #chatView 上的独立 .nav-tip——旧方案把卡片放在 overflow 滚动容器
        的绝对定位子元素里，overflow-x:visible+overflow-y:auto 组合被浏览器按 both-auto 裁剪，
        卡片永远弹不出来（2026-10-31 elf 反馈"悬停没显示"真因） */
-    .summ-nav{position:absolute;right:12px;top:50%;transform:translateY(-50%);display:none;flex-direction:column;gap:5px;align-items:center;width:14px;max-height:72%;overflow-y:auto;scrollbar-width:none;z-index:6}
+    .summ-nav{position:absolute;right:6px;top:50%;transform:translateY(-50%);display:none;flex-direction:column;gap:6px;align-items:center;width:36px;max-height:76%;overflow-y:auto;scrollbar-width:none;z-index:6}
     .summ-nav.show{display:flex}
-    .sn-item{width:8px;height:8px;flex-shrink:0;border-radius:50%;background:#c8cbd2;cursor:pointer;transition:transform .12s,background .12s;box-shadow:0 0 0 2px var(--bg)}
+    .sn-item{position:relative;width:8px;height:8px;flex-shrink:0;border-radius:50%;background:#c8cbd2;cursor:pointer;transition:transform .12s,background .12s;box-shadow:0 0 0 2px var(--bg)}
     .sn-item:hover{background:var(--accent2);transform:scale(1.6)}
     /* 当前可见话题对应的点：加粗主色（滚动实时同步） */
     .sn-item.sn-active{background:var(--accent);transform:scale(1.35)}
     .sn-item.sn-summ{background:var(--accent2)}
-    .nav-tip{position:absolute;right:32px;max-width:200px;background:var(--card);border:1px solid var(--border);border-radius:9px;padding:3px 7px;box-shadow:var(--shadow);font-size:8.5px;line-height:1.4;color:var(--fg);z-index:9;display:none;pointer-events:none;word-break:break-all}
-    .nav-tip .nt-ts{color:var(--muted);font-size:8px;margin-bottom:1px}
+    /* 点间竖杠；active 段（active 点与其上下相邻点之间）用主色加粗 */
+    .sn-item::before{content:"";position:absolute;left:50%;top:-7px;height:7px;width:2px;margin-left:-1px;border-radius:1px;background:#d8dae0}
+    .sn-item:first-child::before{display:none}
+    .sn-item.sn-active::before,.sn-item.sn-next::before{background:var(--accent);width:3px;margin-left:-1.5px}
+    .nav-tip{position:absolute;right:46px;max-width:280px;background:var(--card);border:1px solid var(--border);border-radius:9px;padding:4px 8px;box-shadow:var(--shadow);font-size:7px;line-height:1.35;color:var(--fg);z-index:9;display:none;pointer-events:none;word-break:break-all}
+    .nav-tip .nt-ts{color:var(--muted);font-size:6.5px;margin-bottom:1px}
     .message.summ .summ-body{font-size:12.5px;color:var(--muted);margin-top:4px;white-space:pre-wrap}
     @media (max-width:1100px){.summ-nav{display:none!important}}
     .message{margin-bottom:14px;display:flex;gap:10px;max-width:85%}
@@ -893,7 +897,7 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
         let body,tag='';
         if(x.kind==='s'){body=navPreview(String(x.m.content).split('[对话摘要]')[1]||'');tag='🗜 压缩 · ';}
         else body=navPreview(x.m.content)||((x.m.metadata&&x.m.metadata.images&&x.m.metadata.images.length)?`🖼 图片 ×${x.m.metadata.images.length}`:'（空消息）');
-        return `<div class="sn-item${x.kind==='s'?' sn-summ':''}" onclick="jumpNav(${idx})" data-ts="${esc(tag+ts)}" data-body="${esc(body.slice(0,90))}"></div>`;
+        return `<div class="sn-item${x.kind==='s'?' sn-summ':''}" onclick="jumpNav(${idx})" data-ts="${esc(tag+ts)}" data-body="${esc(body.slice(0,140))}"></div>`;
       }).join('');
       nav.classList.add('show');
       // 悬停浮卡：委托在轨道上（绑定一次即可，innerHTML 重渲染不影响）
@@ -928,7 +932,7 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
       const line=c.scrollTop+c.clientHeight*0.33;
       let act=-1;
       anchors.forEach((el,i)=>{if(el.offsetTop<line)act=i;});
-      dots.forEach((d,i)=>d.classList.toggle('sn-active',i===act));
+      dots.forEach((d,i)=>{d.classList.toggle('sn-active',i===act);d.classList.toggle('sn-next',i===act+1);});
     }
     function jumpNav(idx){
       // DOM 里用户消息按气泡类匹配；工具内嵌的 user 变体不存在，顺位与 anchors 一致
