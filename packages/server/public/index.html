@@ -73,14 +73,14 @@
        悬停卡改为挂在 #chatView 上的独立 .nav-tip——旧方案把卡片放在 overflow 滚动容器
        的绝对定位子元素里，overflow-x:visible+overflow-y:auto 组合被浏览器按 both-auto 裁剪，
        卡片永远弹不出来（2026-10-31 elf 反馈"悬停没显示"真因） */
-    /* 话题轨道：连续细轨线贯穿；点距 32px；线从点背后经过（点有底色圈自然断开） */
     .summ-nav{position:absolute;right:6px;top:50%;transform:translateY(-50%);display:none;flex-direction:column;gap:24px;align-items:center;width:36px;max-height:82%;overflow-y:auto;scrollbar-width:none;z-index:6;padding:4px 0}
     .summ-nav.show{display:flex}
-    .summ-nav::before{content:"";position:absolute;left:50%;top:0;bottom:0;width:1px;margin-left:-0.5px;background:#d8dae0;z-index:-1}
     .sn-item{width:8px;height:8px;flex-shrink:0;border-radius:50%;background:#c8cbd2;cursor:pointer;transition:transform .12s,background .12s;box-shadow:0 0 0 2px var(--bg)}
     .sn-item:hover{background:var(--accent2);transform:scale(1.6)}
-    /* 当前可见话题对应的点：主色（滚动实时同步） */
-    .sn-item.sn-active{background:var(--accent);transform:scale(1.35)}
+    /* 仅当前节点挂竖杠（上下各 32px 探向邻点）；其余保持纯圆点 */
+    .sn-item.sn-active{position:relative;background:var(--accent);transform:scale(1.35)}
+    /* 一条 64px 竖杠穿过当前点、两端抵到邻点圆心（点有底色圈，视觉自然衔接） */
+    .sn-item.sn-active::before{content:"";position:absolute;left:50%;top:-28px;height:64px;width:1px;margin-left:-0.5px;background:var(--accent);border-radius:1px;z-index:-1}
     .sn-item.sn-summ{background:var(--accent2)}
     .nav-tip{position:absolute;right:46px;max-width:340px;background:var(--card);border:1px solid var(--border);border-radius:9px;padding:6px 10px;box-shadow:var(--shadow);font-size:11px;line-height:1.45;color:var(--fg);z-index:9;display:none;pointer-events:none;word-break:break-all}
     .nav-tip .nt-ts{color:var(--muted);font-size:9.5px;margin-bottom:2px}
@@ -930,7 +930,10 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
       const line=c.scrollTop+c.clientHeight*0.33;
       let act=-1;
       anchors.forEach((el,i)=>{if(el.offsetTop<line)act=i;});
+      // 已滚到底：最后一条消息高于 1/3 线时按线判断永远够不到末点 → 直接钉最后一个
+      if(c.scrollHeight-c.scrollTop-c.clientHeight<8)act=anchors.length-1;
       dots.forEach((d,i)=>d.classList.toggle('sn-active',i===act));
+      if(act>=0&&dots[act]&&dots[act].scrollIntoView)dots[act].scrollIntoView({block:'nearest'}); // 轨道跟着走 */
     }
     function jumpNav(idx){
       // DOM 里用户消息按气泡类匹配；工具内嵌的 user 变体不存在，顺位与 anchors 一致
