@@ -73,14 +73,14 @@
        悬停卡改为挂在 #chatView 上的独立 .nav-tip——旧方案把卡片放在 overflow 滚动容器
        的绝对定位子元素里，overflow-x:visible+overflow-y:auto 组合被浏览器按 both-auto 裁剪，
        卡片永远弹不出来（2026-10-31 elf 反馈"悬停没显示"真因） */
-    .summ-nav{position:absolute;right:6px;top:50%;transform:translateY(-50%);display:none;flex-direction:column;gap:24px;align-items:center;width:36px;max-height:82%;overflow-y:auto;scrollbar-width:none;z-index:6;padding:4px 0}
+    .summ-nav{position:absolute;right:6px;top:50%;transform:translateY(-50%);display:none;flex-direction:column;gap:8px;align-items:center;width:36px;max-height:82%;overflow-y:auto;scrollbar-width:none;z-index:6;padding:4px 0}
     .summ-nav.show{display:flex}
     .sn-item{width:8px;height:8px;flex-shrink:0;border-radius:50%;background:#c8cbd2;cursor:pointer;transition:transform .12s,background .12s;box-shadow:0 0 0 2px var(--bg)}
     .sn-item:hover{background:var(--accent2);transform:scale(1.6)}
     /* 当前节点：空心圈 + 上下各撑开 14px，与其他点明显拉开；其余保持紧凑正常间距 */
-    .sn-item.sn-active{position:relative;width:10px;height:10px;background:transparent;border:2px solid var(--accent);box-shadow:none;transform:none;margin:14px 0;animation:none}
+    .sn-item.sn-active{position:relative;width:10px;height:10px;background:transparent;border:2px solid var(--accent);box-shadow:none;transform:none;margin:16px 0;animation:none}
     .sn-item.sn-active:hover{background:var(--accent)}
-    .sn-item.sn-active::before{content:"";position:absolute;left:50%;top:50%;height:20px;width:1px;margin-left:-0.5px;background:var(--accent);z-index:-1}
+    .sn-item.sn-active::before{content:"";position:absolute;left:50%;top:-14px;height:52px;width:1px;margin-left:-0.5px;background:var(--accent);z-index:-1}
     .sn-item.sn-summ{background:var(--accent2)}
     .nav-tip{position:absolute;right:46px;max-width:340px;background:var(--card);border:1px solid var(--border);border-radius:9px;padding:6px 10px;box-shadow:var(--shadow);font-size:11px;line-height:1.45;color:var(--fg);z-index:9;display:none;pointer-events:none;word-break:break-all}
     .nav-tip .nt-ts{color:var(--muted);font-size:9.5px;margin-bottom:2px}
