@@ -68,10 +68,12 @@
     #chatView{position:relative}
     /* 右侧压缩节点导航：历史摘要minymap，点击跳回原文（2026-10-31 elf 点单） */
     /* 话题轨道：右侧一列小圆点，悬停浮出内容卡（点击跳转）；不占对话宽度 */
-    .summ-nav{position:absolute;right:8px;top:20px;bottom:90px;display:none;flex-direction:column;gap:5px;align-items:center;width:14px;z-index:5;overflow:visible}
+    .summ-nav{position:absolute;right:1px;top:20px;bottom:90px;display:none;flex-direction:column;gap:5px;align-items:center;width:14px;z-index:5;overflow:visible}
     .summ-nav.show{display:flex}
-    .sn-item{position:relative;width:8px;height:8px;flex-shrink:0;border-radius:50%;background:#c8cbd2;cursor:pointer;transition:transform .12s}
+    .sn-item{position:relative;width:8px;height:8px;flex-shrink:0;border-radius:50%;background:#c8cbd2;cursor:pointer;transition:transform .12s,background .12s;box-shadow:0 0 0 2px var(--bg)}
     .sn-item:hover{background:var(--accent2);transform:scale(1.5)}
+    /* 当前可见话题对应的点：加粗主色（滚动实时同步） */
+    .sn-item.sn-active{background:var(--accent);transform:scale(1.35)}
     .sn-item.sn-summ{background:var(--accent2)}
     .sn-item .sn-card{display:none;position:absolute;right:16px;top:-6px;width:260px;background:var(--card);border:1px solid var(--border);border-radius:10px;padding:7px 10px;box-shadow:var(--shadow);font-size:11.5px;line-height:1.5;color:var(--fg);z-index:9}
     .sn-item:hover .sn-card{display:block}
@@ -862,6 +864,7 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
       // 图片异步加载会再撑高：1s 内仍在底部附近就继续钉底（用户自己上滚了就不抢）
       setTimeout(()=>{if(c.scrollHeight-c.scrollTop-c.clientHeight<160)c.scrollTop=c.scrollHeight;},700);
       buildSummNav(messages);
+      syncNavActive();
       flashMatch();
       loadCtxChip();
     }
@@ -890,6 +893,20 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
       }).join('');
       nav.innerHTML=`<div class="sn-dot-wrap">${dots}</div>`;
       nav.classList.add('show');
+    }
+    /* 滚动 → 高亮：视口上边缘 1/3 线以下第一个锚点对应点激活 */
+    let navSyncQueued=false;
+    function syncNavActive(){
+      navSyncQueued=false;
+      const dots=document.querySelectorAll('#summNav .sn-item');
+      if(!dots.length)return;
+      const c=document.getElementById('messages');
+      const anchors=document.querySelectorAll('#messages .message.user, #messages .message.summ.titem');
+      if(anchors.length!==dots.length)return; // DOM 与锚点错位时不动作
+      const line=c.scrollTop+c.clientHeight*0.33;
+      let act=-1;
+      anchors.forEach((el,i)=>{if(el.offsetTop<line)act=i;});
+      dots.forEach((d,i)=>d.classList.toggle('sn-active',i===act));
     }
     function jumpNav(idx){
       // DOM 里用户消息按气泡类匹配；工具内嵌的 user 变体不存在，顺位与 anchors 一致
@@ -985,6 +1002,7 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
       s.style.display='flex';
       s.innerHTML=pendingImgs.map((im,i)=>`<div class="img-chip"><img src="data:${im.mimeType};base64,${im.dataBase64}"><button class="rm" onclick="pendingImgs.splice(${i},1);renderImgStrip()">✕</button></div>`).join('');
     }
+    document.getElementById('messages').addEventListener('scroll',()=>{if(!navSyncQueued){navSyncQueued=true;requestAnimationFrame(syncNavActive);}});
     document.getElementById('imgInput').addEventListener('change',e=>{pickImages([...e.target.files]);e.target.value='';});
     document.getElementById('input').addEventListener('paste',e=>{
       const items=[...(e.clipboardData&&e.clipboardData.items||[])].filter(i=>i.kind==='file'&&i.type.startsWith('image/'));
