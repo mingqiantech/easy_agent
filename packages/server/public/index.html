@@ -64,7 +64,9 @@
     .action-btn:disabled{opacity:.4;cursor:not-allowed}
     .view{flex:1;min-height:0;display:flex;flex-direction:column}
     .view[hidden]{display:none}
-    .messages{flex:1;overflow-y:auto;padding:22px;width:100%;max-width:940px;margin:0 auto}
+    .messages{flex:1;overflow-y:auto;padding:22px max(24px, calc((100% - 1080px)/2));width:100%}
+    .messages{scrollbar-width:thin}
+    .messages::-webkit-scrollbar:horizontal{height:0;display:none}
     #chatView{position:relative}
     /* 右侧压缩节点导航：历史摘要minymap，点击跳回原文（2026-10-31 elf 点单） */
     /* 话题轨道：右侧垂直居中小圆点列。
@@ -78,8 +80,8 @@
     /* 当前可见话题对应的点：加粗主色（滚动实时同步） */
     .sn-item.sn-active{background:var(--accent);transform:scale(1.35)}
     .sn-item.sn-summ{background:var(--accent2)}
-    .nav-tip{position:absolute;right:24px;max-width:220px;background:var(--card);border:1px solid var(--border);border-radius:9px;padding:4px 8px;box-shadow:var(--shadow);font-size:10.5px;line-height:1.4;color:var(--fg);z-index:9;display:none;pointer-events:none;word-break:break-all}
-    .nav-tip .nt-ts{color:var(--muted);font-size:9.5px;margin-bottom:1px}
+    .nav-tip{position:absolute;right:24px;max-width:200px;background:var(--card);border:1px solid var(--border);border-radius:9px;padding:3px 7px;box-shadow:var(--shadow);font-size:9.5px;line-height:1.4;color:var(--fg);z-index:9;display:none;pointer-events:none;word-break:break-all}
+    .nav-tip .nt-ts{color:var(--muted);font-size:8.5px;margin-bottom:1px}
     .message.summ .summ-body{font-size:12.5px;color:var(--muted);margin-top:4px;white-space:pre-wrap}
     @media (max-width:1100px){.summ-nav{display:none!important}}
     .message{margin-bottom:14px;display:flex;gap:10px;max-width:85%}
