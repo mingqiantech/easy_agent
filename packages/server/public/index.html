@@ -64,16 +64,21 @@
     .action-btn:disabled{opacity:.4;cursor:not-allowed}
     .view{flex:1;min-height:0;display:flex;flex-direction:column}
     .view[hidden]{display:none}
-    .messages{flex:1;overflow-y:auto;padding:22px max(24px, calc((100% - 1080px)/2));width:100%}
-    .messages{scrollbar-width:thin}
-    .messages::-webkit-scrollbar:horizontal{height:0;display:none}
+    /* 左右等距：纵向滚动条占右侧真实宽度 → 右 padding 补偿 scrollbar 宽；
+       横向滚动条从根源上禁掉（overflow-x:hidden，气泡本来就自动换行不需要横滚）。
+       注意不能配 scrollbar-width 标准属性——Chrome 121+ 见到它会无视下方
+       ::-webkit-scrollbar 自定义（上轮横条复活正是这个原因） */
+    .messages{flex:1;overflow-y:auto;overflow-x:hidden;padding:22px calc(max(24px, calc((100% - 1080px)/2)) - var(--sbw,8px)) 22px max(24px, calc((100% - 1080px)/2));width:100%;--sbw:8px}
+    .messages::-webkit-scrollbar{width:var(--sbw)}
+    .messages::-webkit-scrollbar-thumb{background:#c3c9d4;border-radius:4px}
+    .messages::-webkit-scrollbar-track{background:transparent}
     #chatView{position:relative}
     /* 右侧压缩节点导航：历史摘要minymap，点击跳回原文（2026-10-31 elf 点单） */
     /* 话题轨道：右侧垂直居中小圆点列。
        悬停卡改为挂在 #chatView 上的独立 .nav-tip——旧方案把卡片放在 overflow 滚动容器
        的绝对定位子元素里，overflow-x:visible+overflow-y:auto 组合被浏览器按 both-auto 裁剪，
        卡片永远弹不出来（2026-10-31 elf 反馈"悬停没显示"真因） */
-    .summ-nav{position:absolute;right:6px;top:50%;transform:translateY(-50%);display:none;flex-direction:column;gap:8px;align-items:center;width:36px;max-height:82%;overflow-y:auto;scrollbar-width:none;z-index:6;padding:4px 0}
+    .summ-nav{position:absolute;right:2px;top:50%;transform:translateY(-50%);display:none;flex-direction:column;gap:8px;align-items:center;width:36px;max-height:82%;overflow-y:auto;scrollbar-width:none;z-index:6;padding:4px 0}
     .summ-nav.show{display:flex}
     .sn-item{width:8px;height:8px;flex-shrink:0;border-radius:50%;background:#c8cbd2;cursor:pointer;transition:transform .12s,background .12s;box-shadow:0 0 0 2px var(--bg)}
     .sn-item:hover{background:var(--accent2);transform:scale(1.6)}
