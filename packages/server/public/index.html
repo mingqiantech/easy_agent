@@ -69,9 +69,15 @@
        注意不能配 scrollbar-width 标准属性——Chrome 121+ 见到它会无视下方
        ::-webkit-scrollbar 自定义（上轮横条复活正是这个原因） */
     .messages{flex:1;overflow-y:auto;overflow-x:hidden;padding:22px calc(max(24px, calc((100% - 1100px)/2) + var(--col-shift,36px)) - var(--sbw,8px)) 22px max(24px, calc((100% - 1100px)/2) - var(--col-shift,36px));width:100%;--sbw:8px}
-    .messages::-webkit-scrollbar{width:var(--sbw)}
+    .messages::-webkit-scrollbar{width:var(--sbw);height:8px}
     .messages::-webkit-scrollbar-thumb{background:#c3c9d4;border-radius:4px}
     .messages::-webkit-scrollbar-track{background:transparent}
+    .messages::-webkit-scrollbar-corner{background:transparent}
+    /* 宽表格：气泡内独立横向滚动（不撑破列宽，也不影响整页布局） */
+    .message .clippable.md .md-table-wrap{overflow-x:auto;max-width:100%;scrollbar-width:thin}
+    .message .clippable.md .md-table-wrap::-webkit-scrollbar{height:7px}
+    .message .clippable.md .md-table-wrap::-webkit-scrollbar-thumb{background:#c3c9d4;border-radius:4px}
+    .message .clippable.md table{width:max-content;min-width:100%}
     #chatView{position:relative}
     /* 右侧压缩节点导航：历史摘要minymap，点击跳回原文（2026-10-31 elf 点单） */
     /* 话题轨道：右侧垂直居中小圆点列。
@@ -716,14 +722,14 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
           const rows=[];
           let j=i;
           while(j<lines.length&&lines[j].trim().startsWith('|')){rows.push(lines[j].trim());j++;}
-          out+='<table>';
+          out+='<div class="md-table-wrap"><table>';
           rows.forEach((r,ri)=>{
             if(ri===1)return; // 分隔行
             const cells=r.replace(/^\|/,'').replace(/\|\s*$/,'').split('|');
             const tag=ri===0?'th':'td';
             out+='<tr>'+cells.map(c=>`<${tag}>${mdInline(c.trim())}</${tag}>`).join('')+'</tr>';
           });
-          out+='</table>';i=j;continue;
+          out+='</table></div>';i=j;continue;
         }
         const t=ln.trim();
         if(/^#{1,6}\s/.test(t)){closeLists();const lv=Math.min(t.match(/^#+/)[0].length,4);out+=`<h${lv+3}>${mdInline(t.replace(/^#+\s*/,''))}</h${lv+3}>`;i++;continue;}
