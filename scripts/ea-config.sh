@@ -36,8 +36,19 @@ usage() {
 ■ 通用
   ea-config get [jq路径]        # 缺省 .；例: get .websearch
   ea-config set '<jq过滤>'      # 例: set '.wecom.agentId = "life"'
-  ea-config check               # JSON 合法 + 网关健康 + agents 一览
+  ea-config check [--live]      # 分层自动校验（见下）；--live 加真实搜索探针
   ea-config restart [gateway|wecom|both]
+  ea-config cron-install        # 装 systemd 用户定时器，每 30 分钟自动 check
+  ea-config cron-remove
+
+■ check 分层方案（退出码=❌数；告警⚠️不影响退出码）
+  L0 配置：JSON 合法 + ConfigSchema 试加载 + 关键节存在
+  L1 进程：两个 systemd 服务 active + /health 可达
+  L2 数据：sqlite integrity_check + WAL 体积 + 僵尸轮次台账 + 备份新鲜度
+  L3 记忆：dreaming 三阶段最后运行时间（light≤8h/rem≤16h/deep≤30h）
+            + 各 agent MEMORY.md 可注入（非占位）
+  L4 通道：wecom 服务日志最近认证成功 + 会话固定表非空时 agent 名合法
+  L5(--live)：websearch 真实探针（计入一次搜索调用）+ 拓扑边可读
 
 --restart：编辑类命令写完后立即重启相关服务
 EOF
@@ -88,6 +99,10 @@ edit_cfg() { # <jq-filter> [--arg k v ...]
   cp "$CFG" "$CFG.bak-$(date +%m%d-%H%M%S)"
   mv "$tmp" "$CFG"
   echo "✅ 已写入 $CFG"
+  # 自动校验提醒：网关在跑且没要求 --restart 时，提示运行时仍是旧值
+  if [[ -z $RESTART ]] && curl -s --max-time 2 "$GW/health" >/dev/null 2>&1; then
+    echo "ℹ️ 文件已更新；运行中服务仍是旧配置（未加 --restart）。生效：ea-config restart gateway 或对应服务"
+  fi
 }
 
 cmd="${1:-help}"; shift || true
@@ -141,10 +156,141 @@ case "$cmd" in
   get) jq "${1:-.}" "$CFG" ;;
   set) edit_cfg "$1" ;;
   check)
-    jq empty "$CFG" && echo "🟢 JSON 合法"
-    curl -s "$GW/health" >/dev/null && echo "🟢 网关健康" || echo "🔴 网关未响应"
-    curl -s "$GW/api/agents" | jq -r '.agents[]|"\(.name): \(.model) thinking=\(.thinking) disable=\(.toolsDisable|join(",")) related=\(.relatedAgents // [] | join(",")) watch=\(.watchAgents // [] | join(","))"' ;;
+    exit_err=0
+    ok()   { echo "  ✅ $1"; }
+    warn() { echo "  ⚠️ $1"; }
+    bad()  { echo "  ❌ $1"; exit_err=$((exit_err+1)); }
+    LIVE=""; [[ "${1:-}" == "--live" ]] && LIVE=1
+    STATE=$(dirname "$CFG"); DB="$STATE/agent.db"
+
+    echo "L0 配置"
+    if jq empty "$CFG" 2>/dev/null; then ok "JSON 合法"; else bad "JSON 非法"; fi
+    if command -v bun >/dev/null && [[ -d ~/easy_agent/packages/config/src ]]; then
+      if (cd ~/easy_agent && CHECK_FILE="$CFG" bun -e '
+        const fs = require("fs");
+        const { ConfigSchema } = await import("./packages/config/src/schema.ts");
+        ConfigSchema.parse(JSON.parse(fs.readFileSync(process.env.CHECK_FILE, "utf8")));' >/dev/null 2>&1); then
+        ok "ConfigSchema 试加载通过"
+      else bad "schema 校验不过（服务会 crash-loop）"; fi
+    fi
+    jq -e '.model and .agents' "$CFG" >/dev/null && ok "model/agents 节存在" || warn "缺 model 或 agents 节"
+
+    echo "L1 进程"
+    for s in easy-agent easy-agent-wecom; do
+      st=$(systemctl --user is-active "$s.service" 2>/dev/null || true)
+      [[ $st == active ]] && ok "$s active" || bad "$s $st"
+    done
+    H=$(curl -s --max-time 5 "$GW/health" || true)
+    [[ -n $H ]] && ok "网关响应（uptime $(jq -r '.uptime' <<< "$H")s）" || bad "网关 /health 不可达"
+
+    echo "L2 数据"
+    if [[ -f $DB ]] && command -v sqlite3 >/dev/null; then
+      ic=$(sqlite3 "$DB" "PRAGMA integrity_check;" 2>/dev/null | head -1)
+      [[ $ic == ok ]] && ok "sqlite 完整性 ok" || bad "sqlite: $ic"
+      wal=$(stat -c%s "$DB-wal" 2>/dev/null || echo 0)
+      (( wal < 20*1048576 )) && ok "WAL $(numfmt --to=iec "$wal" 2>/dev/null || echo "$wal")" || warn "WAL 过大 $((wal/1048576))MB（重启后应 checkpoint）"
+      stale=$(sqlite3 "$DB" "SELECT COUNT(*) FROM active_turns WHERE last_step_at < (strftime('%s','now')*1000 - 15*60000);" 2>/dev/null || echo 0)
+      (( stale == 0 )) && ok "无僵尸轮次台账" || warn "发现 $stale 个 >15min 未推进的 active_turns（重启会自愉续跑）"
+      nb=$(curl -s --max-time 5 "$GW/api/backup" 2>/dev/null || true)
+      last=$(jq -r '.backups[0].name // empty' <<< "$nb" 2>/dev/null)
+      if [[ -n $last ]]; then
+        age_h=$(( ( $(date +%s)*1000 - $(jq -r '.backups[0].createdAt // 0' <<< "$nb" | cut -d. -f1) ) / 3600000 + 1 ))
+        (( age_h <= 49 )) && ok "最新备份 ${last:7:16}（≈${age_h}h 前）" || warn "备份已 ${age_h}h 未更新（间隔 $(jq -r '.settings.intervalHours' <<< "$nb")h）"
+      else warn "读不到备份列表"; fi
+    else warn "跳过 sqlite 检查（无 sqlite3 或 DB）"; fi
+
+    echo "L3 记忆"
+    if command -v sqlite3 >/dev/null && [[ -f $DB ]]; then
+      # 用用户实际设定判新鲜度（别拿写死的缺省值误报配置漂移；本次 check 开路就发现
+      # intervalMinutes=1440 而被硬编 8h 报假警）：读 settings.json，阈值=interval×2 宽限
+      ivl_min=$(jq -r '.dreaming.intervalMinutes // 120' "$STATE/settings.json" 2>/dev/null || echo 120)
+      if [[ "$(jq -r '.dreaming.enabled // true' "$STATE/settings.json" 2>/dev/null || echo true)" == "true" ]]; then
+        t=$(sqlite3 "$DB" "SELECT MAX(last_run_at) FROM dreaming_state;" 2>/dev/null)
+        age_h=$(( ( $(date +%s)*1000 - ${t:-0} ) / 3600000 ))
+        limit_h=$(( ivl_min * 2 / 60 ))
+        (( age_h <= limit_h )) && ok "梦境周期正常（上次运行 ${age_h}h 前，间隔 ${ivl_min}min）" \
+          || bad "梦境 ${age_h}h 未运行（间隔 ${ivl_min}min 的 2 倍宽限=${limit_h}h）→ 调度卡死？手动：POST /api/settings/dreaming/run"
+      else warn "梦境自动巩固已禁用（settings.dreaming.enabled=false）"; fi
+      for d in "$STATE/workspace" "$STATE"/workspaces/*; do
+        [[ -f $d/MEMORY.md ]] || continue
+        first=$(head -1 "$d/MEMORY.md" || true)
+        [[ $first == *"Long-Term Memory"* ]] || bad "$(basename "$d")/MEMORY.md 结构异常"
+        # 占位行与真内容共存 = 深眠晋升没删占位（10-20 老伤会误杀注入）
+        if [[ $(wc -l < "$d/MEMORY.md") -gt 3 ]] && grep -q "_No memories yet._" "$d/MEMORY.md"; then
+          bad "$(basename "$d")/MEMORY.md 占位行与内容共存（会误杀注入）"
+        fi
+      done
+      ok "各 agent MEMORY.md 检查完成"
+    fi
+
+    echo "L4 通道"
+    # 注意：本脚本开了 pipefail，grep -q 提前退会给了上游 SIGPIPE → 管道码非 0 误判失败；
+    # 日志匹配一律先落变量再 [[ =~ ]]
+    WLOG=$(journalctl --user -u easy-agent-wecom.service --since "1 day ago" --no-pager 2>/dev/null || true)
+    if [[ $WLOG == *"认证成功"* || $WLOG == *"Authenticated"* ]]; then
+      ok "wecom 近 24h 有认证成功记录"
+    else warn "wecom 无近期认证成功日志"; fi
+    pinned=$(jq -r '.wecom.chatAgents // {} | to_entries[].value' "$CFG" 2>/dev/null)
+    if [[ -n $pinned ]]; then
+      agents_json=$(curl -s --max-time 5 "$GW/api/agents" || true)
+      for pa in $pinned; do
+        jq -e --arg n "$pa" '.agents[]|select(.name==$n)' <<< "$agents_json" >/dev/null 2>&1 && ok "固定会话 agent $pa 存在" || bad "固定会话指向不存在的 agent: $pa"
+      done
+    else ok "无固定会话映射"; fi
+
+    if [[ -n $LIVE ]]; then
+      echo "L5 功能实测"
+      if command -v bun >/dev/null && [[ -d ~/easy_agent/packages/config/src ]]; then
+        (cd ~/easy_agent && bun -e '
+          import { loadConfig } from "./packages/config/src/loader.ts";
+          import { createWebsearchTool } from "./packages/core/src/tool/builtins/websearch.ts";
+          const c = loadConfig() as any;
+          const ws = c.websearch ?? {};
+          const tool = createWebsearchTool({ ...ws, ollamaBaseUrl: ws.ollamaBaseUrl ?? c.providers?.ollama?.baseUrl });
+          const r: any = await tool.execute({ query: "hello", maxResults: 1 }, { sessionId: "chk", agentId: "default", workDir: "/tmp" });
+          const o = r.output ?? r;
+          if ((o.results ?? []).length) console.log("  ✅ websearch 实测通过 (provider=" + o.provider + ")");
+          else { console.log("  ❌ websearch 实测无结果: " + JSON.stringify(o).slice(0,120)); process.exitCode = 1; }
+        ' 2>/dev/null) || { echo "  ❌ websearch 实测失败"; exit_err=$((exit_err+1)); }
+      fi
+      edges=$(curl -s --max-time 5 "$GW/api/topology" | jq '.edges | length' 2>/dev/null || true)
+      [[ -n $edges ]] && ok "拓扑可读（$edges 条边）" || bad "拓扑接口不可读"
+    fi
+
+    echo "----"
+    if (( exit_err )); then echo "🔴 check 完成：$exit_err 项失败"; else echo "🟢 check 全部通过"; fi
+    exit $exit_err ;;
   restart)
     RESTART=1; do_restart "${1:-both}" ;;
+  cron-install)
+    mkdir -p ~/.config/systemd/user
+    cat > ~/.config/systemd/user/ea-check.service <<EOS
+[Unit]
+Description=ea-config 分层自动体检
+
+[Service]
+Type=oneshot
+ExecStart=$HOME/bin/ea-config check --live
+StandardOutput=journal
+EOS
+    cat > ~/.config/systemd/user/ea-check.timer <<'EOF'
+[Unit]
+Description=每 30 分钟自动体检（结果进 journal：journalctl --user -u ea-check.service）
+
+[Timer]
+OnBootDelaySec=60
+OnUnitActiveSec=30min
+
+[Install]
+WantedBy=timers.target
+EOF
+    systemctl --user daemon-reload
+    systemctl --user enable --now ea-check.timer
+    echo "⏰ 已安装 ea-check.timer（每 30min）；结果看 journalctl --user -u ea-check.service -f" ;;
+  cron-remove)
+    systemctl --user disable --now ea-check.timer 2>/dev/null || true
+    rm -f ~/.config/systemd/user/ea-check.{service,timer}
+    systemctl --user daemon-reload
+    echo "已移除 ea-check 定时器" ;;
   help|*) usage ;;
 esac
