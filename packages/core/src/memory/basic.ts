@@ -2,6 +2,11 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { SkillManager } from "../skill/manager.js";
 
+/** 工作区快照 system prompt 的固定开头：session 层靠它识别「可刷新的工作区快照」，
+ * 区别于 subagent/channel 等自定义 system（那些永不被逐轮刷新覆盖） */
+export const WORKSPACE_PROMPT_HEADER =
+  "You are a helpful AI assistant with tools.";
+
 export class BasicMemory {
   constructor(private workDir: string) {}
 
@@ -159,7 +164,7 @@ triggers: [示例]
   }
 
   async buildSystemPrompt(): Promise<string> {
-    let prompt = `You are a helpful AI assistant with tools. Be direct and concise.
+    let prompt = `${WORKSPACE_PROMPT_HEADER} Be direct and concise.
 Current date: ${BasicMemory.localDate()}
 Working directory: ${this.workDir}
 Respond in the user's language.`;

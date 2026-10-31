@@ -83,6 +83,53 @@ describe("SessionManager", () => {
     sessions.delete(s.id);
     expect(sessions.get(s.id)).toBeNull();
   });
+
+  it("refreshWorkspacePrompt：工作区快照逐轮刷新，自定义 system 不被动", async () => {
+    const { WORKSPACE_PROMPT_HEADER } = await import("../../src/memory/basic.js");
+    const sm = new SessionManager(new LLMClient({ providers: {} }), {
+      defaultModel: "test/model",
+    });
+    let version = 1;
+    sm.setSystemPromptProvider(async () => `${WORKSPACE_PROMPT_HEADER} v${version}`);
+
+    const s = sm.create({
+      systemPrompt: `${WORKSPACE_PROMPT_HEADER} v1`,
+    });
+    version = 2;
+    expect(await sm.refreshWorkspacePrompt(s.id)).toBe(true);
+    expect(sm.getMessages(s.id)[0]!.content).toBe(`${WORKSPACE_PROMPT_HEADER} v2`);
+    // 内容没变 → 不再写库（前缀缓存不白白作废）
+    expect(await sm.refreshWorkspacePrompt(s.id)).toBe(false);
+
+    // 自定义 prompt（subagent/渠道模板）不被覆盖
+    const custom = sm.create({ systemPrompt: "You are a helpful AI assistant on telegram." });
+    expect(await sm.refreshWorkspacePrompt(custom.id)).toBe(false);
+    expect(sm.getMessages(custom.id)[0]!.content).toBe(
+      "You are a helpful AI assistant on telegram.",
+    );
+
+    // provider 报错 → 静默跳过不阻断
+    sm.setSystemPromptProvider(async () => {
+      throw new Error("boom");
+    });
+    expect(await sm.refreshWorkspacePrompt(s.id)).toBe(false);
+
+    // run() 入口自动刷新：旧快照在进 LLM 前已被替换
+    version = 3;
+    sm.setSystemPromptProvider(async () => `${WORKSPACE_PROMPT_HEADER} v${version}`);
+    const stub: any = {
+      generate: async () => ({ content: "ok", toolCalls: undefined, finishReason: "stop" }),
+      stream: async function* () {
+        yield { type: "text", text: "ok" };
+        yield { type: "done", finishReason: "stop" };
+      },
+    };
+    const sm2 = new SessionManager(stub, { defaultModel: "test/model" });
+    sm2.setSystemPromptProvider(async () => `${WORKSPACE_PROMPT_HEADER} live`);
+    const s2 = sm2.create({ systemPrompt: `${WORKSPACE_PROMPT_HEADER} stale` });
+    await sm2.run(s2.id, "hi");
+    expect(sm2.getMessages(s2.id)[0]!.content).toBe(`${WORKSPACE_PROMPT_HEADER} live`);
+  });
 });
 
 describe("任意步 abort + 排队持久化", () => {

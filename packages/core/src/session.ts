@@ -11,6 +11,7 @@ import type {
 } from "@easy-agent/schema/llm";
 import type { ToolRegistry } from "./tool/registry.js";
 import { pruneToolResults, pruneWatermark } from "./context.js";
+import { WORKSPACE_PROMPT_HEADER } from "./memory/basic.js";
 
 /** 行→Message 的 metadata 反序列化：空/坏 JSON 当无 metadata，不阻断历史加载 */
 function parseMetadata(raw: unknown): Record<string, any> | null {
@@ -50,6 +51,48 @@ export class SessionManager {
   private running = new Set<string>();
   private queues = new Map<string, { id: number; text: string }[]>();
   private controllers = new Map<string, AbortController>();
+  /** 工作区 system prompt 供给器（server 接线）：每轮 run 前刷新头部快照，
+   * 否则建会话后晋升的记忆/日记/教训永远进不了老会话（2026-10-31 elf 反馈） */
+  private systemPromptProvider?: (
+    agentId: string,
+  ) => Promise<string | undefined>;
+  setSystemPromptProvider(
+    fn: (agentId: string) => Promise<string | undefined>,
+  ) {
+    this.systemPromptProvider = fn;
+  }
+
+  /** 用最新工作区内容替换头部快照；只动 buildSystemPrompt 生成的那种 system 消息，
+   * 自定义 prompt（subagent 等）原样保留。返回是否真的换了（换=前缀缓存作废一次） */
+  async refreshWorkspacePrompt(sessionId: string): Promise<boolean> {
+    if (!this.systemPromptProvider) return false;
+    const session = this.get(sessionId);
+    if (!session) return false;
+    let fresh: string | undefined;
+    try {
+      fresh = await this.systemPromptProvider(session.agentId ?? "default");
+    } catch {
+      return false;
+    }
+    if (!fresh) return false;
+    const db = getDatabase();
+    const row = db
+      .prepare(
+        `SELECT id, content FROM messages
+         WHERE session_id = ? AND role = 'system' AND content LIKE ?
+         ORDER BY created_at, rowid LIMIT 1`,
+      )
+      .get(sessionId, WORKSPACE_PROMPT_HEADER + "%") as
+      | { id: string; content: string }
+      | undefined;
+    if (!row || row.content === fresh) return false;
+    db.prepare(`UPDATE messages SET content = ? WHERE id = ?`).run(
+      fresh,
+      row.id,
+    );
+    return true;
+  }
+
   constructor(llm: LLMClient, options: { defaultModel: string }) {
     this.llm = llm;
     this.defaultModel = options.defaultModel;
@@ -459,6 +502,8 @@ export class SessionManager {
   ): Promise<string> {
     const session = this.get(sessionId);
     if (!session) throw new Error(`Session not found：${sessionId}`);
+    // 每轮开始前刷新工作区快照（记忆晋升/当日日记不再被建会话时的旧快照卡住）
+    await this.refreshWorkspacePrompt(sessionId);
 
     const db = getDatabase();
     const workDir = options?.workDir ?? process.cwd();

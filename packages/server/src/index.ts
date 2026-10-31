@@ -339,6 +339,12 @@ async function main() {
   }
   console.log(`🤖 Agents: ${Object.keys(agents).join(", ")}`);
 
+  // 每轮 run 前刷新会话头部的工作区快照（dreaming 晋升的记忆即时注入老会话）
+  sessions.setSystemPromptProvider(async (agentId: string) => {
+    const a = agents[agentId] ?? agents["default"];
+    return a ? await a.memory.buildSystemPrompt() : undefined;
+  });
+
   // 外部编码 agent（trae-cli headless）：配置 trae 节才注册；缺省围栏=各 agent 工作区
   // （必须在 agents 构建之后：引用 workspaceDir）
   if ((config as any).trae && (config as any).trae.enabled !== false) {

@@ -44,8 +44,10 @@ export function extractIndexTerms(excerpts: string[], query: string, max = 6): s
     }
   }
   return [...freq.entries()]
-    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-    .slice(0, max)
+    // 同频按首次出现序（Map 插入序 + sort 稳定性；去掉了 localeCompare——它会把 ASCII 词插队顶掉中文钥匙词）
+    .sort((a, b) => b[1] - a[1])
+    // 硬顶 6 把钥匙：二查词串太长会稀释另一侧工作区的相似度，max 参数只允许往下收
+    .slice(0, Math.min(max, 6))
     .map(([t]) => t);
 }
 
