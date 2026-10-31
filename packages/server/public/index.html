@@ -999,16 +999,24 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
       const col=Math.min(260,(W-20)/nodes.length);
       const bh=42,gap=12,y0=112;
       const maxKids=Math.max(0,...nodes.map(n=>(n.runs||[]).length));
-      const H=y0+Math.max(1,maxKids+1)*(bh+gap)+18;
+      let H=y0+Math.max(1,maxKids+1)*(bh+gap)+18;
       let html='';
       // agent↔agent 互调弧线（t.edges 来自 sub_agent_runs 聚合，端点落在两圆顶部之间）；
       // 此前跨 agent 派活只在调用方列下垂一张卡，看不出“派给了谁”（2026-10-31 elf 反馈）
       const cxOf=new Map(nodes.map((n,i)=>[n.name,10+col*i+col/2]));
       const links=(t.edges??[]).filter(e=>cxOf.has(e.from)&&cxOf.has(e.to)&&e.from!==e.to);
+      const callLinks=links.filter(e=>e.kind!=='related');
+      const relLinks=links.filter(e=>e.kind==='related');
       if(links.length){
-        html+=`<defs><marker id="tlArrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L8,4 L0,8 z" fill="#8a6fae"/></marker></defs>`;
+        html+=`<defs><marker id="tlArrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L8,4 L0,8 z" fill="#8a6fae"/></marker>`+
+          `<marker id="tlArrowR" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L8,4 L0,8 z" fill="#7291a8"/></marker></defs>`;
       }
-      links.forEach((e,li)=>{
+      // related（memory_search 二查通道）走节点下方弧，与上方 call 层分带不混线
+      relLinks.forEach((e)=>{
+        const x1=cxOf.get(e.from),x2=cxOf.get(e.to);
+        html+=`<path d="M ${x1} 72 Q ${(x1+x2)/2} 100 ${x2} 72" fill="none" stroke="#7291a8" stroke-width="1.3" stroke-dasharray="3 4" opacity=".6" marker-end="url(#tlArrowR)"><title>${esc(e.from)} ⇢ ${esc(e.to)}：检索关联（relatedAgents，memory_search 自动二查）</title></path>`;
+      });
+      callLinks.forEach((e,li)=>{
         const x1=cxOf.get(e.from),x2=cxOf.get(e.to);
         const mid=(x1+x2)/2;
         // 控制点高度随跨度升高但钉在 svg 内；双向对画错开一层防重叠
@@ -1058,6 +1066,13 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
             `<text x="${cx-bw/2+8}" y="${y+32}" font-size="9" fill="#8b93a3">${r.steps}步 · ${r.toolCalls}工具 · ${fmtK(r.totalTokens)}t · ${dur}${tgt?' · 派给 '+esc(r.targetAgent):''}</text></g>`;
         });
       });
+      // 图例：边类型说明（kind 可扩展：将来 watch 监视只需新增一种线型）
+      if(links.length){
+        H+=24;
+        html+=`<g transform="translate(10,${H-8})" font-size="9.5" fill="#8b93a3">`+
+          `<line x1="0" y1="-4" x2="26" y2="-4" stroke="#8a6fae" stroke-width="1.6" marker-end="url(#tlArrow)"/><text x="32" y="0">派活（sub-agent 互调，紫虚线动画=进行中）</text>`+
+          `<line x1="248" y1="-4" x2="274" y2="-4" stroke="#7291a8" stroke-width="1.3" stroke-dasharray="3 4"/><text x="280" y="0">检索关联（relatedAgents 二查通道）</text></g>`;
+      }
       svg.setAttribute('height',H);
       svg.innerHTML=html;
     }

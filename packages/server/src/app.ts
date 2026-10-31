@@ -357,7 +357,23 @@ export function createApp(deps: ServerDeps): Hono {
       else if (e.status !== 'running' && r.status === 'error' && e.status !== 'ok') e.status = 'error';
       edgeMap.set(key, e);
     }
-    const edges = [...edgeMap.values()];
+    const edges: Array<{ from: string; to: string; weight: number; last: number; status: string; kind: "call" | "related" }> =
+      [...edgeMap.values()].map((e) => ({ ...e, kind: "call" as const }));
+    // related 边：agent 配了 relatedAgents（memory_search 二查通道）也在图上可视化；
+    // "*" 按 resolveRelated 同规则展开。边类型可扩展：将来 watch/监视只需新增 kind，
+    // 前端按 kind 配色/线型渲染即可（2026-10-31 elf：拓扑还要能表达监视等关系）
+    for (const a of Object.values(deps.agents)) {
+      const rel = (a as any).relatedAgents as string[] | undefined;
+      if (!rel?.length) continue;
+      const names = rel.includes("*")
+        ? nodes.map((n) => n.name).filter((n) => n !== a.name)
+        : rel;
+      for (const to of names) {
+        if (to === a.name || !agentNames.has(to)) continue;
+        if (edges.some((e) => e.from === a.name && e.to === to)) continue; // 已有实调用边优先
+        edges.push({ from: a.name, to, weight: 0, last: 0, status: "related", kind: "related" as const });
+      }
+    }
     // 是否还有派给泛用 sub-agent 池的活（非具名 agent）
     const hasSubAgentPool = (db
       .prepare(
