@@ -11,7 +11,7 @@
       --fg:#2b3038;--muted:#8c9198;
       --border:#e3e0d8;
       --accent:#5b7a8c;--accent2:#8a85a3;--accent-soft:rgba(91,122,140,.12);
-      --user:linear-gradient(135deg,#6b8a99,#87a3b0);--assistant:#f0eee7;--tool:#ebe9e2;
+      --user:#e3e9ec;--assistant:#f7f6f2;--tool:#ebe9e2;
       --ok:#5f9470;--warn:#c0985a;--danger:#c26d64;
       --shadow:0 2px 10px rgba(58,63,69,.06);
     }
@@ -96,7 +96,7 @@
     .avatar{width:30px;height:30px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:15px;flex-shrink:0;background:var(--accent-soft);color:var(--accent);font-weight:700}
     .message.user .avatar{background:var(--user);color:#fff}
     .bubble{padding:12px 16px;border-radius:14px;white-space:pre-wrap;word-break:break-word;line-height:1.75;font-size:16.5px;background:var(--assistant);border:1px solid var(--border);box-shadow:var(--shadow)}
-    .message.user .bubble{background:var(--user);color:#fff;border:none}
+    .message.user .bubble{background:var(--user);color:#2b3038;border:1px solid #d5dee2}
     .message.toolchip .bubble{background:var(--tool);color:var(--muted);font-size:12px;font-family:monospace}
     .message.summ{max-width:100%}
     .message.summ .bubble{border-left:4px solid var(--accent2);background:rgba(139,92,246,.06)}
@@ -104,7 +104,7 @@
     .input-area{padding:6px 14px;display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;background:transparent}
     /* 宽屏时输入行居中限宽，不再整条横穿；窄屏自动全宽 */
     .input-row{display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;width:100%;max-width:760px;margin:0 auto}
-    .input-area textarea{flex:1;min-width:0;background:#efece5;color:var(--fg);border:1px solid var(--border);border-radius:10px;padding:5px 11px;font-size:14px;font-family:inherit;resize:none;min-height:30px;max-height:110px}
+    .input-area textarea{flex:1;min-width:0;background:#f5f4f0;color:var(--fg);border:1px solid var(--border);border-radius:10px;padding:5px 11px;font-size:14px;font-family:inherit;resize:none;min-height:30px;max-height:110px}
     .input-area textarea:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
     .send-btn{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;border:none;border-radius:10px;padding:6px 18px;cursor:pointer;font-size:13.5px;font-weight:600}
     .stop-btn{background:var(--tool);color:#b3564b;border:1px solid #c26d64;border-radius:10px;padding:6px 14px;cursor:pointer;font-size:14px;font-weight:600}
