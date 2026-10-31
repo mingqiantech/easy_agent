@@ -33,6 +33,11 @@ usage() {
   ea-config wecom unpin <chatId>
   ea-config wecom list
 
+■ 定时任务/监巡视（PATCH 风格同 agent）
+  ea-config cron list                                    # 任务一览
+  ea-config cron watch <agent> <被监视者,...|*> <间隔小时>   # 建巡检任务（payload 跑在 <agent> 名下）
+  ea-config cron rm <name|id>
+
 ■ 通用
   ea-config get [jq路径]        # 缺省 .；例: get .websearch
   ea-config set '<jq过滤>'      # 例: set '.wecom.agentId = "life"'
@@ -260,6 +265,29 @@ case "$cmd" in
     echo "----"
     if (( exit_err )); then echo "🔴 check 完成：$exit_err 项失败"; else echo "🟢 check 全部通过"; fi
     exit $exit_err ;;
+  cron)
+    sub="${1:-list}"; shift || true
+    case "$sub" in
+      list) curl -s "$GW/api/cron" | jq '.jobs[]|{id,name,description,schedule:.schedule.kind,everyH:((.schedule.everyMs//0)/3600000),payloadAgent:.payload.agent,enabled,runCount,lastRunAt:(if (.lastRunAt//0)>0 then (.lastRunAt/1000|strftime("%m-%d %H:%M")) else "从未" end)}' ;;
+      watch)
+        ag="${1:-}"; targets="${2:-}"; hrs="${3:-2}"
+        [[ -n $ag && -n $targets ]] || { usage; exit 1; }
+        BODY=$(jq -n --arg n "${ag}-watch-${targets}" --arg ag "$ag" --arg t "$targets" \
+          --argjson ms $(( hrs * 3600000 )) --arg h "$hrs" '
+          {name:$n, description:($ag + " 每 " + $h + "h 巡检 " + $t + " 运行状态"),
+           schedule:{kind:"every", everyMs:$ms},
+           payload:{kind:"agentTurn", agent:$ag,
+             message:("【定时巡检】用 agent_status 查看 agent：" + $t + "。仅异常（卡在同一步>10min/连续 error/长时间 busy 不推进）才详细说明；正常则一行 ✅ 概要。")}}
+          ')
+        curl -s -X POST "$GW/api/cron" -H "Content-Type: application/json" -d "$BODY" | jq -r '"✅ 已创建 id=" + (.id // "FAIL")'
+        ;;
+      rm)
+        key="${1:-}"
+        id=$(curl -s "$GW/api/cron" | jq -r --arg k "$key" '.jobs[]|select(.name==$k or .id==$k).id' | head -1)
+        [[ -n $id ]] || { echo "❌ 找不到任务 $key"; exit 1; }
+        curl -s -X DELETE "$GW/api/cron/$id" >/dev/null && echo "🗑 已删除 $key ($id)" ;;
+      *) usage; exit 1 ;;
+    esac ;;
   restart)
     RESTART=1; do_restart "${1:-both}" ;;
   cron-install)
