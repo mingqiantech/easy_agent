@@ -156,6 +156,9 @@ export const ConfigSchema = z.object({
         /** 关联 agent（2026-10-30）：memory_search 主检索命中后用索引词二查
          *  这些 agent 的工作区知识（典型：新隔离 agent 关联 default 拿历史记忆） */
         relatedAgents: z.array(z.string()).optional(),
+        /** 监视的 agent（2026-10-31）：拓扑图画 watch 边；每轮 system 注入监视引导，
+         *  提醒它用 agent_status 工具巡检对方在跑什么（"*"=全部其他 agent） */
+        watchAgents: z.array(z.string()).optional(),
       }),
     )
     .default({}),

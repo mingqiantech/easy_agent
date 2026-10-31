@@ -997,36 +997,41 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
       const nodes=t.nodes??[];
       if(!nodes.length){svg.innerHTML='';return;}
       const col=Math.min(260,(W-20)/nodes.length);
-      const bh=42,gap=12,y0=112;
+      const cxOf=new Map(nodes.map((n,i)=>[n.name,10+col*i+col/2]));
+      // 边=泳道式（每条边独占一条水平通道，绝不叠网线；2026-10-31 elf「看不明显」重做）
+      // kind 协议：call=派活(紫实线) watch=监视(橙虚线) related=检索关联(蓝点线)
+      const KINDS={
+        call:{c:'#8a6fae',dash:'',arr:'tlA',icon:'→'},
+        watch:{c:'#c07b3f',dash:'stroke-dasharray="7 3"',arr:'tlW',icon:'\u{1F441}'},
+        related:{c:'#7291a8',dash:'stroke-dasharray="2 4"',arr:'tlR',icon:'\u2315'},
+      };
+      const raw=(t.edges??[]).filter(e=>cxOf.has(e.from)&&cxOf.has(e.to)&&e.from!==e.to);
+      const order={call:0,watch:1,related:2};
+      const links=raw.slice().sort((a,b)=>(order[a.kind]??0)-(order[b.kind]??0)||b.weight-a.weight);
+      const nL=Math.min(links.length,10);
+      const laneY0=8,laneGap=17;
+      const nodeCy=laneY0+nL*laneGap+30, rN=24;
+      const bh=42,gap=12,y0=nodeCy+rN+46;
       const maxKids=Math.max(0,...nodes.map(n=>(n.runs||[]).length));
       let H=y0+Math.max(1,maxKids+1)*(bh+gap)+18;
       let html='';
-      // agent↔agent 互调弧线（t.edges 来自 sub_agent_runs 聚合，端点落在两圆顶部之间）；
-      // 此前跨 agent 派活只在调用方列下垂一张卡，看不出“派给了谁”（2026-10-31 elf 反馈）
-      const cxOf=new Map(nodes.map((n,i)=>[n.name,10+col*i+col/2]));
-      const links=(t.edges??[]).filter(e=>cxOf.has(e.from)&&cxOf.has(e.to)&&e.from!==e.to);
-      const callLinks=links.filter(e=>e.kind!=='related');
-      const relLinks=links.filter(e=>e.kind==='related');
-      if(links.length){
-        html+=`<defs><marker id="tlArrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L8,4 L0,8 z" fill="#8a6fae"/></marker>`+
-          `<marker id="tlArrowR" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L8,4 L0,8 z" fill="#7291a8"/></marker></defs>`;
-      }
-      // related（memory_search 二查通道）走节点下方弧，与上方 call 层分带不混线
-      relLinks.forEach((e)=>{
-        const x1=cxOf.get(e.from),x2=cxOf.get(e.to);
-        html+=`<path d="M ${x1} 72 Q ${(x1+x2)/2} 100 ${x2} 72" fill="none" stroke="#7291a8" stroke-width="1.3" stroke-dasharray="3 4" opacity=".6" marker-end="url(#tlArrowR)"><title>${esc(e.from)} ⇢ ${esc(e.to)}：检索关联（relatedAgents，memory_search 自动二查）</title></path>`;
-      });
-      callLinks.forEach((e,li)=>{
-        const x1=cxOf.get(e.from),x2=cxOf.get(e.to);
-        const mid=(x1+x2)/2;
-        // 控制点高度随跨度升高但钉在 svg 内；双向对画错开一层防重叠
-        const cy=Math.max(6,10-Math.abs(x2-x1)*0.055)+(li%2)*12;
-        const running=e.status==='running';
-        const st=running?'#5f9470':'#8a6fae';
-        const dash=running?'stroke-dasharray="6 4"':"";
-        html+=`<path d="M ${x1} 20 Q ${mid} ${cy} ${x2} 20" fill="none" stroke="${st}" stroke-width="${running?2.2:1.6}" ${dash} opacity=".75" marker-end="url(#tlArrow)"><title>${esc(e.from)} → ${esc(e.to)}：${e.weight} 次子任务${running?'（进行中）':''}</title></path>`;
-        const apexY=10+cy/2; // 二次贝塞尔 t=0.5（端点 y=20）
-        html+=`<text x="${mid}" y="${Math.max(10,apexY-2)}" font-size="9" fill="${st}" text-anchor="middle" paint-order="stroke" stroke="var(--bg,#f4f2ed)" stroke-width="3">→ ${esc(e.to)}${e.weight>1?' ×'+e.weight:''}</text>`;
+      html+=`<defs>`+Object.entries(KINDS).map(([k,v])=>
+        `<marker id="${v.arr}" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6.5" markerHeight="6.5" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="${v.c}"/></marker>`).join("")+
+        `<marker id="tlG" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6.5" markerHeight="6.5" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#5f9470"/></marker></defs>`;
+      links.forEach((e,li)=>{
+        const K=KINDS[e.kind]||KINDS.call;
+        const running=e.kind==='call'&&e.status==='running';
+        const c=running?'#5f9470':K.c, arr=running?'tlG':K.arr;
+        const ly=laneY0+li*laneGap;
+        // 端点随泳道号微扇开，避免多边共用同一出入口
+        const off=((li%5)-2)*4;
+        const x1=cxOf.get(e.from)+off, x2=cxOf.get(e.to)+off;
+        const yTop=nodeCy-rN+1, yEnd=nodeCy-rN+3;
+        const dir=x2>x1?1:-1;
+        html+=`<path d="M ${x1} ${yTop} V ${ly+6} Q ${x1} ${ly} ${x1+6*dir} ${ly} H ${x2-8*dir} Q ${x2} ${ly} ${x2} ${ly+7} V ${yEnd}" fill="none" stroke="${c}" stroke-width="${running?2.2:1.5}" ${running?'stroke-dasharray="6 4"':K.dash} opacity=".82" marker-end="url(#${arr})"><title>${esc(e.from)} ${K.icon} ${esc(e.to)}｜${e.kind==='call'?e.weight+' 次子任务'+(running?'（进行中）':''):e.kind==='watch'?'监视（watchAgents）':'检索关联（memory_search 二查）'}</title></path>`;
+        const lbl=e.kind==='call'?`→ ${e.to}${e.weight>1?' ×'+e.weight:''}`:e.kind==='watch'?`\u{1F441} ${e.to}`:`\u2315 ${e.to}`;
+        const mid=Math.min(x1,x2)+Math.abs(x2-x1)/2;
+        html+=`<text x="${mid}" y="${ly-1.5}" font-size="8.5" fill="${c}" text-anchor="middle" paint-order="stroke" stroke="var(--bg,#f4f2ed)" stroke-width="3">${esc(lbl)}</text>`;
       });
       nodes.forEach((n,i)=>{
         const cx=10+col*i+col/2;
@@ -1034,10 +1039,10 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
         const cfgShort=(n.configModel||'').split('/').pop();
         const tip=n.name+' · 运行模型 '+modelShort+(cfgShort&&n.model!==n.configModel?'（配置默认 '+cfgShort+'，会话已切换）':'')+' · '+n.sessions+' 会话 · 点击查看该 Agent';
         html+=`<g style="cursor:pointer" onclick="pickAgentByName('${esc(n.name)}')"><title>${esc(tip)}</title>`;
-        html+=`<circle class="${n.busy?'pulse':''}" cx="${cx}" cy="44" r="26" fill="${n.busy?'rgba(95,148,112,.12)':'rgba(0,0,0,.04)'}"/>`;
-        html+=`<circle cx="${cx}" cy="44" r="22" fill="#fbfaf7" stroke="${n.busy?'#5f9470':'#c0c4cc'}" stroke-width="3"/>`;
-        html+=`<text x="${cx}" y="48" font-size="12" font-weight="700" text-anchor="middle" fill="#1c2330" pointer-events="none">${esc(n.name)}</text>`;
-        html+=`<text x="${cx}" y="80" font-size="9.5" text-anchor="middle" fill="#8b93a3" pointer-events="none">${n.sessions} 会话 · ${esc(modelShort)}${cfgShort&&n.model!==n.configModel?' ⇄':''}</text>`;
+        html+=`<circle class="${n.busy?'pulse':''}" cx="${cx}" cy="${nodeCy}" r="${rN+4}" fill="${n.busy?'rgba(95,148,112,.12)':'rgba(0,0,0,.04)'}"/>`;
+        html+=`<circle cx="${cx}" cy="${nodeCy}" r="${rN}" fill="#fbfaf7" stroke="${n.busy?'#5f9470':'#c0c4cc'}" stroke-width="3"/>`;
+        html+=`<text x="${cx}" y="${nodeCy+4}" font-size="12" font-weight="700" text-anchor="middle" fill="#1c2330" pointer-events="none">${esc(n.name)}</text>`;
+        html+=`<text x="${cx}" y="${nodeCy+rN+14}" font-size="9.5" text-anchor="middle" fill="#8b93a3" pointer-events="none">${n.sessions} 会话 · ${esc(modelShort)}${cfgShort&&n.model!==n.configModel?' ⇄':''}</text>`;
         html+=`</g>`;
         // 完成的 run 只保留 10 分钟（带龄标签），到期自动从图上退场——
         // 此前完成的子任务会永久挂图，看起来像"完成了没退出"（2026-10-31 elf 反馈）
@@ -1052,7 +1057,7 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
           const y=y0+ri*(bh+gap);
           const st=SA_COLORS[r.status]||'#8b93a3';
           const done=r.status!=='running';
-          html+=`<path d="M ${cx} 70 C ${cx} ${70+(y-70)*0.45}, ${cx} ${y-26}, ${cx} ${y}" fill="none" stroke="${st}" stroke-width="1.6" ${r.status==='running'?'stroke-dasharray="5 4"':''} opacity=".6"/>`;
+          html+=`<path d="M ${cx} ${nodeCy+rN+20} C ${cx} ${nodeCy+rN+28}, ${cx} ${y-26}, ${cx} ${y}" fill="none" stroke="${st}" stroke-width="1.6" ${r.status==='running'?'stroke-dasharray="5 4"':''} opacity=".6"/>`;
           const dur=r.finishedAt?`${r.status==='error'?'✗':'✓'} ${Math.max(0,Math.round((r.finishedAt-r.startedAt)/1000))}s · ${Math.max(0,Math.round((nowT-r.finishedAt)/1000))}s前退出`:'进行中';
           const clip=Math.floor(bw/11);
           const task=(r.task||'').slice(0,clip)+((r.task||'').length>clip?'…':'');
@@ -1060,19 +1065,19 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
           const fadeAttr=done?' opacity=".55"':"";
           html+=`<g style="cursor:pointer" onclick="openSubRun('${esc(r.childSessionId)}')">`+
             `<title>${esc(r.task||'')}${tgt?' — 派给 '+esc(r.targetAgent):''} — 点击查看对话</title>`+
-            `<rect x="${cx-bw/2}" y="${y}" width="${bw}" height="${bh}" rx="9" fill="#fff" stroke="${st}" stroke-width="2"${fadeAttr}"/>`+
+            `<rect x="${cx-bw/2}" y="${y}" width="${bw}" height="${bh}" rx="9" fill="#fff" stroke="${st}" stroke-width="2"${fadeAttr}/>`+
             (r.status==='running'?`<rect x="${cx-bw/2}" y="${y}" width="${bw}" height="${bh}" rx="9" fill="none" stroke="${st}" stroke-width="2" opacity=".5"><animate attributeName="opacity" values=".5;.1;.5" dur="1.4s" repeatCount="indefinite"/></rect>`:'')+
             `<text x="${cx-bw/2+8}" y="${y+17}" font-size="10.5" fill="#1c2330" font-weight="600">${esc(SA_ICON[r.status]||'?')}${esc(tgt?' ['+r.targetAgent+']':'')} ${esc(task)}</text>`+
-            `<text x="${cx-bw/2+8}" y="${y+32}" font-size="9" fill="#8b93a3">${r.steps}步 · ${r.toolCalls}工具 · ${fmtK(r.totalTokens)}t · ${dur}${tgt?' · 派给 '+esc(r.targetAgent):''}</text></g>`;
+            `<text x="${cx-bw/2+8}" y="${y+32}" font-size="9" fill="#8b93a3">${r.steps}步 · ${r.toolCalls}工具 · ${fmtK(r.total_tokens??r.totalTokens)}t · ${dur}${tgt?' · 派给 '+esc(r.targetAgent):''}</text></g>`;
         });
       });
-      // 图例：边类型说明（kind 可扩展：将来 watch 监视只需新增一种线型）
-      if(links.length){
-        H+=24;
-        html+=`<g transform="translate(10,${H-8})" font-size="9.5" fill="#8b93a3">`+
-          `<line x1="0" y1="-4" x2="26" y2="-4" stroke="#8a6fae" stroke-width="1.6" marker-end="url(#tlArrow)"/><text x="32" y="0">派活（sub-agent 互调，紫虚线动画=进行中）</text>`+
-          `<line x1="248" y1="-4" x2="274" y2="-4" stroke="#7291a8" stroke-width="1.3" stroke-dasharray="3 4"/><text x="280" y="0">检索关联（relatedAgents 二查通道）</text></g>`;
-      }
+      // 图例（泳道配色说明）
+      H+=22;
+      html+=`<g transform="translate(10,${H-8})" font-size="9.5" fill="#8b93a3">`+
+        `<line x1="0" y1="-4" x2="22" y2="-4" stroke="#8a6fae" stroke-width="1.6" marker-end="url(#tlA)"/><text x="28" y="0">派活</text>`+
+        `<line x1="78" y1="-4" x2="100" y2="-4" stroke="#5f9470" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#tlG)"/><text x="106" y="0">进行中</text>`+
+        `<line x1="166" y1="-4" x2="188" y2="-4" stroke="#c07b3f" stroke-width="1.6" stroke-dasharray="7 3"/><text x="194" y="0">监视 watch</text>`+
+        `<line x1="278" y1="-4" x2="300" y2="-4" stroke="#7291a8" stroke-width="1.4" stroke-dasharray="2 4"/><text x="306" y="0">检索关联</text></g>`;
       svg.setAttribute('height',H);
       svg.innerHTML=html;
     }

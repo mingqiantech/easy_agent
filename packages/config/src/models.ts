@@ -79,6 +79,8 @@ export interface ResolvedAgent {
   toolHint?: string;
   /** 关联 agent：memory_search 主检索后用索引词二次检索其工作区 */
   relatedAgents: string[];
+  /** 监视的 agent：拓扑 watch 边 + agent_status 巡检引导 */
+  watchAgents: string[];
 }
 
 /**
@@ -120,6 +122,7 @@ export function resolveAgents(config: Config): ResolvedAgent[] {
       toolsDisable: dflt?.tools?.disable ?? [],
       toolHint: dflt?.toolHint,
       relatedAgents: dflt?.relatedAgents ?? [],
+      watchAgents: dflt?.watchAgents ?? [],
     },
   ];
   for (const [name, a] of Object.entries(config.agents ?? {})) {
@@ -137,6 +140,7 @@ export function resolveAgents(config: Config): ResolvedAgent[] {
       toolsDisable: (a as any).tools?.disable ?? [],
       toolHint: (a as any).toolHint,
       relatedAgents: (a as any).relatedAgents ?? [],
+      watchAgents: (a as any).watchAgents ?? [],
     });
   }
   return out;

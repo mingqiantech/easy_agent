@@ -39,6 +39,7 @@ describe("resolveAgents（多 Agent）", () => {
       thinking: "off",
       toolsDisable: [],
       relatedAgents: [],
+      watchAgents: [],
     });
   });
 
@@ -139,5 +140,16 @@ describe("agents-state.json 持久化覆盖（Web UI 设置思考等级）", () 
     });
     expect(resolveAgents(config).find((a) => a.name === "plain")!.thinking).toBe("off");
     fs.unlinkSync(stateFile());
+  });
+});
+
+describe("watchAgents（2026-10-31 监视关系）", () => {
+  it("resolveAgents 透传 watchAgents；缺省为空数组", () => {
+    const rs = resolveAgents(
+      fakeConfig({ agents: { work: { watchAgents: ["*"] }, tech: {} } } as any),
+    );
+    expect(rs.find((r) => r.name === "work")!.watchAgents).toEqual(["*"]);
+    expect(rs.find((r) => r.name === "tech")!.watchAgents).toEqual([]);
+    expect(rs.find((r) => r.name === "default")!.watchAgents).toEqual([]);
   });
 });

@@ -21,6 +21,7 @@ import {
 import { createWebsearchTool } from "@easy-agent/core/tool/builtins/websearch";
 import { SubAgentManager } from "@easy-agent/core/agent/sub-agent";
 import { createSubAgentTool } from "@easy-agent/core/agent/sub-agent-tool";
+import { createAgentStatusTool } from "@easy-agent/core/agent/agent-status-tool";
 import { createVisionTool } from "@easy-agent/core/tool/builtins/vision";
 import { ImageGenerator } from "@easy-agent/core/image-gen/index";
 import { createImageGenTool } from "@easy-agent/core/tool/builtins/image-gen";
@@ -334,10 +335,14 @@ async function main() {
       toolsDisable: a.toolsDisable,
       toolHint: a.toolHint,
       relatedAgents: a.relatedAgents,
+      watchAgents: a.watchAgents,
       memory: mem,
     };
   }
   console.log(`🤖 Agents: ${Object.keys(agents).join(", ")}`);
+
+  // agent_status 监视工具（2026-10-31）：watchAgents 授权跨 agent 查运行台账
+  tools.register(createAgentStatusTool(() => agents));
 
   // 每轮 run 前刷新会话头部的工作区快照（dreaming 晋升的记忆即时注入老会话）
   sessions.setSystemPromptProvider(async (agentId: string) => {
@@ -428,8 +433,14 @@ async function main() {
 
   // cron / 事件 watcher：watch 命中前静默检查（零 LLM 成本），命中才执行 payload
   const cron = new CronManager();
-  const runCronTurn = async (text: string, name: string) => {
-    const agent = agents["default"] ?? Object.values(agents)[0];
+  const runCronTurn = async (text: string, name: string, agentName?: string) => {
+    // 任务可指定在哪个 agent 名下跑（监视/定时巡检场景，2026-10-31）；未知名字回退 default
+    const agent =
+      (agentName ? (agents as any)[agentName] : undefined) ??
+      agents["default"] ??
+      Object.values(agents)[0];
+    if (agentName && !(agents as any)[agentName])
+      console.warn(`⚠️ cron "${name}": 未知 agent "${agentName}"，回退 default`);
     const s = sessions.create({
       agentId: agent?.name ?? "default",
       model: agent?.model,
@@ -438,7 +449,11 @@ async function main() {
         ? await agent.memory.buildSystemPrompt()
         : undefined,
     });
-    await sessions.run(s.id, text, { toolRegistry: tools });
+    await sessions.run(s.id, text, {
+      toolRegistry: tools,
+      workDir: (agent as any)?.workspaceDir,
+      thinking: (agent as any)?.thinking,
+    });
   };
   const cronScheduler = new CronScheduler(cron, async (job) => {
     if (job.schedule.kind === "watch") {
@@ -447,6 +462,7 @@ async function main() {
       await runCronTurn(
         `⚡ 事件 watcher "${job.name}" 命中${hit.message ? `：${hit.message}` : ""}\n${job.payload.message ?? ""}`.trim(),
         job.name,
+        (job.payload as any).agent,
       );
       return;
     }
@@ -458,7 +474,7 @@ async function main() {
       return;
     }
     if (job.payload.kind === "agentTurn" && job.payload.message) {
-      await runCronTurn(job.payload.message, job.name);
+      await runCronTurn(job.payload.message, job.name, (job.payload as any).agent);
     }
   });
   cronScheduler.start();

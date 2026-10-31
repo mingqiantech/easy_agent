@@ -22,6 +22,8 @@ export interface CronJobConfig {
     kind: "agentTurn" | "script";
     message?: string;
     script?: string;
+    /** agentTurn 在哪个具名 agent 名下执行（监视/巡检任务用；缺省 default） */
+    agent?: string;
   };
 
   sessionTarget: "main" | "isolated";

@@ -357,12 +357,23 @@ export function createApp(deps: ServerDeps): Hono {
       else if (e.status !== 'running' && r.status === 'error' && e.status !== 'ok') e.status = 'error';
       edgeMap.set(key, e);
     }
-    const edges: Array<{ from: string; to: string; weight: number; last: number; status: string; kind: "call" | "related" }> =
+    const edges: Array<{ from: string; to: string; weight: number; last: number; status: string; kind: "call" | "related" | "watch" }> =
       [...edgeMap.values()].map((e) => ({ ...e, kind: "call" as const }));
     // related 边：agent 配了 relatedAgents（memory_search 二查通道）也在图上可视化；
     // "*" 按 resolveRelated 同规则展开。边类型可扩展：将来 watch/监视只需新增 kind，
     // 前端按 kind 配色/线型渲染即可（2026-10-31 elf：拓扑还要能表达监视等关系）
     for (const a of Object.values(deps.agents)) {
+      // 监视边：watchAgents 配置（拓扑 kind=watch；"*" 同 relatedAgents 规则展开）
+      const watch = ((a as any).watchAgents as string[] | undefined) ?? [];
+      const wNames = watch.includes("*")
+        ? nodes.map((n) => n.name).filter((n) => n !== a.name)
+        : watch;
+      for (const to of wNames) {
+        if (to === a.name || !agentNames.has(to)) continue;
+        if (edges.some((e) => e.from === a.name && e.to === to && e.kind === "call")) continue;
+        if (edges.some((e) => e.from === a.name && e.to === to && e.kind === "watch")) continue;
+        edges.push({ from: a.name, to, weight: 0, last: 0, status: "watch", kind: "watch" as const });
+      }
       const rel = (a as any).relatedAgents as string[] | undefined;
       if (!rel?.length) continue;
       const names = rel.includes("*")
@@ -472,6 +483,12 @@ export function createApp(deps: ServerDeps): Hono {
     } else if (opts) {
       extraSystem = `外部编码 Agent 可用：${opts}。当任务涉及多文件代码修改、仓库整体分析、批量重构、写/补测试等重活时，优先用它们处理（workdir 指向目标仓库），完成后汇总结果；日常问答、概念解释、小改动不要外包（每次调用有固定开销）。`;
     }
+    // 监视职责引导（2026-10-31）：配了 watchAgents 的 agent 每轮知道自已是监视者
+    const watchList = (agent as any)?.watchAgents as string[] | undefined;
+    if (watchList?.length) {
+      const suffix = `\n监视职责：你负责监视 ${watchList.join(", ")}。需要了解对方时用 agent_status 工具查运行状态（在跑什么/卡在哪步/多久没动静）；发现异常（长时间卡在同一步、连续报错）主动向用户报告，不要无打扰地虚构对方状态。`;
+      extraSystem = extraSystem ? extraSystem + suffix : suffix.trimStart();
+    }
     const toolRegistry = dis.size
       ? {
           getDefinitions: () => deps.tools.getDefinitions().filter((d) => !dis.has(d.name)),
@@ -555,11 +572,15 @@ export function createApp(deps: ServerDeps): Hono {
     const hasRelated = body.relatedAgents !== undefined;
     if (hasRelated && (!Array.isArray(body.relatedAgents) || body.relatedAgents.some((x: any) => typeof x !== "string")))
       return c.json({ error: 'relatedAgents 必须是字符串数组（"*"=全部其他 agent）' }, 400);
+    // 监视名单（2026-10-31）：拓扑 watch 边 + agent_status 巡检权限，数组=替换语义
+    const hasWatch = body.watchAgents !== undefined;
+    if (hasWatch && (!Array.isArray(body.watchAgents) || body.watchAgents.some((x: any) => typeof x !== "string")))
+      return c.json({ error: 'watchAgents 必须是字符串数组（"*"=全部其他 agent）' }, 400);
     if (typeof body.thinking === "string" && body.thinking) {
       if (!levels.includes(body.thinking))
         return c.json({ error: "thinking 必须是 off|low|medium|high" }, 400);
       agent.thinking = body.thinking;
-    } else if (!hasToolsDisable && body.toolHint === undefined && !hasRelated) {
+    } else if (!hasToolsDisable && body.toolHint === undefined && !hasRelated && !hasWatch) {
       return c.json({ error: "thinking 必须是字符串" }, 400);
     }
     if (hasToolsDisable) (agent as any).toolsDisable = body.toolsDisable;
@@ -570,6 +591,7 @@ export function createApp(deps: ServerDeps): Hono {
       return c.json({ error: "toolHint 最长 2000 字符" }, 400);
     if (hasToolHint) (agent as any).toolHint = body.toolHint ?? undefined;
     if (hasRelated) (agent as any).relatedAgents = (body.relatedAgents as string[]).filter((n) => n !== name);
+    if (hasWatch) (agent as any).watchAgents = (body.watchAgents as string[]).filter((n) => n !== name);
     try {
       const dir = deps.config.stateDir;
       fs.mkdirSync(dir, { recursive: true });
@@ -586,6 +608,7 @@ export function createApp(deps: ServerDeps): Hono {
           ...(hasToolsDisable ? { tools: { disable: body.toolsDisable } } : {}),
           ...(hasToolHint ? { toolHint: body.toolHint } : {}),
           ...(hasRelated ? { relatedAgents: (body.relatedAgents as string[]).filter((n) => n !== name) } : {}),
+          ...(hasWatch ? { watchAgents: (body.watchAgents as string[]).filter((n) => n !== name) } : {}),
         },
       };
       fs.writeFileSync(file, JSON.stringify(data, null, 2));
@@ -1089,6 +1112,8 @@ export function createApp(deps: ServerDeps): Hono {
       return c.json({ error: "需要 schedule.kind 和 payload.kind" }, 400);
     if (body.schedule.kind === "watch" && !body.schedule.command)
       return c.json({ error: "watch 任务需要 schedule.command" }, 400);
+    if (body.payload?.agent && !deps.agents[body.payload.agent])
+      return c.json({ error: `payload.agent "${body.payload.agent}" 不存在（可用：${Object.keys(deps.agents).join(", ")}）` }, 400);
     try {
       const id = deps.cron.create({
         name: body.name ?? "job",
