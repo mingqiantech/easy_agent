@@ -36,6 +36,8 @@ usage() {
 ■ 定时任务/监巡视（PATCH 风格同 agent）
   ea-config cron list                                    # 任务一览
   ea-config cron watch <agent> <被监视者,...|*> <间隔小时>   # 建巡检任务（payload 跑在 <agent> 名下）
+  ea-config cron run  <name>                      # 立即触发（≤60s）
+  ea-config cron last <name>                      # 看上次巡检结果
   ea-config cron rm <name|id>
 
 ■ 通用
@@ -280,6 +282,19 @@ case "$cmd" in
              message:("【定时巡检】用 agent_status 查看 agent：" + $t + "。仅异常（卡在同一步>10min/连续 error/长时间 busy 不推进）才详细说明；正常则一行 ✅ 概要。")}}
           ')
         curl -s -X POST "$GW/api/cron" -H "Content-Type: application/json" -d "$BODY" | jq -r '"✅ 已创建 id=" + (.id // "FAIL")'
+        ;;
+      run)
+        key="${1:-}"
+        id=$(curl -s "$GW/api/cron" | jq -r --arg k "$key" '.jobs[]|select(.name==$k or .id==$k).id' | head -1)
+        [[ -n $id ]] || { echo "❌ 找不到任务 $key"; exit 1; }
+        sqlite3 "$(dirname "$CFG")/agent.db" "UPDATE cron_jobs SET next_run_at=$(date +%s%3N), enabled=1 WHERE id='$id';" \
+          && echo "▶️ $key 已置为到期，≤60s 内调度器执行（会话标题 [cron] $key；结果：ea-config cron last $key）"
+        ;;
+      last)
+        key="${1:-}"
+        sid=$(sqlite3 "$(dirname "$CFG")/agent.db" "SELECT id FROM sessions WHERE title LIKE '%${key}%' AND title LIKE '[cron]%' ORDER BY created_at DESC LIMIT 1;")
+        [[ -n $sid ]] || { echo "❌ 无该 cron 的历史会话"; exit 1; }
+        sqlite3 "$(dirname "$CFG")/agent.db" "SELECT role||': '||substr(replace(content,char(10),' '),1,300) FROM messages WHERE session_id='$sid' AND role IN ('user','assistant') ORDER BY rowid DESC LIMIT 3;" | tac
         ;;
       rm)
         key="${1:-}"
