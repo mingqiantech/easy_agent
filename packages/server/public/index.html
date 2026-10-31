@@ -73,15 +73,15 @@
        悬停卡改为挂在 #chatView 上的独立 .nav-tip——旧方案把卡片放在 overflow 滚动容器
        的绝对定位子元素里，overflow-x:visible+overflow-y:auto 组合被浏览器按 both-auto 裁剪，
        卡片永远弹不出来（2026-10-31 elf 反馈"悬停没显示"真因） */
-    .summ-nav{position:absolute;right:3px;top:50%;transform:translateY(-50%);display:none;flex-direction:column;gap:5px;align-items:center;width:14px;max-height:72%;overflow-y:auto;scrollbar-width:none;z-index:6}
+    .summ-nav{position:absolute;right:12px;top:50%;transform:translateY(-50%);display:none;flex-direction:column;gap:5px;align-items:center;width:14px;max-height:72%;overflow-y:auto;scrollbar-width:none;z-index:6}
     .summ-nav.show{display:flex}
     .sn-item{width:8px;height:8px;flex-shrink:0;border-radius:50%;background:#c8cbd2;cursor:pointer;transition:transform .12s,background .12s;box-shadow:0 0 0 2px var(--bg)}
     .sn-item:hover{background:var(--accent2);transform:scale(1.6)}
     /* 当前可见话题对应的点：加粗主色（滚动实时同步） */
     .sn-item.sn-active{background:var(--accent);transform:scale(1.35)}
     .sn-item.sn-summ{background:var(--accent2)}
-    .nav-tip{position:absolute;right:24px;max-width:200px;background:var(--card);border:1px solid var(--border);border-radius:9px;padding:3px 7px;box-shadow:var(--shadow);font-size:9.5px;line-height:1.4;color:var(--fg);z-index:9;display:none;pointer-events:none;word-break:break-all}
-    .nav-tip .nt-ts{color:var(--muted);font-size:8.5px;margin-bottom:1px}
+    .nav-tip{position:absolute;right:32px;max-width:200px;background:var(--card);border:1px solid var(--border);border-radius:9px;padding:3px 7px;box-shadow:var(--shadow);font-size:8.5px;line-height:1.4;color:var(--fg);z-index:9;display:none;pointer-events:none;word-break:break-all}
+    .nav-tip .nt-ts{color:var(--muted);font-size:8px;margin-bottom:1px}
     .message.summ .summ-body{font-size:12.5px;color:var(--muted);margin-top:4px;white-space:pre-wrap}
     @media (max-width:1100px){.summ-nav{display:none!important}}
     .message{margin-bottom:14px;display:flex;gap:10px;max-width:85%}
