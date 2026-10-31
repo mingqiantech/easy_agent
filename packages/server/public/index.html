@@ -67,14 +67,16 @@
     .messages{flex:1;overflow-y:auto;padding:22px}
     #chatView{position:relative}
     /* 右侧压缩节点导航：历史摘要minymap，点击跳回原文（2026-10-31 elf 点单） */
-    .summ-nav{position:absolute;right:18px;top:14px;width:190px;max-height:calc(100% - 130px);overflow-y:auto;display:none;flex-direction:column;gap:6px;background:var(--card);border:1px solid var(--border);border-radius:12px;padding:8px;box-shadow:var(--shadow);font-size:11.5px;z-index:5}
+    /* 话题轨道：右侧一列小圆点，悬停浮出内容卡（点击跳转）；不占对话宽度 */
+    .summ-nav{position:absolute;right:8px;top:20px;bottom:90px;display:none;flex-direction:column;gap:5px;align-items:center;width:14px;z-index:5;overflow:visible}
     .summ-nav.show{display:flex}
-    .summ-nav .sn-title{color:var(--muted);font-size:10.5px;letter-spacing:.5px;display:flex;justify-content:space-between;align-items:center}
-    .summ-nav .sn-title button{border:none;background:none;color:var(--muted);cursor:pointer;font-size:12px;padding:0 2px}
-    .sn-item{border:1px solid var(--border);border-radius:8px;padding:5px 7px;cursor:pointer;background:var(--bg);line-height:1.45;color:var(--fg);opacity:.85}
-    .sn-item:hover{border-color:var(--accent2);opacity:1}
-    .sn-item.sn-summ{background:rgba(139,92,246,.06);border-left:3px solid var(--accent2)}
+    .sn-item{position:relative;width:8px;height:8px;flex-shrink:0;border-radius:50%;background:#c8cbd2;cursor:pointer;transition:transform .12s}
+    .sn-item:hover{background:var(--accent2);transform:scale(1.5)}
+    .sn-item.sn-summ{background:var(--accent2)}
+    .sn-item .sn-card{display:none;position:absolute;right:16px;top:-6px;width:260px;background:var(--card);border:1px solid var(--border);border-radius:10px;padding:7px 10px;box-shadow:var(--shadow);font-size:11.5px;line-height:1.5;color:var(--fg);z-index:9}
+    .sn-item:hover .sn-card{display:block}
     .sn-item .sn-ts{color:var(--muted);font-size:10px}
+    .sn-dot-wrap{flex:1;display:flex;flex-direction:column;gap:5px;align-items:center;justify-content:flex-start;overflow-y:auto;overflow-x:visible;width:100%;scrollbar-width:none}
     .message.summ .summ-body{font-size:12.5px;color:var(--muted);margin-top:4px;white-space:pre-wrap}
     @media (max-width:1100px){.summ-nav{display:none!important}}
     .message{margin-bottom:14px;display:flex;gap:10px;max-width:85%}
@@ -878,23 +880,16 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
         if(m.role==='system'&&String(m.content||'').includes('[对话摘要]')) return [{kind:'s',m}];
         return [];
       });
-      if(!anchors.length){nav.classList.remove('show');nav.innerHTML='';document.getElementById('messages').style.paddingRight='';return;}
-      nav.innerHTML=`<div class="sn-title"><span>🧭 话题 ${anchors.length}</span><button title="收起" onclick="summNavHide()">✕</button></div>`+
-        anchors.map((x,idx)=>{
-          const ts=x.m.createdAt?hhmm(x.m.createdAt):'';
-          if(x.kind==='s'){
-            const body=navPreview(String(x.m.content).split('[对话摘要]')[1]||'');
-            return `<div class="sn-item sn-summ" onclick="jumpNav(${idx})" title="${esc(body.slice(0,200))}"><div class="sn-ts">🗜 压缩 · ${ts}</div>${esc(body.slice(0,38))}…</div>`;
-          }
-          const body=navPreview(x.m.content)||((x.m.metadata&&x.m.metadata.images&&x.m.metadata.images.length)?`🖼 图片 ×${x.m.metadata.images.length}`:'（空消息）');
-          return `<div class="sn-item" onclick="jumpNav(${idx})" title="${esc(body)}"><div class="sn-ts">${ts}</div>${esc(body)}</div>`;
-        }).join('');
+      if(!anchors.length){nav.classList.remove('show');nav.innerHTML='';return;}
+      const dots=anchors.map((x,idx)=>{
+        const ts=x.m.createdAt?hhmm(x.m.createdAt):'';
+        let body,tag='';
+        if(x.kind==='s'){body=navPreview(String(x.m.content).split('[对话摘要]')[1]||'');tag='🗜 压缩 · ';}
+        else body=navPreview(x.m.content)||((x.m.metadata&&x.m.metadata.images&&x.m.metadata.images.length)?`🖼 图片 ×${x.m.metadata.images.length}`:'（空消息）');
+        return `<div class="sn-item${x.kind==='s'?' sn-summ':''}" onclick="jumpNav(${idx})"><div class="sn-card"><div class="sn-ts">${tag}${ts}</div>${esc(body)}</div></div>`;
+      }).join('');
+      nav.innerHTML=`<div class="sn-dot-wrap">${dots}</div>`;
       nav.classList.add('show');
-      document.getElementById('messages').style.paddingRight='220px';
-    }
-    function summNavHide(){
-      document.getElementById('summNav').classList.remove('show');
-      document.getElementById('messages').style.paddingRight='';
     }
     function jumpNav(idx){
       // DOM 里用户消息按气泡类匹配；工具内嵌的 user 变体不存在，顺位与 anchors 一致
