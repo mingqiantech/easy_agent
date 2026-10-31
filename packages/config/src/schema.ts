@@ -94,6 +94,9 @@ export const ConfigSchema = z.object({
       reindexIntervalMinutes: 10,
     }),
   stateDir: z.string().default(""),
+  /** 实际加载的配置文件路径（loadConfig 写入，非用户配置项）：
+   *  PATCH /api/agents 直接回写此文件（2026-10-31 废掉 agents-state.json 双层结构） */
+  configPath: z.string().optional(),
   workspaceDir: z.string().default("."),
   /** Dreaming 参数覆盖（缺省用 packages/memory/src/dreaming.ts DEFAULT_DREAMING_CONFIG）；
    * env EASY_AGENT_DREAM_* 优先级更高 */

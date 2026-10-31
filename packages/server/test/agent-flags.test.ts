@@ -75,16 +75,27 @@ describe("PATCH /api/agents/:name 开关字段", () => {
     expect(bad.status).toBe(400);
   });
 
-  it("持久化进 agents-state.json（重启保持）", async () => {
+  it("PATCH 直写 easy-agent.json（2026-10-31 废双层：单一配置文件真相）", async () => {
     const app = createApp(stubDeps());
     await app.request("/api/agents/life", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ toolHint: "h", toolsDisable: ["acp_agent"] }),
+      body: JSON.stringify({ toolHint: "h", toolsDisable: ["acp_agent"], relatedAgents: ["default"] }),
     });
-    const file = path.join(process.env.EASY_AGENT_STATE_DIR!, "agents-state.json");
+    // stubDeps 无 configPath → 回退 stateDir/easy-agent.json
+    const file = path.join(process.env.EASY_AGENT_STATE_DIR!, "easy-agent.json");
     const data = JSON.parse(fs.readFileSync(file, "utf-8"));
     expect(data.agents.life.toolHint).toBe("h");
     expect(data.agents.life.tools.disable).toEqual(["acp_agent"]);
+    expect(data.agents.life.relatedAgents).toEqual(["default"]);
+    // toolHint:null → 删除键而非写 null（写 null 会挂 schema 校验）
+    await app.request("/api/agents/life", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ toolHint: null }),
+    });
+    const data2 = JSON.parse(fs.readFileSync(file, "utf-8"));
+    expect("toolHint" in data2.agents.life).toBe(false);
+    expect(data2.agents.life.thinking).toBeUndefined(); // 未传的字段不动
   });
 });

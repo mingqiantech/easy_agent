@@ -109,7 +109,7 @@ function effectiveThinking(
  */
 export function resolveAgents(config: Config): ResolvedAgent[] {
   const primary = modelChain(config)[0];
-  // default 也可被 agents 节 / agents-state.json（Web UI 持久化）覆盖
+  // default 也可在 agents 节显式覆盖（含 Web UI PATCH 直写本文件，2026-10-31）
   const dflt = (config.agents ?? {})["default"];
   const defaultModel = dflt?.model ? resolveRef(config, dflt.model) : primary;
   const out: ResolvedAgent[] = [

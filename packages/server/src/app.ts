@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { resolveRef } from "@easy-agent/config/models";
+import { stripJsonComments } from "@easy-agent/config/loader";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import type { LLMClient } from "@easy-agent/llm/client";
@@ -554,8 +555,9 @@ export function createApp(deps: ServerDeps): Hono {
     }
   });
 
-  // Agent 运行时参数修改（思考等级）：即时生效 + 持久化到 agents-state.json，
-  // 重启网关后由 loadConfig 叠加回配置（Web UI 无需改文件即可配置）
+  // Agent 运行时参数修改：即时生效 + 直写 easy-agent.json 的 agents 节
+  // （2026-10-31 elf 点单废掉 agents-state.json 双层结构：配置文件单一真相，
+  // default 也在这里管理；注意注释会在回写时丢失，密钥建议继续用 ${ENV} 占位）
   app.patch("/api/agents/:name", async (c) => {
     const name = c.req.param("name");
     const agent = deps.agents[name];
@@ -593,27 +595,29 @@ export function createApp(deps: ServerDeps): Hono {
     if (hasRelated) (agent as any).relatedAgents = (body.relatedAgents as string[]).filter((n) => n !== name);
     if (hasWatch) (agent as any).watchAgents = (body.watchAgents as string[]).filter((n) => n !== name);
     try {
-      const dir = deps.config.stateDir;
-      fs.mkdirSync(dir, { recursive: true });
-      const file = path.join(dir, "agents-state.json");
+      const file =
+        deps.config.configPath ??
+        path.join(deps.config.stateDir, "easy-agent.json");
       let data: any = {};
       try {
-        data = JSON.parse(fs.readFileSync(file, "utf-8"));
+        data = JSON.parse(stripJsonComments(fs.readFileSync(file, "utf-8")));
       } catch {}
-      data.agents = {
-        ...(data.agents ?? {}),
-        [name]: {
-          ...(data.agents?.[name] ?? {}),
-          ...(typeof body.thinking === "string" && body.thinking ? { thinking: body.thinking } : {}),
-          ...(hasToolsDisable ? { tools: { disable: body.toolsDisable } } : {}),
-          ...(hasToolHint ? { toolHint: body.toolHint } : {}),
-          ...(hasRelated ? { relatedAgents: (body.relatedAgents as string[]).filter((n) => n !== name) } : {}),
-          ...(hasWatch ? { watchAgents: (body.watchAgents as string[]).filter((n) => n !== name) } : {}),
-        },
-      };
-      fs.writeFileSync(file, JSON.stringify(data, null, 2));
+      const cur: any = { ...(data.agents?.[name] ?? {}) };
+      if (typeof body.thinking === "string" && body.thinking) cur.thinking = body.thinking;
+      if (hasToolsDisable) cur.tools = { ...(cur.tools ?? {}), disable: body.toolsDisable };
+      if (hasToolHint) {
+        if (body.toolHint === null) delete cur.toolHint;
+        else cur.toolHint = body.toolHint;
+      }
+      if (hasRelated) cur.relatedAgents = (body.relatedAgents as string[]).filter((n2) => n2 !== name);
+      if (hasWatch) cur.watchAgents = (body.watchAgents as string[]).filter((n2) => n2 !== name);
+      data.agents = { ...(data.agents ?? {}), [name]: cur };
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, JSON.stringify(data, null, 2) + "\n");
+      // 内存 config 同步：重启前再次 resolveAgents/读配置也用新值
+      deps.config.agents = { ...(deps.config.agents ?? {}), [name]: { ...(deps.config.agents?.[name] ?? {}), ...cur } };
     } catch (e: any) {
-      return c.json({ error: `设置已生效但持久化失败: ${e.message}` }, 500);
+      return c.json({ error: `运行时已生效但写配置文件失败: ${e.message}` }, 500);
     }
     return c.json({
       agent: {

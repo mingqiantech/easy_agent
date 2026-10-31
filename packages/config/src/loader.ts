@@ -41,9 +41,12 @@ export function loadConfig(overrides?: Partial<Config>): Config {
     config.stateDir = getStateDir();
   }
 
-  // Web UI 运行时持久化的 agent 覆盖（agents-state.json）叠加到配置文件之上，
-  // 重启后仍生效；优先级：agents-state > easy-agent.json 的 agents 节
-  applyAgentsState(config);
+  // 记住实际加载的配置文件路径（PATCH /api/agents 直接回写此文件，
+  // 2026-10-31 废掉 agents-state.json 双层结构）；无文件时缺省全局路径
+  config.configPath = findConfigPath() ?? path.join(config.stateDir, "easy-agent.json");
+
+  // 2026-10-31 废掉 agents-state.json 双层结构：Web UI 的 PATCH /api/agents
+  // 直接回写 easy-agent.json 的 agents 节（含 default），此处不再叠加覆盖层
 
   // 工作区：未配置时默认 ~/.easy-agent/workspace（env 可覆盖）
   if (!config.workspaceDir || config.workspaceDir === ".") {
@@ -53,7 +56,7 @@ export function loadConfig(overrides?: Partial<Config>): Config {
   fs.mkdirSync(config.workspaceDir, { recursive: true });
   return config;
 }
-function loadConfigFile(): Record<string, unknown> {
+function findConfigPath(): string | null {
   // 优先级：全局状态目录 > 项目目录 > 老版 XDG 路径（向后兼容）
   const paths = [
     path.join(getStateDir(), "easy-agent.json"),
@@ -61,13 +64,18 @@ function loadConfigFile(): Record<string, unknown> {
     path.join(process.cwd(), "easy-agent.jsonc"),
     path.join(os.homedir(), ".config", "easy-agent", "config.json"),
   ];
-  for (const configPath of paths) {
-    try {
-      const content = fs.readFileSync(configPath, "utf-8");
-      return JSON.parse(stripJsonComments(content));
-    } catch {}
+  return paths.find((p) => fs.existsSync(p)) ?? null;
+}
+
+function loadConfigFile(): Record<string, unknown> {
+  const configPath = findConfigPath();
+  if (!configPath) return {};
+  try {
+    const content = fs.readFileSync(configPath, "utf-8");
+    return JSON.parse(stripJsonComments(content));
+  } catch {
+    return {};
   }
-  return {};
 }
 
 /**
@@ -97,23 +105,6 @@ function loadEnvFile(filePath: string): void {
     if (key && process.env[key] === undefined) {
       process.env[key] = value;
     }
-  }
-}
-
-/**
- * 读取 <stateDir>/agents-state.json（由 PATCH /api/agents/:name 写入），
- * 按 agent 字段级叠加到 config.agents；文件不存在/损坏那么静默忽略。
- * 注：default agent 的覆盖也走这里（models.ts 的 resolveAgents 会读 agents["default"]）。
- */
-function applyAgentsState(config: Config): void {
-  try {
-    const file = path.join(config.stateDir, "agents-state.json");
-    const data = JSON.parse(stripJsonComments(fs.readFileSync(file, "utf-8")));
-    for (const [name, ov] of Object.entries<any>(data.agents ?? {})) {
-      config.agents[name] = { ...(config.agents[name] ?? {}), ...ov };
-    }
-  } catch {
-    // 无覆盖文件
   }
 }
 
