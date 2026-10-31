@@ -196,3 +196,15 @@ describe("providers 进阶（OpenClaw 式自定义 provider）", () => {
     require("node:fs").unlinkSync(cfgFile);
   });
 });
+
+describe("websearch schema（2026-10-31 显式配置时发现）", () => {
+  it("provider=ollama 合法且 ollamaBaseUrl/ollamaApiKey 不被剥离", async () => {
+    const { ConfigSchema } = await import("../src/schema.js");
+    const c = ConfigSchema.parse({
+      providers: {},
+      websearch: { provider: "ollama", ollamaBaseUrl: "http://x:11434", ollamaApiKey: "k" },
+    });
+    expect((c.websearch as any).provider).toBe("ollama");
+    expect((c.websearch as any).ollamaBaseUrl).toBe("http://x:11434");
+  });
+});

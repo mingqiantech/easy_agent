@@ -48,10 +48,15 @@ export const ConfigSchema = z.object({
   /** 网页搜索：填了哪个 key 用哪个 API（auto 优先级 tavily>brave>bocha），都没填回退 Bing 抓取 */
   websearch: z
     .object({
-      provider: z.enum(["auto", "tavily", "brave", "bocha", "bing"]).default("auto"),
+      // ollama 档为代码已支持的后端（本地代理/云），schema 曾遗漏枚举（2026-10-31 显式配置时发现）
+      provider: z.enum(["auto", "tavily", "brave", "bocha", "ollama", "bing"]).default("auto"),
       tavilyApiKey: z.string().optional(),
       braveApiKey: z.string().optional(),
       bochaApiKey: z.string().optional(),
+      /** 缺省自动复用 providers.ollama.baseUrl */
+      ollamaBaseUrl: z.string().optional(),
+      /** 仅直连 ollama.com 云时需要 */
+      ollamaApiKey: z.string().optional(),
     })
     .default({ provider: "auto" }),
   /** 记忆检索：向量/混合检索配置。embedding.provider=simple 零依赖离线可用；
