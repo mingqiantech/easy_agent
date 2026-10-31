@@ -76,12 +76,12 @@ describe("relatedAgents 二次索引：主检索→索引词→关联工作区",
       { query: "portproxy WSL NAT", maxResults: 5 },
       { sessionId: "s", agentId: "tech", workDir: WS_TECH },
     );
-    expect(r.hits.some((h: any) => !h.from && String(h.excerpt).includes("portproxy"))).toBe(true);
+    expect(r.hits.some((h: any) => h.from === "self" && String(h.excerpt).includes("portproxy"))).toBe(true);
     expect(r.related).toBeDefined();
     expect(r.related.agents).toEqual(["default"]);
     expect(r.related.terms.length).toBeGreaterThan(0);
     expect(capturedQ2.split(" ").length).toBeGreaterThan(0); // 索引词确实拼成查询去了关联区
-    const sec = r.hits.filter((h: any) => h.from);
+    const sec = r.hits.filter((h: any) => h.from && h.from !== "self");
     expect(sec.length).toBe(1);
     expect(sec[0].from).toBe("default");
   });
@@ -94,7 +94,7 @@ describe("relatedAgents 二次索引：主检索→索引词→关联工作区",
       sessionId: "s", agentId: "default", workDir: WS_TECH,
     });
     expect(r.related).toBeUndefined();
-    expect(r.hits.every((h: any) => !h.from)).toBe(true);
+    expect(r.hits.every((h: any) => h.from === "self")).toBe(true); // 主命中统一标 self，与二查 from:<agent> 同坐标
   });
   it("主检索零命中（新空区全索引型）→ 查询词自身做钥匙二查", async () => {
     const emptyWs = path.join(TEST_DIR, "emptyws");

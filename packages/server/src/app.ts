@@ -386,7 +386,9 @@ export function createApp(deps: ServerDeps): Hono {
         : rel;
       for (const to of names) {
         if (to === a.name || !agentNames.has(to)) continue;
-        if (edges.some((e) => e.from === a.name && e.to === to)) continue; // 已有实调用边优先
+        // related 与 call 共存时两条都画（分带不重叠：call 上弧/related 下弧）；
+        // 此前“实调用边优先”直接跳过，图上误示为无检索通道（2026-10-31 实测发现）
+        if (edges.some((e) => e.from === a.name && e.to === to && e.kind === "related")) continue;
         edges.push({ from: a.name, to, weight: 0, last: 0, status: "related", kind: "related" as const });
       }
     }

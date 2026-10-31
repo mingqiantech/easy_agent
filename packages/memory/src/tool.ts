@@ -155,7 +155,11 @@ export function createMemorySearchTool(
       opts.onStatus?.({ mode: String(primary.mode), hits: (primary.hits?.length ?? 0) + secondary.length });
       return {
         mode: primary.mode,
-        hits: [...(primary.hits ?? []), ...secondary],
+        // 主命中补 from=self 标记：与二查的 from:<agent> 同一坐标系，模型/用户才能分辨归属
+        hits: [
+          ...(primary.hits ?? []).map((h: any) => ({ from: "self", ...h })),
+          ...secondary,
+        ],
         ...(usedTerms.length
           ? { related: { terms: usedTerms, agents: related.map((x) => x.name), hits: secondary.length } }
           : {}),
