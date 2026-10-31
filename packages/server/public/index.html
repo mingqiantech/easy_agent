@@ -64,21 +64,22 @@
     .action-btn:disabled{opacity:.4;cursor:not-allowed}
     .view{flex:1;min-height:0;display:flex;flex-direction:column}
     .view[hidden]{display:none}
-    .messages{flex:1;overflow-y:auto;padding:22px}
+    .messages{flex:1;overflow-y:auto;padding:22px;width:100%;max-width:940px;margin:0 auto}
     #chatView{position:relative}
     /* 右侧压缩节点导航：历史摘要minymap，点击跳回原文（2026-10-31 elf 点单） */
-    /* 话题轨道：右侧一列小圆点，悬停浮出内容卡（点击跳转）；不占对话宽度 */
-    .summ-nav{position:absolute;right:1px;top:20px;bottom:90px;display:none;flex-direction:column;gap:5px;align-items:center;width:14px;z-index:5;overflow:visible}
+    /* 话题轨道：右侧垂直居中小圆点列。
+       悬停卡改为挂在 #chatView 上的独立 .nav-tip——旧方案把卡片放在 overflow 滚动容器
+       的绝对定位子元素里，overflow-x:visible+overflow-y:auto 组合被浏览器按 both-auto 裁剪，
+       卡片永远弹不出来（2026-10-31 elf 反馈"悬停没显示"真因） */
+    .summ-nav{position:absolute;right:3px;top:50%;transform:translateY(-50%);display:none;flex-direction:column;gap:5px;align-items:center;width:14px;max-height:72%;overflow-y:auto;scrollbar-width:none;z-index:6}
     .summ-nav.show{display:flex}
-    .sn-item{position:relative;width:8px;height:8px;flex-shrink:0;border-radius:50%;background:#c8cbd2;cursor:pointer;transition:transform .12s,background .12s;box-shadow:0 0 0 2px var(--bg)}
-    .sn-item:hover{background:var(--accent2);transform:scale(1.5)}
+    .sn-item{width:8px;height:8px;flex-shrink:0;border-radius:50%;background:#c8cbd2;cursor:pointer;transition:transform .12s,background .12s;box-shadow:0 0 0 2px var(--bg)}
+    .sn-item:hover{background:var(--accent2);transform:scale(1.6)}
     /* 当前可见话题对应的点：加粗主色（滚动实时同步） */
     .sn-item.sn-active{background:var(--accent);transform:scale(1.35)}
     .sn-item.sn-summ{background:var(--accent2)}
-    .sn-item .sn-card{display:none;position:absolute;right:16px;top:-6px;width:260px;background:var(--card);border:1px solid var(--border);border-radius:10px;padding:7px 10px;box-shadow:var(--shadow);font-size:11.5px;line-height:1.5;color:var(--fg);z-index:9}
-    .sn-item:hover .sn-card{display:block}
-    .sn-item .sn-ts{color:var(--muted);font-size:10px}
-    .sn-dot-wrap{flex:1;display:flex;flex-direction:column;gap:5px;align-items:center;justify-content:flex-start;overflow-y:auto;overflow-x:visible;width:100%;scrollbar-width:none}
+    .nav-tip{position:absolute;right:24px;max-width:220px;background:var(--card);border:1px solid var(--border);border-radius:9px;padding:4px 8px;box-shadow:var(--shadow);font-size:10.5px;line-height:1.4;color:var(--fg);z-index:9;display:none;pointer-events:none;word-break:break-all}
+    .nav-tip .nt-ts{color:var(--muted);font-size:9.5px;margin-bottom:1px}
     .message.summ .summ-body{font-size:12.5px;color:var(--muted);margin-top:4px;white-space:pre-wrap}
     @media (max-width:1100px){.summ-nav{display:none!important}}
     .message{margin-bottom:14px;display:flex;gap:10px;max-width:85%}
@@ -293,6 +294,7 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
     <div class="view" id="chatView">
       <div class="messages" id="messages"></div>
       <div class="summ-nav" id="summNav"></div>
+      <div class="nav-tip" id="navTip"></div>
       <div class="input-area">
         <div class="img-strip" id="imgStrip" style="display:none;flex-basis:100%"></div>
         <div class="input-row">
@@ -884,16 +886,34 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
         return [];
       });
       if(!anchors.length){nav.classList.remove('show');nav.innerHTML='';return;}
-      const dots=anchors.map((x,idx)=>{
+      nav.innerHTML=anchors.map((x,idx)=>{
         const ts=x.m.createdAt?hhmm(x.m.createdAt):'';
         let body,tag='';
         if(x.kind==='s'){body=navPreview(String(x.m.content).split('[对话摘要]')[1]||'');tag='🗜 压缩 · ';}
         else body=navPreview(x.m.content)||((x.m.metadata&&x.m.metadata.images&&x.m.metadata.images.length)?`🖼 图片 ×${x.m.metadata.images.length}`:'（空消息）');
-        return `<div class="sn-item${x.kind==='s'?' sn-summ':''}" onclick="jumpNav(${idx})"><div class="sn-card"><div class="sn-ts">${tag}${ts}</div>${esc(body)}</div></div>`;
+        return `<div class="sn-item${x.kind==='s'?' sn-summ':''}" onclick="jumpNav(${idx})" data-ts="${esc(tag+ts)}" data-body="${esc(body.slice(0,90))}"></div>`;
       }).join('');
-      nav.innerHTML=`<div class="sn-dot-wrap">${dots}</div>`;
       nav.classList.add('show');
+      // 悬停浮卡：委托在轨道上（绑定一次即可，innerHTML 重渲染不影响）
+      if(!nav.dataset.tipBound){
+        nav.dataset.tipBound='1';
+        nav.addEventListener('mouseover',e=>{const d=e.target.closest('.sn-item');if(d)showNavTip(d);});
+        nav.addEventListener('mouseout',e=>{if(e.target.closest('.sn-item'))hideNavTip();});
+        nav.addEventListener('scroll',hideNavTip,{passive:true});
+      }
     }
+    function showNavTip(dot){
+      const tip=document.getElementById('navTip'),view=document.getElementById('chatView');
+      if(!tip||!view)return;
+      tip.innerHTML=`<div class="nt-ts">${dot.dataset.ts||''}</div>${esc(dot.dataset.body||'')}`;
+      const vr=view.getBoundingClientRect(),dr=dot.getBoundingClientRect();
+      tip.style.display='block';
+      const th=tip.offsetHeight;
+      let top=dr.top-vr.top+dr.height/2-th/2;
+      top=Math.max(8,Math.min(top,vr.height-th-96));
+      tip.style.top=top+'px';
+    }
+    function hideNavTip(){const t=document.getElementById('navTip');if(t)t.style.display='none';}
     /* 滚动 → 高亮：视口上边缘 1/3 线以下第一个锚点对应点激活 */
     let navSyncQueued=false;
     function syncNavActive(){
@@ -912,6 +932,7 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
       // DOM 里用户消息按气泡类匹配；工具内嵌的 user 变体不存在，顺位与 anchors 一致
       const els=document.querySelectorAll('#messages .message.user, #messages .message.summ.titem');
       const el=els[idx];if(!el)return;
+      hideNavTip();
       el.scrollIntoView({block:'center',behavior:'smooth'});
       el.classList.add('flash');setTimeout(()=>el.classList.remove('flash'),2600);
     }
