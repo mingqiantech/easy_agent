@@ -77,6 +77,8 @@ export interface ServerDeps {
   agents: Record<string, AgentRuntime>;
   /** 梦境单轮执行器（index.ts 注入：接线 + 防并发） */
   runDreaming?: () => Promise<Record<string, unknown>>;
+  /** 强制重建记忆/会话语料索引（知识拓扑立即刷新用；index.ts 注入闭包） */
+  reindex?: () => Promise<{ files: number; chunks: number }>;
   /** 备份管理器（设置页备份卡片 + 定时调度共用） */
   backup?: BackupManager;
   /** 检索管道状态（检索拓扑图数据源；index.ts 注入，每次请求现取） */
@@ -1187,6 +1189,16 @@ export function createApp(deps: ServerDeps): Hono {
   app.get("/api/retrieval", (c) => {
     if (!deps.getRetrievalStats) return c.json({ error: "retrieval stats unavailable" }, 503);
     return c.json(deps.getRetrievalStats());
+  });
+
+  // 立即重建知识索引（不等 10 分钟周期）：新文档/搬运的记忆秒进知识拓扑
+  app.post("/api/reindex", async (c) => {
+    if (!deps.reindex) return c.json({ error: "reindex unavailable" }, 503);
+    try {
+      return c.json(await deps.reindex());
+    } catch (e: any) {
+      return c.json({ error: String(e?.message ?? e).slice(0, 200) }, 500);
+    }
   });
 
   return app;

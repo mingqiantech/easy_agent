@@ -551,6 +551,7 @@ async function main() {
     agents,
     embedding,
     runDreaming: runDreamingCycle,
+    reindex: reindexMemory,
     cron,
     backup,
     // 检索管道 introspection（Web UI 检索拓扑图）：每次请求现取，热配置变更即时反映

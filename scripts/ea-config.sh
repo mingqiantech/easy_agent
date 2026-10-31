@@ -45,6 +45,8 @@ usage() {
   ea-config set '<jq过滤>'      # 例: set '.wecom.agentId = "life"'
   ea-config check [--live]      # 分层自动校验（见下）；--live 加真实搜索探针
   ea-config restart [gateway|wecom|both]
+  ea-config know reindex                    # 立即重建知识索引（新文档秒进知识拓扑）
+  ea-config know stats                      # 索引规模（文件/块数按来源）
   ea-config cron-install        # 装 systemd 用户定时器，每 30 分钟自动 check
   ea-config cron-remove
 
@@ -305,6 +307,12 @@ case "$cmd" in
     esac ;;
   restart)
     RESTART=1; do_restart "${1:-both}" ;;
+  know)
+    case "${1:-}" in
+      reindex) curl -s -X POST "$GW/api/reindex" --max-time 120 | jq . ;;
+      stats)   curl -s "$GW/api/retrieval" | jq '{entries, embedding: .embedding.model, reindexMin: .reindexIntervalMinutes, dreaming: .dreaming.enabled}' ;;
+      *) usage; exit 1 ;;
+    esac ;;
   cron-install)
     mkdir -p ~/.config/systemd/user
     cat > ~/.config/systemd/user/ea-check.service <<EOS

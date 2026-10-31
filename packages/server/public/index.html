@@ -302,6 +302,7 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
           <option value="0.3">宽泛连接</option><option value="0.35" selected>标准连接</option><option value="0.5">紧密连接</option>
         </select>
         <button onclick="loadKnowledge()">刷新</button>
+        <button onclick="reindexKnow(this)" title="不等 10 分钟周期，立即把新文档/搬运的记忆入索引">♻️ 重建索引</button>
       </div>
       <div class="know-main">
         <div class="topo-wrap"><svg id="knowSvg" width="100%" height="480"></svg></div>
@@ -1111,6 +1112,14 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
       memory:{r:11,fill:'#7291a8',txt:'#22303a'},
       query:{r:20,fill:'#8a6fae',txt:'#fff'},
     };
+    async function reindexKnow(btn){
+      btn.disabled=true; btn.textContent="♻️ 重建中…";
+      try{const r=await (await fetch(`${API}/api/reindex`,{method:"POST"})).json();
+        btn.textContent=r.chunks!=null?`♻️ ${r.files}文件/${r.chunks}块`:`♻️ 完成`;}
+      catch(e){btn.textContent="♻️ 失败";}
+      setTimeout(()=>{btn.disabled=false;btn.textContent="♻️ 重建索引";},4000);
+      loadKnowledge();
+    }
     async function loadKnowledge(){
       const svg=document.getElementById('knowSvg');
       if(!svg)return;
