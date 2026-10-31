@@ -292,6 +292,7 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
         <div class="img-strip" id="imgStrip" style="display:none;flex-basis:100%"></div>
         <div class="input-row">
         <button class="attach-btn" title="添加图片（也可在输入框直接粘贴）" onclick="document.getElementById('imgInput').click()">📎</button>
+        <button class="attach-btn" id="micBtn" title="语音输入（再点停止；Chrome/Edge，需麦克风授权）" onclick="toggleRec()">🎤</button>
         <input type="file" id="imgInput" accept="image/png,image/jpeg,image/gif,image/webp,image/bmp" multiple hidden>
         <textarea id="input" rows="1" placeholder="输入消息…（Enter 发送 / Shift+Enter 换行 / 可粘图）" style="height:30px;overflow-y:auto"
           oninput="this.style.height='30px';this.style.height=Math.min(this.scrollHeight,110)+'px'"
@@ -981,6 +982,7 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
     });
     async function abortRun(){const b=document.getElementById('stopBtn');b.disabled=true;b.title='中断中…';try{await fetch(`${API}/api/sessions/${sid}/abort`,{method:'POST'});}catch(e){b.disabled=false;b.title='';}}
     async function send(){
+      if(rec)rec.stop(); // 发送前先停录音：否则识别会继续往已清空的输入框里写字
       const input=document.getElementById('input'),text=input.value.trim();
       if(!text&&!pendingImgs.length)return;
       if(!sid)await newSession();
@@ -1267,6 +1269,42 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
         (n.type==='agent'?`<div class="kd-actions"><button onclick="pickAgentByName('${esc(n.label)}')">切到该 Agent 对话 →</button></div>`:'')+
         (n.type==='session'?`<div class="kd-actions"><button onclick="openSubRun('${esc(n.id.slice(2))}')">打开会话 →</button></div>`:'')+
         links;
+    }
+
+    /* ── 语音输入：浏览器原生 Web Speech API（零依赖；localhost 算安全上下文可用）
+       识别中的段落实时写进输入框（保留已有文字），可继续编辑后手动发送 ── */
+    let rec=null, recBase="";
+    function toggleRec(){
+      const btn=document.getElementById('micBtn');
+      if(rec){rec.stop();return;}
+      const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+      if(!SR||!window.isSecureContext){
+        alert(!SR?"当前浏览器不支持语音识别（请用 Chrome / Edge）"
+          :"麦克风需要安全上下文：请用 http://localhost:4096 访问（用 IP 如 172.18.x.x 访问时浏览器禁止录音）");
+        return;
+      }
+      rec=new SR();
+      rec.lang="zh-CN";rec.continuous=true;rec.interimResults=true;
+      recBase=document.getElementById('input').value;
+      if(recBase&&!/\s$/.test(recBase))recBase+=" ";
+      btn.textContent="🔴";btn.style.color="#c26d64";
+      let live=recBase;
+      rec.onresult=(e)=>{
+        let fin="",inter="";
+        for(let i=e.resultIndex;i<e.results.length;i++){
+          const t=e.results[i][0].transcript;
+          if(e.results[i].isFinal)fin+=t;else inter+=t;
+        }
+        if(fin){recBase+=fin;/[。！？，；]$/.test(fin.trim())||(recBase+="，");}
+        live=recBase+inter;
+        const inp=document.getElementById('input');
+        inp.value=live;inp.style.height='30px';inp.style.height=Math.min(inp.scrollHeight,110)+'px';
+      };
+      rec.onerror=(e)=>{
+        if(e.error!=='aborted')alert("语音识别失败："+e.error+"（浏览器需能访问识别服务；Edge 国内网络通常可用）");
+      };
+      rec.onend=()=>{rec=null;btn.textContent="🎤";btn.style.color="";};
+      rec.start();
     }
 
     /* ── SSE 事件流：逐字渲染 + 实时工具卡片；断线自动重连，重连后补齐历史 ── */
