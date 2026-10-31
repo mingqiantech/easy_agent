@@ -818,13 +818,34 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
       document.querySelectorAll('#messages .clippable').forEach(el=>{
         if(el.dataset.clChecked)return;
         el.dataset.clChecked='1';
-        if(el.scrollHeight<=840)return;
-        el.classList.add('clipped');
-        const btn=document.createElement('span');
-        btn.className='expand-btn';btn.textContent='展开全部 ▾';
-        btn.onclick=()=>{const on=el.classList.toggle('clipped');btn.textContent=on?'展开全部 ▾':'收起 ▴';};
-        el.parentNode.insertBefore(btn,el.nextSibling);
+        // scrollHeight 受行高/表格影响在首帧可能偏小；用 offsetHeight 兜底 +
+        // rAF 后复查一次（样式/表格布局完成后）
+        const test=()=>{const h=el.scrollHeight||el.offsetHeight;if(h>840){el.classList.add('clipped');return true;}return false;};
+        const mk=()=>{const btn=document.createElement('span');
+          btn.className='expand-btn';btn.textContent='展开全部 ▾';
+          btn.onclick=()=>{const on=el.classList.toggle('clipped');btn.textContent=on?'展开全部 ▾':'收起 ▴';};
+          el.parentNode.insertBefore(btn,el.nextSibling);};
+        if(test())mk();
+        else requestAnimationFrame(()=>{if(!el.classList.contains('clipped')&&test())mk();});
       });
+      // ② 会话级长文折叠：当前视口内已渲染高度总和 >1600px 的连续消息，
+      //    保留最近 2 条全显，更早的默认收起（点展开可看）——治多条长回复堆满屏幕
+      const c=document.getElementById('messages');
+      const items=[...c.querySelectorAll('.message:not(.toolchip)')];
+      let total=items.reduce((a,m)=>a+m.offsetHeight,0);
+      if(total>2400){
+        for(let i=0;i<items.length-2;i++){
+          const b=items[i].querySelector('.clippable:not(.clipped)');
+          if(b&&items[i].offsetHeight>500){b.classList.add('clipped');
+            if(!b.parentNode.querySelector('.expand-btn')){const btn=document.createElement('span');
+              btn.className='expand-btn';btn.textContent='展开全部 ▾';
+              btn.onclick=()=>{const on=b.classList.toggle('clipped');btn.textContent=on?'展开全部 ▾':'收起 ▴';};
+              b.parentNode.insertBefore(btn,b.nextSibling);}
+            total-=b.offsetHeight;
+          }
+          if(total<=1600)break;
+        }
+      }
     }
 
     /* ── 上下文占用小部件：顶栏胶囊 + 点击弹层（窗口/最新一轮/会话累计）── */
@@ -868,6 +889,7 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
       c.innerHTML=rows||'<div class="empty">开始对话吧</div>';
       groupToolMessages();
       applyCollapse();
+      setTimeout(applyCollapse,300); // 表格/字体布局稳定后补判
       c.scrollTop=c.scrollHeight;
       // 布局稳定后再钉一次底部：工具组折叠/图片加载会二次撑高，只滚一次会停在半路
       // （elf 反馈：切 agent 后对话"到最上面"——实际是停在旧底/顶部，2026-10-31）
