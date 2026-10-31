@@ -77,10 +77,10 @@
     .summ-nav.show{display:flex}
     .sn-item{width:8px;height:8px;flex-shrink:0;border-radius:50%;background:#c8cbd2;cursor:pointer;transition:transform .12s,background .12s;box-shadow:0 0 0 2px var(--bg)}
     .sn-item:hover{background:var(--accent2);transform:scale(1.6)}
-    /* 仅当前节点挂竖杠（上下各 32px 探向邻点）；其余保持纯圆点 */
-    .sn-item.sn-active{position:relative;background:var(--accent);transform:scale(1.35)}
-    /* 一条 64px 竖杠穿过当前点、两端抵到邻点圆心（点有底色圈，视觉自然衔接） */
-    .sn-item.sn-active::before{content:"";position:absolute;left:50%;top:-28px;height:64px;width:1px;margin-left:-0.5px;background:var(--accent);border-radius:1px;z-index:-1}
+    /* 当前节点：空心圈 + 上下各撑开 14px，与其他点明显拉开；其余保持紧凑正常间距 */
+    .sn-item.sn-active{position:relative;width:10px;height:10px;background:transparent;border:2px solid var(--accent);box-shadow:none;transform:none;margin:14px 0;animation:none}
+    .sn-item.sn-active:hover{background:var(--accent)}
+    .sn-item.sn-active::before{content:"";position:absolute;left:50%;top:50%;height:20px;width:1px;margin-left:-0.5px;background:var(--accent);z-index:-1}
     .sn-item.sn-summ{background:var(--accent2)}
     .nav-tip{position:absolute;right:46px;max-width:340px;background:var(--card);border:1px solid var(--border);border-radius:9px;padding:6px 10px;box-shadow:var(--shadow);font-size:11px;line-height:1.45;color:var(--fg);z-index:9;display:none;pointer-events:none;word-break:break-all}
     .nav-tip .nt-ts{color:var(--muted);font-size:9.5px;margin-bottom:2px}
