@@ -68,7 +68,7 @@
        横向滚动条从根源上禁掉（overflow-x:hidden，气泡本来就自动换行不需要横滚）。
        注意不能配 scrollbar-width 标准属性——Chrome 121+ 见到它会无视下方
        ::-webkit-scrollbar 自定义（上轮横条复活正是这个原因） */
-    .messages{flex:1;overflow-y:auto;overflow-x:hidden;padding:22px calc(max(24px, calc((100% - 1080px)/2) + var(--col-shift,36px)) - var(--sbw,8px)) 22px max(24px, calc((100% - 1080px)/2) - var(--col-shift,36px));width:100%;--sbw:8px}
+    .messages{flex:1;overflow-y:auto;overflow-x:hidden;padding:22px calc(max(24px, calc((100% - 1200px)/2) + var(--col-shift,36px)) - var(--sbw,8px)) 22px max(24px, calc((100% - 1200px)/2) - var(--col-shift,36px));width:100%;--sbw:8px}
     .messages::-webkit-scrollbar{width:var(--sbw)}
     .messages::-webkit-scrollbar-thumb{background:#c3c9d4;border-radius:4px}
     .messages::-webkit-scrollbar-track{background:transparent}
@@ -103,7 +103,7 @@
     .ts{font-size:10px;color:var(--muted);margin-top:5px}
     .input-area{padding:6px 14px;display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;background:transparent}
     /* 宽屏时输入行居中限宽，不再整条横穿；窄屏自动全宽 */
-    .input-row{display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;width:100%;max-width:760px;margin:0 auto}
+    .input-row{display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;width:100%;max-width:980px;margin:0 auto}
     .input-area textarea{flex:1;min-width:0;background:#f5f4f0;color:var(--fg);border:1px solid var(--border);border-radius:10px;padding:5px 11px;font-size:14px;font-family:inherit;resize:none;min-height:30px;max-height:110px}
     .input-area textarea:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
     .send-btn{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;border:none;border-radius:10px;padding:6px 18px;cursor:pointer;font-size:13.5px;font-weight:600}
