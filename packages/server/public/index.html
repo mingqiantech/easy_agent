@@ -68,7 +68,7 @@
        横向滚动条从根源上禁掉（overflow-x:hidden，气泡本来就自动换行不需要横滚）。
        注意不能配 scrollbar-width 标准属性——Chrome 121+ 见到它会无视下方
        ::-webkit-scrollbar 自定义（上轮横条复活正是这个原因） */
-    .messages{flex:1;overflow-y:auto;overflow-x:hidden;padding:22px calc(max(24px, calc((100% - 1080px)/2)) - var(--sbw,8px)) 22px max(24px, calc((100% - 1080px)/2));width:100%;--sbw:8px}
+    .messages{flex:1;overflow-y:auto;overflow-x:hidden;padding:22px calc(max(24px, calc((100% - 1080px)/2) + var(--col-shift,36px)) - var(--sbw,8px)) 22px max(24px, calc((100% - 1080px)/2) - var(--col-shift,36px));width:100%;--sbw:8px}
     .messages::-webkit-scrollbar{width:var(--sbw)}
     .messages::-webkit-scrollbar-thumb{background:#c3c9d4;border-radius:4px}
     .messages::-webkit-scrollbar-track{background:transparent}
