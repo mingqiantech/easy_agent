@@ -930,7 +930,7 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
       const line=c.scrollTop+c.clientHeight*0.33;
       let act=-1;
       anchors.forEach((el,i)=>{if(el.offsetTop<line)act=i;});
-      dots.forEach((d,i)=>{d.classList.toggle('sn-active',i===act);d.classList.toggle('sn-next',i===act+1);});
+      dots.forEach((d,i)=>d.classList.toggle('sn-active',i===act));
     }
     function jumpNav(idx){
       // DOM 里用户消息按气泡类匹配；工具内嵌的 user 变体不存在，顺位与 anchors 一致
