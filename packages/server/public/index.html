@@ -87,11 +87,13 @@
     .message.summ .bubble{border-left:4px solid var(--accent2);background:rgba(139,92,246,.06)}
     .ts{font-size:10px;color:var(--muted);margin-top:5px}
     .input-area{padding:6px 14px;border-top:1px solid var(--border);display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;background:var(--card)}
-    .input-area textarea{flex:1;background:var(--bg);color:var(--fg);border:1px solid var(--border);border-radius:10px;padding:5px 11px;font-size:14px;font-family:inherit;resize:none;min-height:30px;max-height:110px}
+    /* 宽屏时输入行居中限宽，不再整条横穿；窄屏自动全宽 */
+    .input-row{display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;width:100%;max-width:760px;margin:0 auto}
+    .input-area textarea{flex:1;min-width:0;background:var(--bg);color:var(--fg);border:1px solid var(--border);border-radius:10px;padding:5px 11px;font-size:14px;font-family:inherit;resize:none;min-height:30px;max-height:110px}
     .input-area textarea:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
     .send-btn{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;border:none;border-radius:10px;padding:6px 18px;cursor:pointer;font-size:13.5px;font-weight:600}
-    .stop-btn{background:var(--tool);color:#b3564b;border:1px solid #c26d64;border-radius:10px;padding:6px 14px;cursor:pointer;font-size:13.5px;font-weight:600}
-    .attach-btn{background:var(--hover);border:1px solid var(--border);border-radius:10px;height:30px;padding:0 10px;cursor:pointer;font-size:14px}
+    .stop-btn{background:var(--tool);color:#b3564b;border:1px solid #c26d64;border-radius:10px;padding:6px 14px;cursor:pointer;font-size:14px;font-weight:600}
+    .attach-btn{background:var(--hover);border:1px solid var(--border);border-radius:10px;height:30px;padding:0 10px;cursor:pointer;font-size:15px}
     .attach-btn:hover{background:var(--accent-soft)}
     .img-strip{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px}
     .img-chip{position:relative}
@@ -288,6 +290,7 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
       <div class="summ-nav" id="summNav"></div>
       <div class="input-area">
         <div class="img-strip" id="imgStrip" style="display:none;flex-basis:100%"></div>
+        <div class="input-row">
         <button class="attach-btn" title="添加图片（也可在输入框直接粘贴）" onclick="document.getElementById('imgInput').click()">📎</button>
         <input type="file" id="imgInput" accept="image/png,image/jpeg,image/gif,image/webp,image/bmp" multiple hidden>
         <textarea id="input" rows="1" placeholder="输入消息…（Enter 发送 / Shift+Enter 换行 / 可粘图）" style="height:30px;overflow-y:auto"
@@ -295,6 +298,7 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
           onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();send()}"></textarea>
         <button class="stop-btn" id="stopBtn" hidden onclick="abortRun()" title="停止当前任务（工具跑到一半会自动续跑；再点为真停）">■ 停止</button>
         <button class="send-btn" id="sendBtn" onclick="send()">发送</button>
+        </div>
       </div>
     </div>
 
