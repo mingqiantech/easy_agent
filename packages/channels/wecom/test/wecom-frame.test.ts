@@ -69,3 +69,17 @@ describe("WeCom 帧映射", () => {
     expect(m.text).toContain("（引用: 原方案 A）");
   });
 });
+
+describe("wecom 配置：chatAgents 固定映射（2026-10-31）", () => {
+  it("schema 接受 chatAgents 且缺省空对象", async () => {
+    const { ConfigSchema } = await import("@easy-agent/config/schema");
+    const c = ConfigSchema.parse({
+      providers: {},
+      wecom: { botId: "b", secret: "s", agentId: "tech", chatAgents: { "group:123": "life" } },
+    });
+    expect(c.wecom!.chatAgents).toEqual({ "group:123": "life" });
+    const d = ConfigSchema.parse({ providers: {}, wecom: { botId: "b", secret: "s" } });
+    expect(d.wecom!.chatAgents).toEqual({});
+    expect(d.wecom!.agentId).toBe("default");
+  });
+});

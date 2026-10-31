@@ -138,6 +138,9 @@ export const ConfigSchema = z.object({
       allowedUserIds: z.array(z.string()).default([]),
       /** 默认接入的网关 agent（会话内可用「切换 <name>」改） */
       agentId: z.string().default("default"),
+      /** 按会话固定 agent（2026-10-31）：key=chatId 或 channel:chatId，value=agent 名；
+       *  优先级最高，固定后「切换」指令对该会话无效 */
+      chatAgents: z.record(z.string()).default({}),
     })
     .optional(),
   /** 多 Agent 定义："名字" -> { model?, workspaceDir?, description?, thinking?, tools? } */

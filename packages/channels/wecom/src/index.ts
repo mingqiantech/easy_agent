@@ -1,10 +1,15 @@
+import fs from "node:fs";
+import path from "node:path";
 import { WeComAdapter } from "./bot.js";
 import { loadConfig } from "@easy-agent/config/loader";
+import { getStateDir } from "@easy-agent/config/path";
 
 /**
  * 方案 B：企微通道 = 4096 网关的桥接进程（不再本地起会话）。
  * 消息 → POST /api/sessions/:id/messages → 网关（workspace 记忆 + 工具 + agent 路由）
- * 会话按 chatId 稳定映射，第一个用户可通过 "切换 <agent名>" 指令选 agent。
+ * 会话按 chatId 稳定映射；agent 选择优先级（2026-10-31）：
+ *   配置固定 wecom.chatAgents > 「切换」指令（持久化到 <stateDir>/wecom-chat-agents.json，
+ *   重启不丢） > wecom.agentId 缺省。
  */
 
 const GW = process.env.EASY_AGENT_GATEWAY ?? "http://127.0.0.1:4096";
@@ -116,8 +121,28 @@ async function main() {
   }
 
   const defaultAgent = config.wecom.agentId || "default";
+  // 按会话固定 agent（配置优先级最高）：key 支持 chatId 或 channel:chatId
+  const staticMap = (config.wecom.chatAgents ?? {}) as Record<string, string>;
+  const pinnedAgent = (chatKey: string, chatId: string) =>
+    staticMap[chatKey] ?? staticMap[chatId] ?? null;
+
+  // 「切换」结果持久化：重启后各会话保持选定的 agent
+  const switchFile = path.join(getStateDir(), "wecom-chat-agents.json");
+  const manual = new Map<string, string>();
+  try {
+    const saved = JSON.parse(fs.readFileSync(switchFile, "utf-8"));
+    for (const [k, v] of Object.entries(saved)) if (typeof v === "string") manual.set(k, v);
+  } catch {}
+  const persistSwitches = () => {
+    try {
+      fs.writeFileSync(switchFile, JSON.stringify(Object.fromEntries(manual), null, 2) + "\n");
+    } catch (e: any) {
+      console.error("wecom 切换状态持久化失败:", String(e?.message).slice(0, 120));
+    }
+  };
+
   const sessions = new Map<string, BridgeState>(); // chatKey → session
-  const chatAgents = new Map<string, string>(); // chatKey → 选定 agent（切换指令）
+  const chatAgents = manual; // 引用同一张表：下面逻辑沿用旧变量名
 
   const adapter = new WeComAdapter({
     botId: config.wecom.botId,
@@ -128,21 +153,27 @@ async function main() {
   });
 
   adapter.onMessage(async (msg) => {
-    const chatKey = `${msg.channel}:${msg.chatId}`;
-    let reply: string;
-    try {
-      const agentId = chatAgents.get(chatKey) ?? defaultAgent;
+      const chatKey = `${msg.channel}:${msg.chatId}`;
+      let reply: string;
+      try {
+        const pinned = pinnedAgent(chatKey, msg.chatId);
+        const agentId = pinned ?? chatAgents.get(chatKey) ?? defaultAgent;
       // 指令：切换 agent（不消耗一次会话轮）
       const sw = /^[\/#]?\s*(切换|switch)\s+(\S+)/i.exec(msg.text);
       if (sw) {
-        const list = (await gwFetch("/api/agents")).agents as Array<{ name: string }>;
         const want = sw[2];
-        if (!list.some((a) => a.name === want)) {
-          reply = `没有 agent「${want}」，可选：${list.map((a) => a.name).join(" / ")}`;
+        if (pinned) {
+          reply = `此会话已由配置固定为 ${pinned}，切换指令无效（需修改 easy-agent.json 的 wecom.chatAgents）。`;
         } else {
-          chatAgents.set(chatKey, want);
-          await ensureSession(sessions, chatKey, want);
-          reply = `已切换到 ${want}，直接说事。`;
+          const list = (await gwFetch("/api/agents")).agents as Array<{ name: string }>;
+          if (!list.some((a) => a.name === want)) {
+            reply = `没有 agent「${want}」，可选：${list.map((a) => a.name).join(" / ")}`;
+          } else {
+            chatAgents.set(chatKey, want);
+            persistSwitches();
+            await ensureSession(sessions, chatKey, want);
+            reply = `已切换到 ${want}，直接说事。（此选择重启后仍保持）`;
+          }
         }
         await adapter.sendMessage(msg.chatId, reply);
         return;
@@ -179,7 +210,11 @@ async function main() {
   });
 
   await adapter.start();
-  console.log(`🌉 WeCom → 网关桥接就绪 (${GW})，默认 agent=${defaultAgent}`);
+  console.log(
+    `🌉 WeCom → 网关桥接就绪 (${GW})，默认 agent=${defaultAgent}` +
+      (Object.keys(staticMap).length ? `；固定映射 ${Object.keys(staticMap).length} 条` : "") +
+      (manual.size ? `；恢复切换记忆 ${manual.size} 条` : ""),
+  );
 }
 
 main().catch((e) => {
