@@ -121,6 +121,8 @@ export function createApp(deps: ServerDeps): Hono {
         thinking: a.thinking,
         toolsDisable: (a as any).toolsDisable ?? [],
         toolHint: (a as any).toolHint,
+        relatedAgents: (a as any).relatedAgents ?? [],
+        watchAgents: (a as any).watchAgents ?? [],
       })),
     }),
   );
