@@ -77,9 +77,9 @@
     .summ-nav.show{display:flex}
     .sn-item{width:8px;height:8px;flex-shrink:0;border-radius:50%;background:#c8cbd2;cursor:pointer;transition:transform .12s,background .12s;box-shadow:0 0 0 2px var(--bg)}
     .sn-item:hover{background:var(--accent2);transform:scale(1.6)}
-    /* 当前节点：空心圈 + 上下各撑开 14px，与其他点明显拉开；其余保持紧凑正常间距 */
-    .sn-item.sn-active{position:relative;width:10px;height:10px;background:transparent;border:2px solid var(--accent);box-shadow:none;transform:none;margin:16px 0;animation:none}
-    .sn-item.sn-active:hover{background:var(--accent)}
+    /* 当前节点：实心主色点（比灰点大一档）+ 上下撑开拉开间距；其余紧凑灰点 */
+    .sn-item.sn-active{position:relative;width:10px;height:10px;background:var(--accent);box-shadow:0 0 0 2px var(--bg);transform:none;margin:16px 0}
+    .sn-item.sn-active:hover{transform:scale(1.3)}
     .sn-item.sn-active::before{content:"";position:absolute;left:50%;top:-14px;height:52px;width:1px;margin-left:-0.5px;background:var(--accent);z-index:-1}
     .sn-item.sn-summ{background:var(--accent2)}
     .nav-tip{position:absolute;right:46px;max-width:340px;background:var(--card);border:1px solid var(--border);border-radius:9px;padding:6px 10px;box-shadow:var(--shadow);font-size:11px;line-height:1.45;color:var(--fg);z-index:9;display:none;pointer-events:none;word-break:break-all}
