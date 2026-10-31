@@ -73,6 +73,7 @@
     .summ-nav .sn-title button{border:none;background:none;color:var(--muted);cursor:pointer;font-size:12px;padding:0 2px}
     .sn-item{border:1px solid var(--border);border-radius:8px;padding:5px 7px;cursor:pointer;background:var(--bg);line-height:1.45;color:var(--fg);opacity:.85}
     .sn-item:hover{border-color:var(--accent2);opacity:1}
+    .sn-item.sn-summ{background:rgba(139,92,246,.06);border-left:3px solid var(--accent2)}
     .sn-item .sn-ts{color:var(--muted);font-size:10px}
     .message.summ .summ-body{font-size:12.5px;color:var(--muted);margin-top:4px;white-space:pre-wrap}
     @media (max-width:1100px){.summ-nav{display:none!important}}
@@ -864,26 +865,40 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
     }
 
     /* 右侧压缩导航：列出历史 [对话摘要] 节点，点击跳回流内分隔条闪烁定位 */
+    /* 右侧导航：话题节点（每轮用户提问）+ 🗜 压缩条穿插——比纯压缩摘要实用：
+       摘要是模型写的 markdown 做条目又丑又重复，而用户要跳回的往往是"我那时问的问题" */
+    function navPreview(t){
+      return String(t).replace(/\[长文本已存文件：[^\]]*\][\s\S]*?--- 前 400 字预览 ---/,'')
+        .replace(/^#+\s*/gm,'').replace(/[*`>]/g,'').replace(/\s+/g,' ').trim().slice(0,38);
+    }
     function buildSummNav(messages){
       const nav=document.getElementById('summNav');
-      const sums=(messages||[]).map((m,i)=>({m,i})).filter(x=>x.m.role==='system'&&String(x.m.content||'').includes('[对话摘要]'));
-      if(!sums.length){nav.classList.remove('show');nav.innerHTML='';document.getElementById('messages').style.paddingRight='';return;}
-      nav.innerHTML=`<div class="sn-title"><span>🗜 压缩节点 ${sums.length}</span><button title="收起" onclick="summNavHide()">✕</button></div>`+
-        sums.map((x,idx)=>{
-          const body=String(x.m.content).split('[对话摘要]')[1]?.trim()||'';
+      const anchors=(messages||[]).flatMap((m,i)=>{
+        if(m.role==='user') return [{kind:'q',m}];
+        if(m.role==='system'&&String(m.content||'').includes('[对话摘要]')) return [{kind:'s',m}];
+        return [];
+      });
+      if(!anchors.length){nav.classList.remove('show');nav.innerHTML='';document.getElementById('messages').style.paddingRight='';return;}
+      nav.innerHTML=`<div class="sn-title"><span>🧭 话题 ${anchors.length}</span><button title="收起" onclick="summNavHide()">✕</button></div>`+
+        anchors.map((x,idx)=>{
           const ts=x.m.createdAt?hhmm(x.m.createdAt):'';
-          return `<div class="sn-item" onclick="jumpSumm(${idx})" title="${esc(body.slice(0,200))}"><div class="sn-ts">#第${idx+1}次 · ${ts}</div>${esc(body.slice(0,42))}…</div>`;
+          if(x.kind==='s'){
+            const body=navPreview(String(x.m.content).split('[对话摘要]')[1]||'');
+            return `<div class="sn-item sn-summ" onclick="jumpNav(${idx})" title="${esc(body.slice(0,200))}"><div class="sn-ts">🗜 压缩 · ${ts}</div>${esc(body.slice(0,38))}…</div>`;
+          }
+          const body=navPreview(x.m.content)||((x.m.metadata&&x.m.metadata.images&&x.m.metadata.images.length)?`🖼 图片 ×${x.m.metadata.images.length}`:'（空消息）');
+          return `<div class="sn-item" onclick="jumpNav(${idx})" title="${esc(body)}"><div class="sn-ts">${ts}</div>${esc(body)}</div>`;
         }).join('');
       nav.classList.add('show');
-      nav.dataset.count=sums.length;
       document.getElementById('messages').style.paddingRight='220px';
     }
     function summNavHide(){
       document.getElementById('summNav').classList.remove('show');
       document.getElementById('messages').style.paddingRight='';
     }
-    function jumpSumm(idx){
-      const els=document.querySelectorAll('#messages .message.summ');
+    function jumpNav(idx){
+      // DOM 里用户消息按气泡类匹配；工具内嵌的 user 变体不存在，顺位与 anchors 一致
+      const els=document.querySelectorAll('#messages .message.user, #messages .message.summ.titem');
       const el=els[idx];if(!el)return;
       el.scrollIntoView({block:'center',behavior:'smooth'});
       el.classList.add('flash');setTimeout(()=>el.classList.remove('flash'),2600);
