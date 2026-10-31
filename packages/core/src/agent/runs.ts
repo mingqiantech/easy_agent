@@ -7,6 +7,9 @@ export interface CreateRunInput {
   parentSessionId?: string;
   parentAgent?: string;
   childSessionId: string;
+  /** 跨 agent 派活时的目标 agent 名（泛 sub-agent 池=undefined）；持久化一份，
+   * 防子会话被清理后拓扑边无处可查（2026-10-31） */
+  targetAgent?: string;
   task: string;
   model?: string;
 }
@@ -16,6 +19,7 @@ export interface SubAgentRunRow {
   parent_session_id: string | null;
   parent_agent: string | null;
   child_session_id: string;
+  target_agent: string | null;
   task: string;
   model: string | null;
   status: SubAgentRunStatus;
@@ -31,13 +35,14 @@ export function createRun(input: CreateRunInput): string {
   const id = generateId();
   db.prepare(
     `INSERT INTO sub_agent_runs
-     (id, parent_session_id, parent_agent, child_session_id, task, model, status, started_at)
-     VALUES (?, ?, ?, ?, ?, ?, 'running', ?)`,
+     (id, parent_session_id, parent_agent, child_session_id, target_agent, task, model, status, started_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'running', ?)`,
   ).run(
     id,
     input.parentSessionId ?? null,
     input.parentAgent ?? null,
     input.childSessionId,
+    input.targetAgent ?? null,
     input.task.slice(0, 500),
     input.model ?? null,
     now(),

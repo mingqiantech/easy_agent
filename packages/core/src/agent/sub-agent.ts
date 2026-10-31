@@ -55,6 +55,7 @@ export class SubAgentManager {
       parentSessionId: config.parentSessionId,
       parentAgent: config.parentAgent,
       childSessionId: sessionId,
+      targetAgent: config.agentId,
       task,
       model,
     });

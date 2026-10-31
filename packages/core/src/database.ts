@@ -197,6 +197,7 @@ function initializeSchema(db: Database): void {
       parent_session_id TEXT,
       parent_agent TEXT,
       child_session_id TEXT NOT NULL,
+      target_agent TEXT,
       task TEXT NOT NULL,
       model TEXT,
       status TEXT NOT NULL DEFAULT 'running',
@@ -353,6 +354,18 @@ function initializeSchema(db: Database): void {
   const atCols = db.prepare("PRAGMA table_info(active_turns)").all() as Array<{ name: string }>;
   if (!atCols.some((c) => c.name === "current_tool")) {
     db.exec("ALTER TABLE active_turns ADD COLUMN current_tool TEXT");
+  }
+
+  // 2026-10-31 拓扑边持久化：sub_agent_runs 记目标 agent（子会话被清理后边仍可溯源）
+  const sarCols = db.prepare("PRAGMA table_info(sub_agent_runs)").all() as Array<{ name: string }>;
+  if (!sarCols.some((c) => c.name === "target_agent")) {
+    db.exec("ALTER TABLE sub_agent_runs ADD COLUMN target_agent TEXT");
+    // 存量回填：子会话还在的直接取归属
+    db.exec(
+      `UPDATE sub_agent_runs SET target_agent =
+         (SELECT s.agent_id FROM sessions s WHERE s.id = sub_agent_runs.child_session_id)
+       WHERE target_agent IS NULL`,
+    );
   }
 
   // 旧库的 memory_entries 缺 content_hash/created_at 两列（IncrementalIndex 依赖）→ 补齐

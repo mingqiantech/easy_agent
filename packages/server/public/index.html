@@ -1001,6 +1001,25 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
       const maxKids=Math.max(0,...nodes.map(n=>(n.runs||[]).length));
       const H=y0+Math.max(1,maxKids+1)*(bh+gap)+18;
       let html='';
+      // agent↔agent 互调弧线（t.edges 来自 sub_agent_runs 聚合，端点落在两圆顶部之间）；
+      // 此前跨 agent 派活只在调用方列下垂一张卡，看不出“派给了谁”（2026-10-31 elf 反馈）
+      const cxOf=new Map(nodes.map((n,i)=>[n.name,10+col*i+col/2]));
+      const links=(t.edges??[]).filter(e=>cxOf.has(e.from)&&cxOf.has(e.to)&&e.from!==e.to);
+      if(links.length){
+        html+=`<defs><marker id="tlArrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L8,4 L0,8 z" fill="#8a6fae"/></marker></defs>`;
+      }
+      links.forEach((e,li)=>{
+        const x1=cxOf.get(e.from),x2=cxOf.get(e.to);
+        const mid=(x1+x2)/2;
+        // 控制点高度随跨度升高但钉在 svg 内；双向对画错开一层防重叠
+        const cy=Math.max(6,10-Math.abs(x2-x1)*0.055)+(li%2)*12;
+        const running=e.status==='running';
+        const st=running?'#5f9470':'#8a6fae';
+        const dash=running?'stroke-dasharray="6 4"':"";
+        html+=`<path d="M ${x1} 20 Q ${mid} ${cy} ${x2} 20" fill="none" stroke="${st}" stroke-width="${running?2.2:1.6}" ${dash} opacity=".75" marker-end="url(#tlArrow)"><title>${esc(e.from)} → ${esc(e.to)}：${e.weight} 次子任务${running?'（进行中）':''}</title></path>`;
+        const apexY=10+cy/2; // 二次贝塞尔 t=0.5（端点 y=20）
+        html+=`<text x="${mid}" y="${Math.max(10,apexY-2)}" font-size="9" fill="${st}" text-anchor="middle" paint-order="stroke" stroke="var(--bg,#f4f2ed)" stroke-width="3">→ ${esc(e.to)}${e.weight>1?' ×'+e.weight:''}</text>`;
+      });
       nodes.forEach((n,i)=>{
         const cx=10+col*i+col/2;
         const modelShort=(n.model||'').split('/').pop()||'?';
@@ -1029,12 +1048,14 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
           const dur=r.finishedAt?`${r.status==='error'?'✗':'✓'} ${Math.max(0,Math.round((r.finishedAt-r.startedAt)/1000))}s · ${Math.max(0,Math.round((nowT-r.finishedAt)/1000))}s前退出`:'进行中';
           const clip=Math.floor(bw/11);
           const task=(r.task||'').slice(0,clip)+((r.task||'').length>clip?'…':'');
+          const tgt=r.targetAgent&&r.targetAgent!==n.name&&r.targetAgent!=='sub-agent'?` ⇢ ${r.targetAgent}`:'';
+          const fadeAttr=done?' opacity=".55"':"";
           html+=`<g style="cursor:pointer" onclick="openSubRun('${esc(r.childSessionId)}')">`+
-            `<title>${esc(r.task||'')} — 点击查看对话</title>`+
-            `<rect x="${cx-bw/2}" y="${y}" width="${bw}" height="${bh}" rx="9" fill="#fff" stroke="${st}" stroke-width="2"${done?' opacity=".55"':''}/>`+
+            `<title>${esc(r.task||'')}${tgt?' — 派给 '+esc(r.targetAgent):''} — 点击查看对话</title>`+
+            `<rect x="${cx-bw/2}" y="${y}" width="${bw}" height="${bh}" rx="9" fill="#fff" stroke="${st}" stroke-width="2"${fadeAttr}"/>`+
             (r.status==='running'?`<rect x="${cx-bw/2}" y="${y}" width="${bw}" height="${bh}" rx="9" fill="none" stroke="${st}" stroke-width="2" opacity=".5"><animate attributeName="opacity" values=".5;.1;.5" dur="1.4s" repeatCount="indefinite"/></rect>`:'')+
-            `<text x="${cx-bw/2+8}" y="${y+17}" font-size="10.5" fill="#1c2330" font-weight="600">${esc(SA_ICON[r.status]||'?')} ${esc(task)}</text>`+
-            `<text x="${cx-bw/2+8}" y="${y+32}" font-size="9" fill="#8b93a3">${r.steps}步 · ${r.toolCalls}工具 · ${fmtK(r.totalTokens)}t · ${dur}</text></g>`;
+            `<text x="${cx-bw/2+8}" y="${y+17}" font-size="10.5" fill="#1c2330" font-weight="600">${esc(SA_ICON[r.status]||'?')}${esc(tgt?' ['+r.targetAgent+']':'')} ${esc(task)}</text>`+
+            `<text x="${cx-bw/2+8}" y="${y+32}" font-size="9" fill="#8b93a3">${r.steps}步 · ${r.toolCalls}工具 · ${fmtK(r.totalTokens)}t · ${dur}${tgt?' · 派给 '+esc(r.targetAgent):''}</text></g>`;
         });
       });
       svg.setAttribute('height',H);

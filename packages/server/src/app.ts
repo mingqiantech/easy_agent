@@ -252,17 +252,18 @@ export function createApp(deps: ServerDeps): Hono {
            ORDER BY s.updated_at DESC LIMIT 3`,
         )
         .all(a.name) as any[];
+      // 历史 tool_calls 表无任何写入方（死表），计数改从 sub_agent_runs 聚合
       const sub = db
         .prepare(
-          `SELECT COUNT(*) n FROM tool_calls tc
-           JOIN sessions s ON tc.session_id = s.id
-           WHERE s.agent_id = ? AND tc.tool_name = 'sub-agent'`,
+          `SELECT COUNT(*) n FROM sub_agent_runs WHERE parent_agent = ?`,
         )
         .get(a.name) as any;
       const runs = db
         .prepare(
           `SELECT child_session_id, task, model, status, steps, tool_calls,
-                  total_tokens, started_at, finished_at
+                  total_tokens, started_at, finished_at,
+                  COALESCE(target_agent,
+                    (SELECT s.agent_id FROM sessions s WHERE s.id = sub_agent_runs.child_session_id)) AS target_agent
            FROM sub_agent_runs WHERE parent_agent = ?
            ORDER BY started_at DESC LIMIT 4`,
         )
@@ -316,6 +317,7 @@ export function createApp(deps: ServerDeps): Hono {
           totalTokens: r.total_tokens,
           startedAt: r.started_at,
           finishedAt: r.finished_at,
+          targetAgent: r.target_agent ?? null,
         })),
         currentTasks: (tasks ?? []).map((t) => ({
           id: t.id,
@@ -328,9 +330,42 @@ export function createApp(deps: ServerDeps): Hono {
       };
     });
 
-    const edges = nodes
-      .filter((n) => n.subAgentCalls > 0)
-      .map((n) => ({ from: n.name, to: "sub-agents", weight: n.subAgentCalls }));
+    // 真实 agent↔agent 连接：从全量 sub_agent_runs 聚合（子会话归属=目标 agent；
+    // 泛 sub-agent 池不算）——此前只有一条指向伪节点 "sub-agents" 的边，
+    // 跨 agent 互调在拓扑上完整看不见（2026-10-31 elf 反馈）
+    const agentNames = new Set(nodes.map((n) => n.name));
+    const edgeMap = new Map<string, { from: string; to: string; weight: number; last: number; status: string }>();
+    for (const r of db
+      .prepare(
+        `SELECT parent_agent AS from_agent,
+                COALESCE(target_agent,
+                  (SELECT s.agent_id FROM sessions s WHERE s.id = sub_agent_runs.child_session_id)) AS to_agent,
+                MAX(started_at) last,
+                CASE WHEN MAX(CASE WHEN status = 'running' THEN 1 ELSE 0 END) = 1 THEN 'running' ELSE MAX(status) END AS status
+         FROM sub_agent_runs
+         WHERE parent_agent IS NOT NULL
+         GROUP BY parent_agent, child_session_id`,
+      )
+      .all() as any[]) {
+      const { from_agent: from, to_agent: to } = r;
+      if (!from || !to || to === 'sub-agent' || !agentNames.has(from) || !agentNames.has(to)) continue;
+      const key = `${from}→${to}`;
+      const e = edgeMap.get(key) ?? { from, to, weight: 0, last: 0, status: 'ok' };
+      e.weight += 1;
+      if ((r.last ?? 0) > e.last) e.last = r.last;
+      if (r.status === 'running') e.status = 'running';
+      else if (e.status !== 'running' && r.status === 'error' && e.status !== 'ok') e.status = 'error';
+      edgeMap.set(key, e);
+    }
+    const edges = [...edgeMap.values()];
+    // 是否还有派给泛用 sub-agent 池的活（非具名 agent）
+    const hasSubAgentPool = (db
+      .prepare(
+        `SELECT COUNT(*) n FROM sub_agent_runs r
+         LEFT JOIN sessions s ON s.id = r.child_session_id
+         WHERE COALESCE(r.target_agent, s.agent_id) = 'sub-agent'`,
+      )
+      .get() as any)?.n > 0;
 
     return c.json({
       nodes,
