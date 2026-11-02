@@ -23,6 +23,10 @@
     .agent-pick select,.model-pick select{width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:10px;background:var(--bg);color:var(--fg);font-size:13px;font-family:inherit}
     .new-btn{padding:12px 16px;cursor:pointer;color:var(--accent);border-bottom:1px solid var(--border);font-size:14px}
     .new-btn:hover{background:var(--accent-soft)}
+    .top-row{display:flex;align-items:center;border-bottom:1px solid var(--border)}
+    .top-row .new-btn{border-bottom:none;flex:1}
+    .sub-new{padding:12px 14px 12px 0;cursor:pointer;color:var(--muted);font-size:13px}
+    .sub-new:hover{color:var(--accent)}
     .session-list{flex:1;overflow-y:auto}
     .session-item{padding:10px 12px;cursor:pointer;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px}
     .session-item:hover{background:var(--hover)}
@@ -271,7 +275,10 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
   <div class="sidebar" id="sidebar">
     <div class="brand">⚡ Easy Agent</div>
     <div class="agent-pick"><select id="agentSel" onchange="switchAgent()"></select></div>
-    <div class="new-btn" onclick="goHome()" title="2026-11-02 起单会话滚动：所有对话进首页会话">⌂ 首页会话</div>
+    <div class="top-row">
+      <div class="new-btn" onclick="goHome()" title="2026-11-02 起单会话滚动：日常对话都进首页会话">⌂ 首页会话</div>
+      <div class="sub-new" onclick="newSession()" title="开临时/专项会话（可选；旧会话超 60 天未更新会自动归档隐藏）">＋新会话</div>
+    </div>
     <div class="search-box" id="searchBox">
       <input id="searchInput" class="search-in" placeholder="🔍 搜索消息，Enter…" autocomplete="off"
         onfocus="startSearch()" oninput="searchDebounce()" onkeydown="if(event.key==='Enter')runSearch();if(event.key==='Escape')closeSearch()">
@@ -500,6 +507,14 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
       const home=(sessions??[]).find(s=>s.pinned);
       if(!home){alert('首页会话不存在（服务端会自动创建，稍后重试）');return;}
       if(home.id!==sid) await selectSession(home.id);
+    }
+    /* 临时/专项会话入口（主路径仍是首页滚动；超 60 天不用会被时间归档隐藏，不丢数据） */
+    async function newSession(){
+      const name=prompt('会话名（可选，留空默认）：');
+      if(name===null)return;
+      const r=await fetch(`${API}/api/sessions`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({agentId:agent,title:name.trim()||undefined})});
+      const{session}=await r.json();sid=session.id;syncHash();
+      document.getElementById('messages').innerHTML='';openEvents(sid);await loadSessions();
     }
     async function selectSession(id){sid=id;openEvents(id);syncHash();await loadSessions();await loadMessages();}
     async function delSession(id){

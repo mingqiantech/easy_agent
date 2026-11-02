@@ -162,6 +162,7 @@ export function createApp(deps: ServerDeps): Hono {
       agentId: agent.name,
       // alias（如 "local"/"flash"）解析为 canonical provider/model ref
       model: rawModel ? resolveRef(deps.config, rawModel) : undefined,
+      title: typeof body.title === "string" && body.title.trim() ? body.title.trim().slice(0, 60) : undefined,
       systemPrompt,
     });
     return c.json({ session }, 201);
