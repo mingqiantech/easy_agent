@@ -617,6 +617,32 @@ async function main() {
       console.warn("🌙 梦境失败:", String(e?.message).slice(0, 140));
     }
   }, 60000);
+
+  // 会话时间归档（2026-11-02 elf 拍板：单会话滚动，阈值 60 天）：
+  // 超期消息进 messages_archive（UI 全量仍可看），超期非置顶会话整场隐藏。
+  // 启动跑一次 + 每 12h 周期；EASY_AGENT_ARCHIVE_DAYS=0 可关。
+  {
+    const archiveDays = Number(
+      process.env.EASY_AGENT_ARCHIVE_DAYS ?? config.sessions?.archiveDays ?? 60,
+    );
+    const keepRecent = config.sessions?.keepRecent ?? 10;
+    if (Number.isFinite(archiveDays) && archiveDays > 0) {
+      const runArchive = () => {
+        try {
+          const r = sessions.archiveOlderThan(archiveDays, keepRecent);
+          if (r.archivedMessages || r.archivedSessions)
+            console.log(
+              `🗄️ 时间归档: ${r.archivedMessages} 条消息 / ${r.archivedSessions} 个会话（阈值 ${archiveDays} 天）`,
+            );
+        } catch (e: any) {
+          console.warn("🗄️ 归档失败:", String(e?.message).slice(0, 140));
+        }
+      };
+      setTimeout(runArchive, 8000);
+      setInterval(runArchive, 12 * 3600000);
+    }
+  }
+
   const port = Number(process.env.PORT ?? 4096);
   if (await portInUse(port)) {
     console.error(

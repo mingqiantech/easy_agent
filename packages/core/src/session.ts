@@ -180,6 +180,70 @@ export class SessionManager {
     db.prepare("DELETE FROM pending_queue WHERE session_id = ?").run(id);
     return true;
   }
+  /**
+   * 时间归档（2026-11-02 elf 拍板：单会话滚动，阈值 60 天）：
+   * 1) 消息级：非 system 且超过 archiveDays 的旧消息移入 messages_archive
+   *    （复用压缩归档同一张表：UI getFullMessages 仍可见、全文搜索命中，
+   *    但 getMessages/LLM 上下文不再带；工作区头部与历次[对话摘要]是 system，永不动）；
+   *    每会话最近 keepRecent 条无条件保留，防止长期静默会话被掏空。
+   * 2) 会话级：超期未更新的非置顶会话标 status='archived'（list 只查 active，自然隐藏；
+   *    数据与搜索均保留）。pin（首页滚动会话）永不归档。
+   */
+  archiveOlderThan(archiveDays: number, keepRecent = 10): {
+    archivedMessages: number;
+    archivedSessions: number;
+  } {
+    const db = getDatabase();
+    const ts = now();
+    const cutoff = ts - archiveDays * 86400000;
+    let archivedMessages = 0;
+    const ins = db.prepare(
+      `INSERT OR REPLACE INTO messages_archive
+       (id, session_id, role, content, metadata, created_at, archived_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    );
+    const del = db.prepare("DELETE FROM messages WHERE id = ?");
+    const sessRows = db
+      .prepare("SELECT id FROM sessions WHERE status = 'active'")
+      .all() as any[];
+    for (const { id: sessionId } of sessRows) {
+      const rows = db
+        .prepare(
+          `SELECT id, role, content, metadata, created_at FROM messages
+           WHERE session_id = ? AND role != 'system'
+           ORDER BY created_at ASC, rowid ASC`,
+        )
+        .all(sessionId) as any[];
+      const eligible = Math.max(0, rows.length - keepRecent);
+      let cut = 0;
+      while (cut < eligible && rows[cut].created_at < cutoff) cut++;
+      if (!cut) continue;
+      db.transaction(() => {
+        for (let i = 0; i < cut; i++) {
+          const m = rows[i];
+          ins.run(
+            m.id,
+            sessionId,
+            m.role,
+            m.content,
+            m.metadata ?? "{}",
+            m.created_at,
+            ts,
+          );
+          del.run(m.id);
+          archivedMessages++;
+        }
+      })();
+    }
+    const archivedSessions = db
+      .prepare(
+        `UPDATE sessions SET status = 'archived'
+         WHERE pinned = 0 AND status = 'active' AND updated_at < ?`,
+      )
+      .run(cutoff).changes;
+    return { archivedMessages, archivedSessions };
+  }
+
   /** 会话内切换模型（后续对话用新模型） */
   setModel(id: string, model: string): void {
     const db = getDatabase();

@@ -271,7 +271,7 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
   <div class="sidebar" id="sidebar">
     <div class="brand">⚡ Easy Agent</div>
     <div class="agent-pick"><select id="agentSel" onchange="switchAgent()"></select></div>
-    <div class="new-btn" onclick="newSession()">＋ 新会话</div>
+    <div class="new-btn" onclick="goHome()" title="2026-11-02 起单会话滚动：所有对话进首页会话">⌂ 首页会话</div>
     <div class="search-box" id="searchBox">
       <input id="searchInput" class="search-in" placeholder="🔍 搜索消息，Enter…" autocomplete="off"
         onfocus="startSearch()" oninput="searchDebounce()" onkeydown="if(event.key==='Enter')runSearch();if(event.key==='Escape')closeSearch()">
@@ -468,7 +468,7 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
     }
     function switchAgent(){
       agent=document.getElementById('agentSel').value;sid=null;closeEvents();
-      document.getElementById('messages').innerHTML='<div class="empty">选择或创建一个会话</div>';
+      document.getElementById('messages').innerHTML='<div class="empty">会话加载中…</div>';
       updateThinkSel();syncHash();
       loadSessions();
       // 知识作用域跟随顶栏 agent：正在看知识图时切 agent 即时重绘
@@ -493,17 +493,20 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
         </div>`).join('');
       if(sid) loadModelForSession();
     }
-    async function newSession(){
-      const r=await fetch(`${API}/api/sessions`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({agentId:agent})});
-      const{session}=await r.json();sid=session.id;syncHash();
-      document.getElementById('messages').innerHTML='';openEvents(sid);await loadSessions();
+    /* 单会话策略（elf 拍板 2026-11-02）：不新建会话，一律回到首页置顶会话滚动 */
+    async function goHome(){
+      const r=await fetch(`${API}/api/sessions?agent=${encodeURIComponent(agent)}`);
+      const{sessions}=await r.json().catch(()=>({sessions:[]}));
+      const home=(sessions??[]).find(s=>s.pinned);
+      if(!home){alert('首页会话不存在（服务端会自动创建，稍后重试）');return;}
+      if(home.id!==sid) await selectSession(home.id);
     }
     async function selectSession(id){sid=id;openEvents(id);syncHash();await loadSessions();await loadMessages();}
     async function delSession(id){
       if(!confirm('删除该会话及其全部消息？'))return;
       const j=await (await fetch(`${API}/api/sessions/${id}`,{method:'DELETE'})).json();
       if(j.error){alert('❌ '+j.error);return;}
-      if(id===sid){sid=null;syncHash();document.getElementById('messages').innerHTML='<div class="empty">选择或创建一个会话</div>';}
+      if(id===sid){sid=null;syncHash();document.getElementById('messages').innerHTML='<div class="empty">已删除，点顶部「⌂ 首页会话」继续</div>';}
       await loadSessions();
     }
     async function renameSession(id){

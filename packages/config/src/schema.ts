@@ -120,6 +120,18 @@ export const ConfigSchema = z.object({
       l2MergeThresholdChars: z.number().int().min(4000).optional(),
     })
     .optional(),
+  /** 会话组织策略（2026-11-02 elf 拍板：全塞一条会话滚动，归档阈值 60 天）：
+   * 每个 agent 主入口固定用置顶首页会话（UI 不再提供新建入口）；
+   * 超过 archiveDays 的旧消息移入 messages_archive（UI 全量历史仍可见，LLM 上下文自动变轻）；
+   * 超过 archiveDays 未更新的非置顶会话整场标 archived（列表隐藏，搜索/历史不丢）。
+   * env EASY_AGENT_ARCHIVE_DAYS 覆盖（0=关闭时间归档） */
+  sessions: z
+    .object({
+      archiveDays: z.number().int().min(1).default(60),
+      /** 绝对不动的最近消息条数（防罕见场景把会话掏空；与压缩保留段同量级） */
+      keepRecent: z.number().int().min(2).default(10),
+    })
+    .default({ archiveDays: 60, keepRecent: 10 }),
   // Week 6: 渠道配置（可选）
   telegram: z
     .object({
