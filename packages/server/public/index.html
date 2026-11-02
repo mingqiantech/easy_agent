@@ -120,7 +120,7 @@
     .stop-btn{background:var(--tool);color:#b3564b;border:1px solid #c26d64;border-radius:10px;padding:6px 14px;cursor:pointer;font-size:14px;font-weight:600}
     .attach-btn{background:var(--hover);border:1px solid var(--border);border-radius:10px;height:30px;padding:0 10px;cursor:pointer;font-size:15px}
     .attach-btn:hover{background:var(--accent-soft)}
-    .img-strip{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px}
+    .img-strip{display:flex;gap:8px;flex-wrap:wrap;width:100%;max-width:900px;margin:0 auto 8px} /* 与 .input-row 同列居中（修 2026-11-02：预览图贴窗口最左，看着不在输入框上方） */
     .img-chip{position:relative}
     .img-chip img{max-height:80px;max-width:130px;border-radius:8px;border:1px solid var(--border);display:block}
     .img-chip .rm{position:absolute;top:-7px;right:-7px;background:#c26d64;color:#fff;border:none;border-radius:50%;width:18px;height:18px;font-size:11px;cursor:pointer;line-height:18px;padding:0}
