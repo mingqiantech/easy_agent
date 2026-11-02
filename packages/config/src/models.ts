@@ -75,8 +75,9 @@ export interface ResolvedAgent {
   thinking: ThinkingLevel;
   /** agent 专属工具黑名单（全局 disable 之外再减） */
   toolsDisable: string[];
-  /** 每轮动态注入 system 区的附加提示词 */
-  toolHint?: string;
+  /** 每轮动态注入 system 区的附加提示词（旧名 toolHint，2026-11-02 改名；
+   *  行为守则类内容应放工作区 AGENTS.md，这里只留随工具开关变化/高频拨弄的策略） */
+  extraPrompt?: string;
   /** 关联 agent：memory_search 主检索后用索引词二次检索其工作区 */
   relatedAgents: string[];
   /** 监视的 agent：拓扑 watch 边 + agent_status 巡检引导 */
@@ -120,7 +121,7 @@ export function resolveAgents(config: Config): ResolvedAgent[] {
       description: dflt?.description ?? "默认助手",
       thinking: effectiveThinking(config, defaultModel, dflt?.thinking),
       toolsDisable: dflt?.tools?.disable ?? [],
-      toolHint: dflt?.toolHint,
+      extraPrompt: dflt?.extraPrompt ?? dflt?.toolHint,
       relatedAgents: dflt?.relatedAgents ?? [],
       watchAgents: dflt?.watchAgents ?? [],
     },
@@ -138,7 +139,7 @@ export function resolveAgents(config: Config): ResolvedAgent[] {
       description: a.description ?? name,
       thinking: effectiveThinking(config, model, a.thinking),
       toolsDisable: (a as any).tools?.disable ?? [],
-      toolHint: (a as any).toolHint,
+      extraPrompt: (a as any).extraPrompt ?? (a as any).toolHint,
       relatedAgents: (a as any).relatedAgents ?? [],
       watchAgents: (a as any).watchAgents ?? [],
     });

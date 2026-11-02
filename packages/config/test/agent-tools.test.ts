@@ -23,13 +23,25 @@ describe("agent 专属工具黑名单（toolsDisable）", () => {
     const rs = resolveAgents(cfg as any);
     expect(rs[0]!.toolsDisable).toEqual(["bash"]);
   });
-  it("toolHint 透传；未配置为 undefined", () => {
+  it("extraPrompt 透传；未配置为 undefined", () => {
     const cfg = ConfigSchema.parse({
       ...base,
-      agents: { writer: { toolHint: "涉及代码重构时先用 acp_agent" }, coder: {} },
+      agents: { writer: { extraPrompt: "涉及代码重构时先用 acp_agent" }, coder: {} },
     } as any);
     const rs = resolveAgents(cfg as any);
-    expect(rs.find((r) => r.name === "writer")!.toolHint).toBe("涉及代码重构时先用 acp_agent");
-    expect(rs.find((r) => r.name === "coder")!.toolHint).toBeUndefined();
+    expect(rs.find((r) => r.name === "writer")!.extraPrompt).toBe("涉及代码重构时先用 acp_agent");
+    expect(rs.find((r) => r.name === "coder")!.extraPrompt).toBeUndefined();
+  });
+  it("旧键 toolHint 自动升级（2026-11-02 改名兼容）；两键并存时 extraPrompt 优先", () => {
+    const cfg = ConfigSchema.parse({
+      ...base,
+      agents: {
+        a: { toolHint: "旧文案" },
+        b: { toolHint: "旧的", extraPrompt: "新的" },
+      },
+    } as any);
+    const rs = resolveAgents(cfg as any);
+    expect(rs.find((r) => r.name === "a")!.extraPrompt).toBe("旧文案");
+    expect(rs.find((r) => r.name === "b")!.extraPrompt).toBe("新的");
   });
 });

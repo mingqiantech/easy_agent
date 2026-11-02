@@ -122,7 +122,8 @@ export function createApp(deps: ServerDeps): Hono {
         description: a.description,
         thinking: a.thinking,
         toolsDisable: (a as any).toolsDisable ?? [],
-        toolHint: (a as any).toolHint,
+        toolHint: (a as any).extraPrompt, // @deprecated 旧字段名，同值兼容一个周期
+        extraPrompt: (a as any).extraPrompt,
         relatedAgents: (a as any).relatedAgents ?? [],
         watchAgents: (a as any).watchAgents ?? [],
       })),
@@ -471,7 +472,7 @@ export function createApp(deps: ServerDeps): Hono {
     const agent = sess ? deps.agents[sess.agentId] : undefined;
     // agent 专属工具裁剪：黑名单内工具对模型不可见且拒绝执行
     const dis = new Set<string>((agent as any)?.toolsDisable ?? []);
-    // 外部编码工具使用引导：仅在该 agent 真拿得到工具时注入；toolHint 叠加在后
+    // 外部编码工具使用引导：仅在该 agent 真拿得到工具时注入；extraPrompt 叠加在后
     const traeOn = deps.tools.names().includes("trae_agent") && !dis.has("trae_agent");
     const acpOn = deps.tools.names().includes("acp_agent") && !dis.has("acp_agent");
     let extraSystem = "";
@@ -483,10 +484,10 @@ export function createApp(deps: ServerDeps): Hono {
           .filter(Boolean)
           .join(" / ")
       : "";
-    if ((agent as any)?.toolHint) {
+    if ((agent as any)?.extraPrompt) {
       // 自定义策略优先；若工具可用只声明可用性，不再附带“别外包”劝退句（避免指令冲突）
       const lead = opts ? `外部编码 Agent 可用：${opts}。是否外包/何时外包完全由下条自定义策略决定。\n` : "";
-      extraSystem = lead + String((agent as any).toolHint);
+      extraSystem = lead + String((agent as any).extraPrompt);
     } else if (opts) {
       extraSystem = `外部编码 Agent 可用：${opts}。当任务涉及多文件代码修改、仓库整体分析、批量重构、写/补测试等重活时，优先用它们处理（workdir 指向目标仓库），完成后汇总结果；日常问答、概念解释、小改动不要外包（每次调用有固定开销）。`;
     }
@@ -582,22 +583,24 @@ export function createApp(deps: ServerDeps): Hono {
       return c.json({ error: 'relatedAgents 必须是字符串数组（"*"=全部其他 agent）' }, 400);
     // 监视名单（2026-10-31）：拓扑 watch 边 + agent_status 巡检权限，数组=替换语义
     const hasWatch = body.watchAgents !== undefined;
+    // 附加提示词（2026-11-02 改名 toolHint→extraPrompt；body 旧名仍接受，写入落新名）
+    const hasExtraPrompt = body.extraPrompt !== undefined || body.toolHint !== undefined;
+    const ep = body.extraPrompt !== undefined ? body.extraPrompt : body.toolHint;
     if (hasWatch && (!Array.isArray(body.watchAgents) || body.watchAgents.some((x: any) => typeof x !== "string")))
       return c.json({ error: 'watchAgents 必须是字符串数组（"*"=全部其他 agent）' }, 400);
     if (typeof body.thinking === "string" && body.thinking) {
       if (!levels.includes(body.thinking))
         return c.json({ error: "thinking 必须是 off|low|medium|high" }, 400);
       agent.thinking = body.thinking;
-    } else if (!hasToolsDisable && body.toolHint === undefined && !hasRelated && !hasWatch) {
+    } else if (!hasToolsDisable && !hasExtraPrompt && !hasRelated && !hasWatch) {
       return c.json({ error: "thinking 必须是字符串" }, 400);
     }
     if (hasToolsDisable) (agent as any).toolsDisable = body.toolsDisable;
-    const hasToolHint = body.toolHint !== undefined;
-    if (hasToolHint && body.toolHint !== null && typeof body.toolHint !== "string")
-      return c.json({ error: "toolHint 必须是字符串或 null（清除）" }, 400);
-    if (typeof body.toolHint === "string" && body.toolHint.length > 2000)
-      return c.json({ error: "toolHint 最长 2000 字符" }, 400);
-    if (hasToolHint) (agent as any).toolHint = body.toolHint ?? undefined;
+    if (hasExtraPrompt && ep !== null && typeof ep !== "string")
+      return c.json({ error: "extraPrompt 必须是字符串或 null（清除）" }, 400);
+    if (typeof ep === "string" && ep.length > 2000)
+      return c.json({ error: "extraPrompt 最长 2000 字符" }, 400);
+    if (hasExtraPrompt) (agent as any).extraPrompt = ep ?? undefined;
     if (hasRelated) (agent as any).relatedAgents = (body.relatedAgents as string[]).filter((n) => n !== name);
     if (hasWatch) (agent as any).watchAgents = (body.watchAgents as string[]).filter((n) => n !== name);
     try {
@@ -611,9 +614,10 @@ export function createApp(deps: ServerDeps): Hono {
       const cur: any = { ...(data.agents?.[name] ?? {}) };
       if (typeof body.thinking === "string" && body.thinking) cur.thinking = body.thinking;
       if (hasToolsDisable) cur.tools = { ...(cur.tools ?? {}), disable: body.toolsDisable };
-      if (hasToolHint) {
-        if (body.toolHint === null) delete cur.toolHint;
-        else cur.toolHint = body.toolHint;
+      if (hasExtraPrompt) {
+        delete cur.toolHint; // 旧键退场，防双写分叉
+        if (ep === null) delete cur.extraPrompt;
+        else cur.extraPrompt = ep;
       }
       if (hasRelated) cur.relatedAgents = (body.relatedAgents as string[]).filter((n2) => n2 !== name);
       if (hasWatch) cur.watchAgents = (body.watchAgents as string[]).filter((n2) => n2 !== name);

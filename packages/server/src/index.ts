@@ -333,7 +333,8 @@ async function main() {
       workspaceDir: a.workspaceDir,
       thinking: a.thinking,
       toolsDisable: a.toolsDisable,
-      toolHint: a.toolHint,
+      extraPrompt: a.extraPrompt,
+      toolHint: a.extraPrompt, // @deprecated 旧名同值兼容
       relatedAgents: a.relatedAgents,
       watchAgents: a.watchAgents,
       memory: mem,

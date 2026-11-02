@@ -133,8 +133,8 @@ case "$cmd" in
       related) patch_agent "$name" "{\"relatedAgents\":$(jq -R 'split(",")' <<< "$val")}" ;;
       watch)   patch_agent "$name" "{\"watchAgents\":$(jq -R 'split(",")' <<< "$val")}" ;;
       hint)
-        if [[ $val == "-" ]]; then patch_agent "$name" '{"toolHint":null}'
-        else patch_agent "$name" "{\"toolHint\":$(jq -Rs . <<< "$val")}"; fi ;;
+        if [[ $val == "-" ]]; then patch_agent "$name" '{"extraPrompt":null}'
+        else patch_agent "$name" "{\"extraPrompt\":$(jq -Rs . <<< "$val")}"; fi ;;
       list) curl -s "$GW/api/agents" | jq '.agents' ;;
       *) usage; exit 1 ;;
     esac ;;

@@ -173,8 +173,12 @@ export const ConfigSchema = z.object({
         tools: z
           .object({ disable: z.array(z.string()).default([]) })
           .optional(),
-        /** 附加提示词：每轮动态注入 system 区（开关切换即时生效）；
+        /** 附加提示词（2026-11-02 由 toolHint 改名；行为守则类内容请写各 agent 工作区
+         *  AGENTS.md，本字段只留给“随工具开关变化/需频繁拨弄”的 per-request 注入策略）：
+         *  每轮动态注入 system 区（开关切换即时生效，不落库不动 prompt 前缀缓存）；
          *  与内置 trae 使用引导叠加，自定义文案优先 */
+        extraPrompt: z.string().max(2000).optional(),
+        /** @deprecated 旧名，加载时自动升级为 extraPrompt（两者都在时 extraPrompt 优先） */
         toolHint: z.string().max(2000).optional(),
         /** 关联 agent（2026-10-30）：memory_search 主检索命中后用索引词二查
          *  这些 agent 的工作区知识（典型：新隔离 agent 关联 default 拿历史记忆） */

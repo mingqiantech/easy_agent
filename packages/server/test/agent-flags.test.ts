@@ -34,12 +34,12 @@ function stubDeps(): any {
 }
 
 describe("PATCH /api/agents/:name 开关字段", () => {
-  it("toolsDisable + toolHint 可单独 PATCH 并 GET 回显", async () => {
+  it("toolsDisable + extraPrompt 可单独 PATCH 并 GET 回显；旧名 toolHint 作别名同义", async () => {
     const app = createApp(stubDeps());
     let r = await app.request("/api/agents/life", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ toolHint: "重活优先 acp_agent" }),
+      body: JSON.stringify({ toolHint: "重活优先 acp_agent" }), // 旧名兼容
     });
     expect(r.status).toBe(200);
     r = await app.request("/api/agents/life", {
@@ -50,32 +50,42 @@ describe("PATCH /api/agents/:name 开关字段", () => {
     expect(r.status).toBe(200);
     const j = await (await app.request("/api/agents")).json() as any;
     const life = j.agents.find((a: any) => a.name === "life");
-    expect(life.toolHint).toBe("重活优先 acp_agent");
+    expect(life.extraPrompt).toBe("重活优先 acp_agent");
+    expect(life.toolHint).toBe("重活优先 acp_agent"); // 响应里旧名同值兼容一个周期
     expect(life.toolsDisable).toEqual(["trae_agent"]);
+    // 新名直接 PATCH 也生效
+    r = await app.request("/api/agents/life", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ extraPrompt: "新名文案" }),
+    });
+    expect(r.status).toBe(200);
+    const j2 = await (await app.request("/api/agents")).json() as any;
+    expect(j2.agents.find((a: any) => a.name === "life").extraPrompt).toBe("新名文案");
   });
 
-  it("toolHint null 清除；类型错误 400", async () => {
+  it("extraPrompt null 清除；类型错误 400", async () => {
     const app = createApp(stubDeps());
     await app.request("/api/agents/life", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ toolHint: "x" }),
+      body: JSON.stringify({ extraPrompt: "x" }),
     });
     const j: any = await (await app.request("/api/agents/life", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ toolHint: null }),
+      body: JSON.stringify({ extraPrompt: null }),
     })).json();
-    expect(j.agent.toolHint).toBeUndefined();
+    expect(j.agent.extraPrompt).toBeUndefined();
     const bad = await app.request("/api/agents/life", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ toolHint: 123 }),
+      body: JSON.stringify({ extraPrompt: 123 }),
     });
     expect(bad.status).toBe(400);
   });
 
-  it("PATCH 直写 easy-agent.json（2026-10-31 废双层：单一配置文件真相）", async () => {
+  it("PATCH 直写 easy-agent.json（2026-10-31 废双层：单一配置文件真相；改名后落新键并清旧键）", async () => {
     const app = createApp(stubDeps());
     await app.request("/api/agents/life", {
       method: "PATCH",
@@ -85,16 +95,18 @@ describe("PATCH /api/agents/:name 开关字段", () => {
     // stubDeps 无 configPath → 回退 stateDir/easy-agent.json
     const file = path.join(process.env.EASY_AGENT_STATE_DIR!, "easy-agent.json");
     const data = JSON.parse(fs.readFileSync(file, "utf-8"));
-    expect(data.agents.life.toolHint).toBe("h");
+    expect(data.agents.life.extraPrompt).toBe("h"); // 旧名进来也落新键
+    expect("toolHint" in data.agents.life).toBe(false); // 旧键不留
     expect(data.agents.life.tools.disable).toEqual(["acp_agent"]);
     expect(data.agents.life.relatedAgents).toEqual(["default"]);
-    // toolHint:null → 删除键而非写 null（写 null 会挂 schema 校验）
+    // extraPrompt:null → 删除键而非写 null（写 null 会挂 schema 校验）
     await app.request("/api/agents/life", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ toolHint: null }),
+      body: JSON.stringify({ extraPrompt: null }),
     });
     const data2 = JSON.parse(fs.readFileSync(file, "utf-8"));
+    expect("extraPrompt" in data2.agents.life).toBe(false);
     expect("toolHint" in data2.agents.life).toBe(false);
     expect(data2.agents.life.thinking).toBeUndefined(); // 未传的字段不动
   });
