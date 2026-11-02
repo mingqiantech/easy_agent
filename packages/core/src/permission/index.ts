@@ -81,5 +81,6 @@ export const defaultRules: PermissionRule[] = [
     denylist: ["*--force*", "*reset --hard*", "*clean -fd*"],
   },
   { tool: "image_gen", default: "allow" },
+  { tool: "show_image", default: "allow" },
   { tool: "extract", default: "allow" },
 ];

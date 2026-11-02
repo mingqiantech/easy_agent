@@ -23,6 +23,7 @@ import { SubAgentManager } from "@easy-agent/core/agent/sub-agent";
 import { createSubAgentTool } from "@easy-agent/core/agent/sub-agent-tool";
 import { createAgentStatusTool } from "@easy-agent/core/agent/agent-status-tool";
 import { createVisionTool } from "@easy-agent/core/tool/builtins/vision";
+import { createShowImageTool } from "@easy-agent/core/tool/builtins/show-image";
 import { ImageGenerator } from "@easy-agent/core/image-gen/index";
 import { createImageGenTool } from "@easy-agent/core/tool/builtins/image-gen";
 import { createTraeTool } from "@easy-agent/core/tool/builtins/trae-agent";
@@ -276,6 +277,9 @@ async function main() {
 
   // Week6: Vision 工具（图片理解）
   tools.register(createVisionTool(config.visionModel ?? config.defaultModel));
+
+  // 图片展示（2026-11-02 elf 点单）：本地图片发布到 uploads，回复贴 markdown 即内嵌渲染
+  tools.register(createShowImageTool());
 
   // Week8: 图片生成工具
   tools.register(

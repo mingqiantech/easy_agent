@@ -424,8 +424,15 @@ export function createApp(deps: ServerDeps): Hono {
     if (!abs) return c.json({ error: "not found" }, 404);
     const ext = abs.split(".").pop()!;
     const mime =
-      { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp", bmp: "image/bmp" }[ext] ??
+      { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp", bmp: "image/bmp", svg: "image/svg+xml" }[ext] ??
       "application/octet-stream";
+    // svg 可能是 agent 生成的：限制内嵌行为，防脚本执行
+    if (ext === "svg")
+      return c.body(new Uint8Array(fs.readFileSync(abs)), 200, {
+        "Content-Type": mime,
+        "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'",
+        "X-Content-Type-Options": "nosniff",
+      });
     return c.body(new Uint8Array(fs.readFileSync(abs)), 200, {
       "Content-Type": mime,
       "Cache-Control": "public, max-age=31536000, immutable",
