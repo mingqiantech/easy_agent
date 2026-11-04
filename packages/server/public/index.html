@@ -108,6 +108,12 @@
     .message.summ .summ-body{font-size:12.5px;color:var(--muted);margin-top:4px;white-space:pre-wrap}
     @media (max-width:1100px){.summ-nav{display:none!important}}
     .message{margin-bottom:14px;display:flex;gap:10px;max-width:85%}
+    /* 气泡硬约束（2026-11-04 elf 点破'气泡没有限制左右长度'）：flex 子项默认 min-width:auto，
+       宽表格/长行会把气泡撑出消息列再被窗口裁切（滚动条也推出屏=看起来直接截断）。
+       min-width:0 允许收缩 + bubble overflow:hidden 兜底，宽内容只能落在
+       .md-table-wrap/.md pre 的内部横滚区里 */
+    .message>div{min-width:0}
+    .bubble{max-width:100%;overflow:hidden}
     .message.user{margin-left:auto;flex-direction:row-reverse}
     .avatar{width:30px;height:30px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:15px;flex-shrink:0;background:var(--accent-soft);color:var(--accent);font-weight:700}
     .message.user .avatar{background:var(--user);color:#4a5a63;border:1px solid #dfe7ea}
@@ -282,7 +288,7 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
 </head>
 <body>
   <div class="sidebar" id="sidebar">
-    <div class="brand">⚡ Easy Agent <span style="font-size:10px;color:var(--muted);font-weight:400" title="构建水印：看不到 1104f 说明浏览器还在用旧缓存">1104f</span></div>
+    <div class="brand">⚡ Easy Agent <span style="font-size:10px;color:var(--muted);font-weight:400" title="构建水印：看不到 1104g 说明浏览器还在用旧缓存">1104g</span></div>
     <div class="agent-pick"><select id="agentSel" onchange="switchAgent()"></select></div>
     <div class="top-row">
       <div class="new-btn" onclick="goHome()" title="2026-11-02 起单会话滚动：日常对话都进首页会话">⌂ 首页会话</div>
