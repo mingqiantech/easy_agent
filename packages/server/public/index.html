@@ -77,8 +77,10 @@
     .messages::-webkit-scrollbar-thumb{background:#c3c9d4;border-radius:4px}
     .messages::-webkit-scrollbar-track{background:transparent}
     .messages::-webkit-scrollbar-corner{background:transparent}
-    /* 宽表格：气泡内独立横向滚动（不撑破列宽，也不影响整页布局） */
-    .message .clippable.md .md-table-wrap{overflow-x:scroll;max-width:100%;scrollbar-width:thin;scrollbar-color:#c3c9d4 transparent}
+    /* 宽表格：气泡内独立横向滚动（不撑破列宽，也不影响整页布局）。
+       scrollbar-width 标准属性保留：Chrome 121+ 会改用系统细条但恒可见，
+       比 8px 自定义条更容易被用户发现「可以左右滑」 */
+    .message .clippable.md .md-table-wrap{overflow-x:scroll;max-width:100%;scrollbar-width:thin;scrollbar-color:#aeb6c2 rgba(0,0,0,.05)}
     .message .clippable.md .md-table-wrap::-webkit-scrollbar{height:8px}
     .message .clippable.md .md-table-wrap::-webkit-scrollbar-thumb{background:#c3c9d4;border-radius:4px}
     .message .clippable.md .md-table-wrap::-webkit-scrollbar-track{background:rgba(0,0,0,.04);border-radius:4px}
@@ -274,7 +276,7 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
 </head>
 <body>
   <div class="sidebar" id="sidebar">
-    <div class="brand">⚡ Easy Agent <span style="font-size:10px;color:var(--muted);font-weight:400" title="构建水印：看不到 1104b 说明浏览器还在用旧缓存">1104b</span></div>
+    <div class="brand">⚡ Easy Agent <span style="font-size:10px;color:var(--muted);font-weight:400" title="构建水印：看不到 1104d 说明浏览器还在用旧缓存">1104d</span></div>
     <div class="agent-pick"><select id="agentSel" onchange="switchAgent()"></select></div>
     <div class="top-row">
       <div class="new-btn" onclick="goHome()" title="2026-11-02 起单会话滚动：日常对话都进首页会话">⌂ 首页会话</div>
@@ -771,6 +773,17 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
       closeLists();
       return out;
     }
+    /* 气泡内左右滑动（2026-11-04 elf 点单）：鼠标在宽表格/长代码块上时，
+       触控板横向滑动（deltaX）与 shift+滚轮都改成横向滚动，不再被页面纵向吞掉；
+       普通滚轮保持纵向滚页。touchstart 拖拽由 overflow:scroll 原生支持 */
+    document.getElementById('messages').addEventListener('wheel',(e)=>{
+      const wrap=e.target.closest('.md-table-wrap, .md pre, .tpre');
+      if(!wrap||wrap.scrollWidth<=wrap.clientWidth)return;
+      const dx=Math.abs(e.deltaX)>Math.abs(e.deltaY)?e.deltaX:(e.shiftKey?e.deltaY:0);
+      if(!dx)return;
+      wrap.scrollLeft+=dx;
+      e.preventDefault();
+    },{passive:false});
     /* 代码块复制按钮（事件委托） */
     document.getElementById('messages').addEventListener('click',(ev)=>{
       const btn=ev.target.closest('.copy-btn');if(!btn)return;
