@@ -174,7 +174,9 @@
     .md p code+.md p code{margin-left:4px}
     .md blockquote{margin:6px 0;padding:4px 12px;border-left:3px solid var(--accent2);color:var(--fg);background:var(--hover);border-radius:0 8px 8px 0}
     .md pre{margin:8px 0;padding:10px 12px;background:#2b323b;color:#e2e7ee;border-radius:10px;overflow-x:auto;font-size:15px;line-height:1.65;position:relative}
-    .md pre code{background:none;border:none;color:inherit;padding:0;font-size:inherit;white-space:pre;word-break:normal}
+    .md pre code{background:none;border:none;color:inherit;padding:0;font-size:inherit;white-space:pre-wrap;word-break:break-word}
+    /* 长行自动折行（2026-11-04 elf 反馈'左右太长需要滑轮'）：不再横向溢出，免去横滚；
+       确实想看原始对齐时点右上角复制后到编辑器里看 */
     .md pre[data-lang]::before{content:attr(data-lang);position:absolute;top:5px;left:12px;font-size:10px;color:#8b95a5;letter-spacing:.5px}
     .md pre{padding-top:24px}
     .copy-btn{position:absolute;top:4px;right:6px;font-size:11px;color:#aab4c2;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.15);border-radius:6px;padding:2px 9px;cursor:pointer;user-select:none}
@@ -280,7 +282,7 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
 </head>
 <body>
   <div class="sidebar" id="sidebar">
-    <div class="brand">⚡ Easy Agent <span style="font-size:10px;color:var(--muted);font-weight:400" title="构建水印：看不到 1104e 说明浏览器还在用旧缓存">1104e</span></div>
+    <div class="brand">⚡ Easy Agent <span style="font-size:10px;color:var(--muted);font-weight:400" title="构建水印：看不到 1104f 说明浏览器还在用旧缓存">1104f</span></div>
     <div class="agent-pick"><select id="agentSel" onchange="switchAgent()"></select></div>
     <div class="top-row">
       <div class="new-btn" onclick="goHome()" title="2026-11-02 起单会话滚动：日常对话都进首页会话">⌂ 首页会话</div>
