@@ -134,7 +134,7 @@ export function createApp(deps: ServerDeps): Hono {
   async function ensureHomeSession(agentName: string): Promise<void> {
     const rt = deps.agents[agentName];
     if (!rt) return;
-    if (deps.sessions.list(50, agentName).some((s) => s.pinned)) return;
+    if (deps.sessions.hasPinned(agentName)) return;
     const systemPrompt = await rt.memory.buildSystemPrompt();
     deps.sessions.create({
       agentId: agentName,

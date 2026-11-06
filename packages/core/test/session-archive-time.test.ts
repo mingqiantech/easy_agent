@@ -93,3 +93,19 @@ describe("archiveOlderThan（时间归档）", () => {
     expect((db.prepare("SELECT status FROM sessions WHERE id = ?").get(s1.id) as any).status).toBe("archived");
   });
 });
+
+describe("hasPinned / findByTitle 不受 list 截断窗口影响（2026-11-06 重复首页 bug 回归）", () => {
+  it("会话数超 list(50) 时 pinned 仍判存在；cron 标题复用仍命中", () => {
+    const s = makeSessions();
+    const home = s.create({ agentId: "crowded", pinned: true, systemPrompt: "首页", title: "首页" });
+    for (let i = 0; i < 60; i++) {
+      const x = s.create({ agentId: "crowded", title: `[cron] t${i}` });
+      s.addMessage(x.id, { role: "user", content: String(i) }); // 推 updated_at，把首页顶出任何 50 窗口
+    }
+    expect(s.hasPinned("crowded")).toBe(true);
+    expect(s.findByTitle("首页", "crowded")?.id).toBe(home.id);
+    expect(s.findByTitle("[cron] t59", "crowded")?.title).toBe("[cron] t59");
+    expect(s.findByTitle("[cron] 不存在", "crowded")).toBeNull();
+    expect(s.hasPinned("nobody")).toBe(false);
+  });
+});

@@ -169,6 +169,27 @@ export class SessionManager {
       messageCount: row.msg_count,
     }));
   }
+  /** 该 agent 是否已有置顶首页会话（2026-11-06 修：不能用 list(50) 判存在——
+   * 会话数超限时旧首页排在 50 外会被误判缺失，造出重复首页） */
+  hasPinned(agentId: string): boolean {
+    return !!getDatabase()
+      .prepare(
+        "SELECT 1 FROM sessions WHERE agent_id = ? AND pinned = 1 AND status = 'active' LIMIT 1",
+      )
+      .get(agentId);
+  }
+
+  /** 按标题精确查会话（cron 滚动复用专用；不走 list(50) 截断窗口） */
+  findByTitle(title: string, agentId: string): SessionInfo | null {
+    const db = getDatabase();
+    const row = db
+      .prepare(
+        "SELECT id FROM sessions WHERE title = ? AND agent_id = ? AND status = 'active' ORDER BY updated_at DESC LIMIT 1",
+      )
+      .get(title, agentId) as any;
+    return row ? this.get(row.id) : null;
+  }
+
   /** 删除会话；pinned（首页）不可删。返回是否真正删除。 */
   delete(id: string): boolean {
     const db = getDatabase();

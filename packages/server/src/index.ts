@@ -450,9 +450,7 @@ async function main() {
     // 之前每跑一次新建一条，巡检类任务几天就刷屏会话列表）；
     // 复用会话的 system 快照由 run() 入口 refreshWorkspacePrompt 自动刷新，无旧上下文问题
     const title = `[cron] ${name}`.slice(0, 50);
-    const existing = sessions
-      .list(50, agent?.name ?? "default")
-      .find((x) => x.title === title);
+    const existing = sessions.findByTitle(title, agent?.name ?? "default");
     const s =
       existing ??
       sessions.create({
