@@ -446,14 +446,23 @@ async function main() {
       Object.values(agents)[0];
     if (agentName && !(agents as any)[agentName])
       console.warn(`⚠️ cron "${name}": 未知 agent "${agentName}"，回退 default`);
-    const s = sessions.create({
-      agentId: agent?.name ?? "default",
-      model: agent?.model,
-      title: `[cron] ${name}`.slice(0, 50),
-      systemPrompt: agent
-        ? await agent.memory.buildSystemPrompt()
-        : undefined,
-    });
+    // 同任务复用一条滚动会话（2026-11-06 修 elf 报「71 条 [cron] 会话」：
+    // 之前每跑一次新建一条，巡检类任务几天就刷屏会话列表）；
+    // 复用会话的 system 快照由 run() 入口 refreshWorkspacePrompt 自动刷新，无旧上下文问题
+    const title = `[cron] ${name}`.slice(0, 50);
+    const existing = sessions
+      .list(50, agent?.name ?? "default")
+      .find((x) => x.title === title);
+    const s =
+      existing ??
+      sessions.create({
+        agentId: agent?.name ?? "default",
+        model: agent?.model,
+        title,
+        systemPrompt: agent
+          ? await agent.memory.buildSystemPrompt()
+          : undefined,
+      });
     await sessions.run(s.id, text, {
       toolRegistry: tools,
       workDir: (agent as any)?.workspaceDir,
