@@ -685,8 +685,14 @@ async function main() {
     process.exit(1);
   }
 
-  serve({ fetch: app.fetch, port });
-  console.log(`Gateway: http://localhost:${port}`);
+  // 监听地址（安全默认 2026-11-10）：旧版 serve() 未指定 hostname → 绑 *，
+  // 局域网内任意设备无鉴权读写会话/记忆。要局域网访问显式设 EASY_AGENT_HOST=0.0.0.0
+  const host = process.env.EASY_AGENT_HOST ?? "127.0.0.1";
+  serve({ fetch: app.fetch, port, hostname: host });
+  console.log(
+    `Gateway: http://${host === "0.0.0.0" ? "<本机IP>" : host}:${port}` +
+      (host === "127.0.0.1" ? "（仅本机；局域网访问设 EASY_AGENT_HOST=0.0.0.0）" : "⚠️ 全网卡监听，网关无鉴权注意风险"),
+  );
 }
 
 main();
