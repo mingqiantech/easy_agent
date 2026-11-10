@@ -207,6 +207,7 @@ async function main() {
 
   adapter.onMessage(async (msg) => {
       const chatKey = `${msg.channel}:${msg.chatId}`;
+      console.log(`💬 wecom ← chatId=${msg.chatId} (${msg.channel}) 长度${(msg.text ?? "").length}`);
       let reply: string;
       try {
         const pinned = pinnedAgent(chatKey, msg.chatId);
