@@ -1,6 +1,6 @@
 import { describe, it, expect } from "bun:test";
 // 被测函数在模块 main() 之前定义，import 副作用安全（main 在文件底部才调用）
-import { extractImages } from "../src/index.js";
+import { extractAudio, extractImages } from "../src/index.js";
 
 /** wecom 出图（2026-11-10）：回复文本里 show_image 的 markdown 引用 → 文件路径 + 清洗后文本 */
 describe("extractImages（wecom 出图文本提取）", () => {
@@ -27,5 +27,19 @@ describe("extractImages（wecom 出图文本提取）", () => {
     const r = extractImages("没有图，就一句话");
     expect(r.files).toEqual([]);
     expect(r.cleaned).toBe("没有图，就一句话");
+  });
+});
+
+/** tts 投递标记提取（2026-11-10） */
+describe("extractAudio（wecom 语音投递标记）", () => {
+  it("[[audio_as_voice]]+[[audio:/uploads/x.mp3]] → 路径 + 标记剥离", () => {
+    const r = extractAudio("[[audio_as_voice]]\n[[audio: /uploads/tts-abc123.mp3]]\n好的，已合成。");
+    expect(r.file).toContain("tts-abc123.mp3");
+    expect(r.cleaned).toBe("好的，已合成。");
+  });
+  it("无标记原样；多个只取第一个", () => {
+    expect(extractAudio("纯文本").file).toBeNull();
+    const r = extractAudio("[[audio: /uploads/a.mp3]][[audio: /uploads/b.mp3]]");
+    expect(r.file).toContain("a.mp3");
   });
 });

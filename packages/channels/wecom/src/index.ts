@@ -132,7 +132,9 @@ export function extractAudio(reply: string): { file: string | null; cleaned: str
     if (!file) file = path.join(UPLOADS_DIR, f);
     return "";
   });
-  cleaned = cleaned.replace(/\[\[audio_as_voice\]\]\n?/g, "").trimEnd();
+  cleaned = cleaned.replace(/\[\[audio_as_voice\]\]\n?/g, "");
+  // 标记行整体剥离后不留空行/行首空白
+  cleaned = cleaned.replace(/^\s*\n+/g, "").replace(/\n{2,}\s*$/g, "").trimEnd();
   return { file, cleaned };
 }
 
