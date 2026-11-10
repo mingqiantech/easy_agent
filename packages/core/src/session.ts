@@ -199,6 +199,12 @@ export class SessionManager {
     if (!row || row.pinned) return false;
     db.prepare("DELETE FROM sessions WHERE id = ?").run(id);
     db.prepare("DELETE FROM pending_queue WHERE session_id = ?").run(id);
+    // 存量库无 FK 的关联表（建表漏 REFERENCES）：显式连带清，防孤儿（2026-11-10）
+    // token_usage 曾累积 227 条孤儿；session_ingestion/tool_calls/audit_logs 同步清
+    db.prepare("DELETE FROM token_usage WHERE session_id = ?").run(id);
+    db.prepare("DELETE FROM session_ingestion WHERE session_id = ?").run(id);
+    db.prepare("DELETE FROM tool_calls WHERE session_id = ?").run(id);
+    db.prepare("DELETE FROM audit_logs WHERE session_id = ?").run(id);
     return true;
   }
   /**

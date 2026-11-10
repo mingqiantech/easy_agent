@@ -166,10 +166,11 @@ function initializeSchema(db: Database): void {
       created_at INTEGER NOT NULL
     );
 
-    -- token 用量记录表（每步 LLM 调用）
+    -- token 用量记录表（每步 LLM 调用；2026-11-10 补 FK：建表漏了 REFERENCES，
+    -- 历次删会话累积孤儿——存量库无 FK 可依赖，靠 delete() 显式连带 + 新库 FK 双保险）
     CREATE TABLE IF NOT EXISTS token_usage (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      session_id TEXT NOT NULL,
+      session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
       model TEXT NOT NULL,
       prompt_tokens INTEGER NOT NULL DEFAULT 0,
       completion_tokens INTEGER NOT NULL DEFAULT 0,

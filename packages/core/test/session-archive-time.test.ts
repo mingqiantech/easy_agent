@@ -109,3 +109,21 @@ describe("hasPinned / findByTitle 不受 list 截断窗口影响（2026-11-06 �
     expect(s.hasPinned("nobody")).toBe(false);
   });
 });
+
+describe("delete 连带清无-FK 关联表（2026-11-10 孤儿 token_usage 修复回归）", () => {
+  it("删会话后 token_usage/session_ingestion/tool_calls/audit_logs 无孤儿", () => {
+    const s = makeSessions();
+    const x = s.create({ agentId: "gc" });
+    const db = getDatabase();
+    db.prepare("INSERT INTO token_usage (session_id, model, prompt_tokens, completion_tokens, total_tokens, created_at) VALUES (?,?,?,?,?,?)").run(x.id, "m", 1, 2, 3, Date.now());
+    db.prepare("INSERT INTO session_ingestion (session_id, snippet_count, ingested_at) VALUES (?,?,?)").run(x.id, 1, Date.now());
+    db.prepare("INSERT INTO tool_calls (session_id, tool_name, created_at) VALUES (?,?,?)").run(x.id, "t", Date.now());
+    db.prepare("INSERT INTO audit_logs (session_id, action, created_at) VALUES (?,?,?)").run(x.id, "del", Date.now());
+    expect(s.delete(x.id)).toBe(true);
+    const q = (t: string) => (db.prepare(`SELECT COUNT(*) c FROM ${t} WHERE session_id = ?`).get(x.id) as any).c;
+    expect(q("token_usage")).toBe(0);
+    expect(q("session_ingestion")).toBe(0);
+    expect(q("tool_calls")).toBe(0);
+    expect(q("audit_logs")).toBe(0);
+  });
+});
