@@ -158,7 +158,33 @@ export const ConfigSchema = z.object({
       /** 按会话固定 agent（2026-10-31）：key=chatId 或 channel:chatId，value=agent 名；
        *  优先级最高，固定后「切换」指令对该会话无效 */
       chatAgents: z.record(z.string()).default({}),
+      /** 告警投递会话（2026-11-10）：体检 ❌/预算超支等系统告警经 outbox 推到这里；
+       *  不配则告警只进日志不外推 */
+      alertChatId: z.string().optional(),
     })
+    .optional(),
+  /** 成本护栏（2026-11-10）：每日（本地零点重置）网关全部 agent 合计费用超阈：
+   *  alert=推告警到 alertChatId 继续跑；block=新消息直接拒。未配=不限 */
+  budget: z
+    .object({
+      dailyUsd: z.number().positive(),
+      mode: z.enum(["alert", "block"]).default("alert"),
+    })
+    .optional(),
+  /** 工具审批（2026-11-10 接通 PermissionManager）：开启后 ask 规则（bash 不在白名单、
+   *  write 命中敏感路径等）阻塞等待 Web UI/企微批复，5 分钟超时自动拒；deny 规则直接拒。默认关（兼容现行为） */
+  approvals: z
+    .object({ enabled: z.boolean().default(false) })
+    .optional(),
+  /** 外部 MCP server 接入（2026-11-10）：stdio 拉起，工具注册为 <srv>__<tool> */
+  mcpServers: z
+    .record(
+      z.object({
+        command: z.string(),
+        args: z.array(z.string()).default([]),
+        env: z.record(z.string()).optional(),
+      }),
+    )
     .optional(),
   /** 多 Agent 定义："名字" -> { model?, workspaceDir?, description?, thinking?, tools? } */
   agents: z

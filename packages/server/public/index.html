@@ -139,6 +139,14 @@
     .img-thumbs{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px}
     .md-img{max-width:min(100%,480px);max-height:360px;border-radius:10px;border:1px solid var(--border);cursor:zoom-in;display:block;margin:6px 0}
     .md-audio{width:min(100%,360px);margin:6px 0}
+    /* 审批横幅（2026-11-10）：有待批工具时置顶提醒，批准/拒绝直接回 API */
+    .apbar{background:#fdf6e3;border-bottom:1px solid #e5d3a1;padding:8px 16px;font-size:13px;display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+    .apbar[hidden]{display:none}
+    .apbar .ap-item{display:flex;gap:8px;align-items:center;background:var(--card);border:1px solid var(--border);border-radius:9px;padding:5px 10px}
+    .apbar .ap-item code{font-size:12px;color:var(--muted);max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .apbar button{border:1px solid var(--border);border-radius:8px;padding:3px 10px;font-size:12px;cursor:pointer;background:var(--card)}
+    .apbar .ok{color:#5f9470;border-color:#5f9470}
+    .apbar .no{color:#c26d64;border-color:#c26d64}
     .img-thumbs img{max-width:220px;max-height:200px;border-radius:10px;border:1px solid var(--border);cursor:zoom-in;display:block}
     .send-btn:hover{opacity:.9}
     .send-btn:disabled{opacity:.4;cursor:not-allowed}
@@ -326,9 +334,11 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
         </details>
         <button id="traeSw" class="agent-sw" onclick="toggleTrae()" title="当前 Agent 是否可用外部编码工具 trae_agent/acp_agent">🤖</button>
         <button class="action-btn" onclick="summarize()" id="summBtn">📝 总结本会话</button>
+        <button class="action-btn" onclick="exportSession()" title="导出当前会话为 Markdown（含归档全量）">⇩ 导出</button>
       </div>
     </div>
 
+    <div class="apbar" id="apbar" hidden></div>
     <div class="view" id="chatView">
       <div class="messages" id="messages"></div>
       <div class="summ-nav" id="summNav"></div>
@@ -403,6 +413,24 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
           <div class="hint" style="margin-top:0">混合检索全链路实时状态（关键词 BM25 + 向量 KNN → 融合 → 精排 → 记忆强化闭环）。绿=在用，灰=未启用/兜底。</div>
           <div class="rtg" id="rtgGraph"></div>
         </div>
+        <div class="card">
+          <h3>🎯 技能管理 Skills（当前顶栏 Agent 的工作区）</h3>
+          <div class="hint" style="margin-top:0">SKILL.md 触发词命中的本轮指引（<code>triggers</code> 命中即注入正文）。改动即时生效，无需重启。</div>
+          <div id="skillList" style="margin-top:8px"></div>
+          <div class="set-row" style="margin-top:8px"><input id="skillTest" placeholder="测试触发：输入一句话看命中哪个技能" style="flex:1;padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-size:13px"><button class="action-btn" onclick="skillTestRun()">测</button></div>
+          <details style="margin-top:8px"><summary style="cursor:pointer;font-size:13px;color:var(--accent)">＋ 新建 / 编辑技能</summary>
+            <input id="skillName" placeholder="技能名（字母数字中文-_）" style="margin-top:6px;padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-size:13px;width:100%">
+            <input id="skillDesc" placeholder="描述（会进系统提示列举）" style="margin-top:6px;padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-size:13px;width:100%">
+            <input id="skillTriggers" placeholder="触发词，逗号分隔，如：接线图, 电路图" style="margin-top:6px;padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-size:13px;width:100%">
+            <textarea id="skillBody" placeholder="技能正文（Markdown，命中时注入本轮 system）" style="margin-top:6px;width:100%;height:120px;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:8px;font:12px/1.6 ui-monospace,monospace;color:var(--fg)"></textarea>
+            <button class="action-btn" onclick="skillSave()" style="margin-top:6px">💾 保存技能</button>
+          </details>
+        </div>
+        <div class="card">
+          <h3>💰 预算护栏</h3>
+          <div class="hint" style="margin-top:0">当日总费用超阈值：alert=推告警到企微告警会话并继续；block=拒收新消息。配置写 easy-agent.json 的 <code>budget</code>；告警会话 <code>ea-config wecom alert-chat &lt;chatId&gt;</code>。</div>
+          <div class="hint" id="budgetStatus" style="margin-top:6px"></div>
+        </div>
         <div class="card" id="memCard" style="display:none"><!-- 长期记忆编辑器：按 elf 要求不在 Web UI 展示；后端 GET/PUT /api/memory/content 保留 -->
           <h3>🧠 长期记忆 MEMORY.md</h3>
           <div class="hint" id="memPaths" style="margin-top:0"></div>
@@ -421,6 +449,7 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
       </div>
       <div class="metrics" id="usageMetrics"></div>
       <div style="padding:14px 20px 0"><div class="card"><h3>每日用量</h3><svg id="usageChart" width="100%" height="170"></svg></div></div>
+      <div style="padding:14px 20px 0"><div class="card"><h3>每日成本 · 按 Agent 堆叠</h3><svg id="usageAgentChart" width="100%" height="170"></svg><div class="hint" id="agentChartLegend" style="margin-top:0"></div></div></div>
       <div class="usage-tables">
         <div class="card"><h3>按模型</h3><table class="usage-table" id="usageModels"></table></div>
         <div class="card"><h3>按 Agent</h3><table class="usage-table" id="usageAgents"></table></div>
@@ -539,6 +568,7 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
           ${s.pinned?'':`<button class="act-btn" title="重命名" onclick="event.stopPropagation();renameSession('${s.id}')">✎</button>
           <button class="act-btn del" title="删除会话" onclick="event.stopPropagation();delSession('${s.id}')">✕</button>`}
         </div>`).join('');
+      {const cur=sorted.find(x=>x.id===sid);window.__sessTitle=cur?(cur.title||"首页会话"):"会话";}
       if(sid) loadModelForSession();
     }
     /* 单会话策略（elf 拍板 2026-11-02）：不新建会话，一律回到首页置顶会话滚动 */
@@ -1222,7 +1252,7 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
       if(usageTimer){clearInterval(usageTimer);usageTimer=null;}
       if(v==='topo'){refreshTopo();topoTimer=setInterval(refreshTopo,5000);}
       if(v==='know'){loadKnowledge();}
-      if(v==='settings'){loadSettingsView();loadBackups();loadRetrieval();}
+      if(v==='settings'){loadSettingsView();loadBackups();loadRetrieval();loadSkillsCard();}
       if(v==='usage'){loadUsage();usageTimer=setInterval(loadUsage,15000);}
     }
     async function refreshTopo(){
@@ -1714,6 +1744,7 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
         const rows=(list,key)=>'<tr><th>'+key+'</th><th>tokens</th><th>次数</th><th>费用</th></tr>'+(list||[]).map(x=>`<tr><td>${esc(x[key])}</td><td>${fmtK(x.total)}</td><td>${x.calls}</td><td>${fmtUSD(x.cost)}</td></tr>`).join('')||'<tr><td colspan="4" style="color:var(--muted)">暂无数据</td></tr>';
         document.getElementById('usageModels').innerHTML=(u.byModel||[]).length?'<tr><th>model</th><th>tokens</th><th>缓存输入</th><th>次数</th><th>费用</th></tr>'+u.byModel.map(x=>`<tr><td>${esc(x.model)}</td><td>${fmtK(x.total)}</td><td>${x.cacheRead>0?fmtK(x.cacheRead):'-'}</td><td>${x.calls}</td><td>${fmtUSD(x.cost)}</td></tr>`).join(''):'<tr><td colspan="5" style="color:var(--muted)">暂无数据</td></tr>';
         document.getElementById('usageAgents').innerHTML=rows(u.byAgent,'agent');
+        renderBudget(u.budget);renderAgentChart(u.dailyAgents||[]);
       }catch(e){}
     }
     function renderUsageChart(daily){
@@ -1762,6 +1793,122 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
           const path=pts.map((p,i)=>`${i?'L':'M'}${p[0].toFixed(1)} ${p[1].toFixed(1)}`).join(' ');
           return `<path d="${path}" fill="none" stroke="#5f9470" stroke-width="1.5" opacity=".85"/>${d}`;
         })();
+    }
+
+
+    /* ── 会话导出（2026-11-10）：走包装 fetch 带令牌，blob 下载 ── */
+    async function exportSession(){
+      if(!sid){alert('请先选择会话');return;}
+      try{
+        const r=await fetch(`${API}/api/sessions/${sid}/export?format=md`);
+        if(!r.ok){alert('导出失败 HTTP '+r.status);return;}
+        const blob=await r.blob();
+        const a=document.createElement('a');a.href=URL.createObjectURL(blob);
+        a.download=(window.__sessTitle||'session')+'.md';a.click();
+        setTimeout(()=>URL.revokeObjectURL(a.href),5000);
+      }catch(e){alert('导出失败: '+e.message);}
+    }
+
+    /* ── 工具审批（2026-11-10）：顶栏下方横幅，10s 轮询 pending ── */
+    async function pollApprovals(){
+      const bar=document.getElementById('apbar');
+      if(!bar)return;
+      try{
+        const j=await (await fetch(`${API}/api/approvals`)).json();
+        const list=j.pending||[];
+        if(!list.length){bar.hidden=true;bar.innerHTML='';return;}
+        bar.hidden=false;
+        bar.innerHTML='<b style="color:#a07a2c">⏸️ 待审批 '+list.length+' 项</b>'+list.map(a=>
+          `<span class="ap-item">🤖 ${esc(a.agent||'')} <b>${esc(a.tool)}</b><code title="${esc(a.detail||'')}">${esc((a.detail||'').slice(0,60))}</code>
+           <button class="ok" onclick="apResolve(${a.id},'allow')">批准</button>
+           <button class="no" onclick="apResolve(${a.id},'deny')">拒绝</button></span>`).join('');
+      }catch(e){bar.hidden=true;}
+    }
+    async function apResolve(id,action){
+      try{await fetch(`${API}/api/approvals/${id}/resolve`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action})});}catch(e){}
+      pollApprovals();
+    }
+    setInterval(pollApprovals,10000);
+
+    /* ── 技能管理卡（2026-11-10） ── */
+    async function loadSkillsCard(){
+      const el=document.getElementById('skillList');
+      if(!el)return;
+      try{
+        const j=await (await fetch(`${API}/api/skills?agent=${encodeURIComponent(agent)}`)).json();
+        if(j.error){el.innerHTML='<span style="color:var(--muted)">'+esc(j.error)+'</span>';return;}
+        el.innerHTML=(j.skills||[]).length?j.skills.map(k=>
+          `<div class="ap-item" style="display:flex;gap:8px;align-items:center;margin-bottom:5px">🎯 <b>${esc(k.name)}</b> <span style="color:var(--muted);font-size:12px">${esc(k.description||'')}</span> <span style="font-size:11px;color:var(--accent2)">[${esc((k.triggers||[]).join(','))}]</span>
+           <button class="act-btn" title="编辑（载入下方表单）" onclick="skillLoad('${esc(k.name)}')">✎</button>
+           <button class="act-btn del" title="删除" onclick="skillDel('${esc(k.name)}')">✕</button></div>`).join('')
+          :'<span style="color:var(--muted);font-size:12px">该 agent 暂无技能（下方新建）</span>';
+      }catch(e){el.innerHTML='';}
+    }
+    async function skillLoad(name){
+      const j=await (await fetch(`${API}/api/skills/${encodeURIComponent(name)}?agent=${encodeURIComponent(agent)}`)).json();
+      if(j.error){alert(j.error);return;}
+      document.getElementById('skillName').value=name;
+      const fm=(j.markdown||'').split('---')[1]||'';
+      const g=(k)=>{const m=new RegExp(k+':\\s*(.+)').exec(fm);return m?m[1].trim():'';};
+      document.getElementById('skillDesc').value=g('description');
+      document.getElementById('skillTriggers').value=g('triggers').replace(/^\[|\]$/g,'').replace(/["' ]/g,'');
+      document.getElementById('skillBody').value=(j.markdown||'').split('---').slice(2).join('---').trim();
+    }
+    async function skillSave(){
+      const name=document.getElementById('skillName').value.trim();
+      if(!name){alert('技能名必填');return;}
+      const triggers=document.getElementById('skillTriggers').value.split(/[,，]/).map(x=>x.trim()).filter(Boolean);
+      const body=document.getElementById('skillBody').value||'# 使用说明\n';
+      const desc=document.getElementById('skillDesc').value.trim();
+      const fm=['---',`name: ${name}`,`description: ${desc}`,`triggers: [${triggers.map(t=>JSON.stringify(t)).join(',')}]`,'---'].join('\n');
+      const r=await (await fetch(`${API}/api/skills/${encodeURIComponent(name)}?agent=${encodeURIComponent(agent)}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({markdown:fm+'\n\n'+body+'\n'})})).json();
+      if(r.error){alert('❌ '+r.error);return;}
+      alert('✅ 已保存（即时生效）');loadSkillsCard();
+      document.getElementById('skillName').value=document.getElementById('skillDesc').value=document.getElementById('skillTriggers').value=document.getElementById('skillBody').value='';
+    }
+    async function skillDel(name){
+      if(!confirm('删除技能 '+name+'？'))return;
+      await fetch(`${API}/api/skills/${encodeURIComponent(name)}?agent=${encodeURIComponent(agent)}`,{method:'DELETE'});
+      loadSkillsCard();
+    }
+    async function skillTestRun(){
+      const text=document.getElementById('skillTest').value.trim();
+      if(!text)return;
+      const j=await (await fetch(`${API}/api/skills/test`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({agent,text})})).json();
+      alert(j.matched?`🎯 命中技能：${j.matched}`:`未命中（共 ${j.total} 个技能）`);
+    }
+
+    /* ── 预算状态 + 按 agent 每日成本堆叠图（2026-11-10） ── */
+    function renderBudget(b){
+      const el=document.getElementById('budgetStatus');
+      if(!el)return;
+      if(!b){el.textContent='未配置预算（不限制）。设置见 easy-agent.json budget 节。';return;}
+      const pct=Math.min(100,Math.round(b.spentToday/b.dailyUsd*100));
+      el.innerHTML=`今日 <b>$${b.spentToday.toFixed(2)}</b> / 限额 $${b.dailyUsd}（${pct}%，模式 ${b.mode}）<div class="ctx-bar"><span style="width:${Math.max(pct,1)}%"></span></div>`;
+    }
+    function renderAgentChart(rows){
+      const svg=document.getElementById('usageAgentChart');
+      if(!svg)return;
+      const agents=[...new Set(rows.map(x=>x.agent))].sort();
+      const days=[...new Set(rows.map(x=>x.day))].sort();
+      if(!agents.length||!days.length){svg.innerHTML='<text x="12" y="90" font-size="12" fill="#8b93a3">区间内无计费数据（多为本地模型/未定价）</text>';document.getElementById('agentChartLegend').innerHTML='';return;}
+      const COLORS=['#5b7a8c','#8a85a3','#5f9470','#c0985a','#c26d64','#6b9bd1','#a8c0d0'];
+      const W=svg.clientWidth||720,H=170,pad=10;
+      const map={};rows.forEach(x=>{(map[x.day]=map[x.day]||{})[x.agent]=x.cost||0;});
+      const totPerDay=days.map(d=>agents.reduce((a,ag)=>a+((map[d]||{})[ag]||0),0));
+      const max=Math.max(...totPerDay,0.0001);
+      const step=(W-2*pad)/days.length,bw=Math.max(3,Math.min(30,step-6));
+      svg.innerHTML=days.map((d,i)=>{
+        let acc=0,bars='';const x=pad+i*step+(step-bw)/2;
+        for(const ag of agents){
+          const v=(map[d]||{})[ag]||0;if(v<=0)continue;
+          const h=(v/max)*(H-56);
+          bars+=`<rect x="${x}" y="${H-30-acc-h}" width="${bw}" height="${Math.max(h,1)}" fill="${COLORS[agents.indexOf(ag)%COLORS.length]}"><title>${ag} ${d}: $${v.toFixed(4)}</title></rect>`;
+          acc+=h;
+        }
+        return `<g>${bars}<text x="${x+bw/2}" y="${H-12}" font-size="9" fill="#8b93a3" text-anchor="middle">${d.slice(5)}</text></g>`;
+      }).join('');
+      document.getElementById('agentChartLegend').innerHTML=agents.map((ag,ix)=>`<span style="margin-right:12px"><i style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${COLORS[ix%COLORS.length]}"></i> ${esc(ag)}</span>`).join('');
     }
 
     (async function init(){

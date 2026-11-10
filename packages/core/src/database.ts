@@ -182,6 +182,32 @@ function initializeSchema(db: Database): void {
     );
     CREATE INDEX IF NOT EXISTS idx_token_usage_created ON token_usage (created_at);
 
+    -- 主动推送发件箱（2026-11-10）：网关/体检脚本/cron 投递写入，wecom 桥接轮询消费
+    -- （网关本体无企微长连接，桥接进程才是出口；发失败留行重试）
+    CREATE TABLE IF NOT EXISTS outbox (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      chat_id TEXT NOT NULL,
+      text TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      sent_at INTEGER
+    );
+
+    -- 工具审批请求（2026-11-10 接通 PermissionManager ask 流）：run 循环写入并等待，
+    -- UI/企微消费 resolve；status: pending/allowed/denied/timeout
+    CREATE TABLE IF NOT EXISTS approvals (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id TEXT NOT NULL,
+      agent_id TEXT,
+      tool_name TEXT NOT NULL,
+      detail TEXT,
+      reason TEXT,
+      status TEXT NOT NULL DEFAULT 'pending',
+      created_at INTEGER NOT NULL,
+      resolved_at INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS idx_approvals_pending
+      ON approvals(status, created_at DESC);
+
     -- 排队消息持久化：转向/队列消息落库，网关重启后自动恢复续跑
     CREATE TABLE IF NOT EXISTS pending_queue (
       id INTEGER PRIMARY KEY AUTOINCREMENT,

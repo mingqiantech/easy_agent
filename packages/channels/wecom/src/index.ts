@@ -211,6 +211,25 @@ async function main() {
       try {
         const pinned = pinnedAgent(chatKey, msg.chatId);
         const agentId = pinned ?? chatAgents.get(chatKey) ?? defaultAgent;
+      // 指令：审批回复（2026-11-10，不消耗会话轮）：同意 <id> / 拒绝 <id>
+      const ap = /^[\/#]?\s*(同意|允许|批准|allow|拒绝|deny)\s+(\d{1,10})\s*$/i.exec(msg.text.trim());
+      if (ap) {
+        const allow = !/拒绝|deny/i.test(ap[1]);
+        let ok = false;
+        try {
+          ok = !!(await gwFetch(`/api/approvals/${ap[2]}/resolve`, {
+            method: "POST",
+            body: JSON.stringify({ action: allow ? "allow" : "deny" }),
+          })).ok;
+        } catch {}
+        reply = ok
+          ? allow
+            ? `✅ 审批 #${ap[2]} 已批准，任务继续执行`
+            : `⛔ 审批 #${ap[2]} 已拒绝`
+          : `没找到待审批项 #${ap[2]}（可能已处理或超时自动拒绝）`;
+        await adapter.sendMessage(msg.chatId, reply);
+        return;
+      }
       // 指令：切换 agent（不消耗一次会话轮）
       const sw = /^[\/#]?\s*(切换|switch)\s+(\S+)/i.exec(msg.text);
       if (sw) {
@@ -270,6 +289,45 @@ async function main() {
   });
 
   await adapter.start();
+
+  // ── 发件箱消费（2026-11-10）：网关告警/cron 定向投递经此进程推企微 ──
+  const drainOutbox = async () => {
+    try {
+      const { pending } = await gwFetch("/api/outbox");
+      for (const item of pending ?? []) {
+        await adapter.sendMessage(item.chatId, item.text);
+        await gwFetch(`/api/outbox/${item.id}/ack`, { method: "POST" }).catch(() => {});
+      }
+    } catch {}
+  };
+
+  // ── 审批通知（2026-11-10）：pending 审批推到归属会话（反查 chatKey；非企微会话发告警群）──
+  const announced = new Set<number>();
+  const pollApprovals = async () => {
+    try {
+      const j: any = await gwFetch("/api/approvals");
+      const pendIds = new Set<number>((j.pending ?? []).map((x: any) => x.id));
+      for (const id of announced) if (!pendIds.has(id)) announced.delete(id); // 已处理→允许新审批重推
+      for (const a of j.pending ?? []) {
+        if (announced.has(a.id)) continue;
+        announced.add(a.id);
+        let chatId: string | null = null;
+        for (const [k, v] of sessions) if (v.sessionId === a.sessionId) chatId = k.slice(k.indexOf(":") + 1);
+        chatId = chatId ?? (config.wecom?.alertChatId ?? null);
+        if (!chatId) continue; // 非企微会话且未配 alertChatId：只能 Web UI 批
+        await adapter
+          .sendMessage(
+            chatId,
+            `⏸️ 工具审批 #${a.id}：${a.agent ?? ""} ${a.tool}\n${String(a.detail || "").slice(0, 200)}\n\n回复「同意 ${a.id}」执行，「拒绝 ${a.id}」终止（10 分钟超时自动拒）`,
+          )
+          .catch(() => {});
+      }
+    } catch {}
+  };
+  setInterval(() => {
+    drainOutbox().catch(() => {});
+    pollApprovals().catch(() => {});
+  }, 5000);
   console.log(
     `🌉 WeCom → 网关桥接就绪 (${GW})，默认 agent=${defaultAgent}` +
       (Object.keys(staticMap).length ? `；固定映射 ${Object.keys(staticMap).length} 条` : "") +

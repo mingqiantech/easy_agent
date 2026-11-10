@@ -1,4 +1,6 @@
 import { Hono } from "hono";
+import { PermissionManager, defaultRules } from "@easy-agent/core/permission/index";
+import { SkillManager } from "@easy-agent/core/skill/manager";
 import { resolveRef } from "@easy-agent/config/models";
 import { stripJsonComments } from "@easy-agent/config/loader";
 import { cors } from "hono/cors";
@@ -93,6 +95,9 @@ const BUILD_VER = process.env.EASY_AGENT_BUILD ?? String(Date.now());
 
 export function createApp(deps: ServerDeps): Hono {
   const app = new Hono();
+  /** 成本护栏 alert 去重（当日一次）+ 审批规则引擎（2026-11-10） */
+  let budgetAlerted = "";
+  const permMgr = new PermissionManager(defaultRules);
   app.use("*", cors());
   app.use("*", logger());
 
@@ -499,6 +504,30 @@ export function createApp(deps: ServerDeps): Hono {
     // 在 OCR 拼接之后做，图文合并超长也能盖到
     if (typeof body.text === "string" && body.text)
       body.text = offloadLongText(body.text);
+    // 成本护栏（2026-11-10）：当日花费超 budget.dailyUsd → block 拒新消息 / alert 每日推一次告警
+    {
+      const b = deps.config.budget;
+      if (b) {
+        const midnight = new Date();
+        midnight.setHours(0, 0, 0, 0);
+        const row = getDatabase()
+          .prepare("SELECT COALESCE(SUM(cost_usd),0) c FROM token_usage WHERE created_at >= ?")
+          .get(midnight.getTime()) as any;
+        const spent = Number(row?.c ?? 0);
+        if (spent >= b.dailyUsd) {
+          const msg = `💰 预算护栏：今日已用 $${spent.toFixed(2)} ≥ 限额 $${b.dailyUsd}`;
+          if (b.mode === "block")
+            return c.json({ error: msg + "（block 模式拒收新消息；可调 budget 或明日再用）" }, 429);
+          const todayKey = new Date().toISOString().slice(0, 10);
+          if (budgetAlerted !== todayKey && deps.config.wecom?.alertChatId) {
+            budgetAlerted = todayKey;
+            getDatabase()
+              .prepare("INSERT INTO outbox (chat_id, text, created_at) VALUES (?,?,?)")
+              .run(deps.config.wecom.alertChatId, msg + "（alert 模式继续运行；如需拦截改 budget.mode=block）", Date.now());
+          }
+        }
+      }
+    }
     const agent = sess ? deps.agents[sess.agentId] : undefined;
     // agent 专属工具裁剪：黑名单内工具对模型不可见且拒绝执行
     const dis = new Set<string>((agent as any)?.toolsDisable ?? []);
@@ -542,7 +571,7 @@ export function createApp(deps: ServerDeps): Hono {
         console.warn("skill 匹配失败:", String(e?.message).slice(0, 120));
       }
     }
-    const toolRegistry = dis.size
+    const baseRegistry = dis.size
       ? {
           getDefinitions: () => deps.tools.getDefinitions().filter((d) => !dis.has(d.name)),
           execute: (name: string, input: unknown, ctx: any) =>
@@ -551,6 +580,49 @@ export function createApp(deps: ServerDeps): Hono {
               : deps.tools.execute(name, input, ctx),
         }
       : deps.tools;
+    // 审批门（2026-11-10，config.approvals.enabled 才生效）：PermissionManager ask → 落 approvals 阻塞等待
+    // （Web UI/企微批复，10 分钟超时或会话 abort 自动拒）；deny 直接拒；无规则工具放行（不管辖未知工具）
+    const toolRegistry = deps.config.approvals?.enabled
+      ? {
+          getDefinitions: () => baseRegistry.getDefinitions(),
+          execute: async (name: string, input: unknown, ctx: any) => {
+            const detail =
+              (input as any)?.command ??
+              (input as any)?.path ??
+              JSON.stringify(input ?? {}).slice(0, 300);
+            const d = permMgr.check(name, String(detail));
+            if (d.permission === "deny" || d.reason === "denylist") {
+              if (d.permission === "deny")
+                return { output: null, error: `权限规则拒绝（${d.reason}）：${String(detail).slice(0, 120)}` };
+            }
+            if (d.permission === "allow" || d.reason === "no rule")
+              return baseRegistry.execute(name, input, ctx);
+            // ask：创建审批并等待
+            const dbA = getDatabase();
+            const ins = dbA
+              .prepare("INSERT INTO approvals (session_id, agent_id, tool_name, detail, reason, created_at) VALUES (?,?,?,?,?,?)")
+              .run(ctx.sessionId, ctx.agentId, name, String(detail).slice(0, 500), d.reason, Date.now());
+            const approvalId = Number(ins.lastInsertRowid);
+            bus({ type: "approval_required", approvalId, toolName: name, detail: String(detail).slice(0, 160) });
+            const deadline = Date.now() + 10 * 60_000;
+            for (;;) {
+              await new Promise((r) => setTimeout(r, 1500));
+              if (ctx.abortSignal?.aborted) {
+                dbA.prepare("UPDATE approvals SET status='denied', resolved_at=? WHERE id=? AND status='pending'").run(Date.now(), approvalId);
+                return { output: null, error: "会话已中断，审批作废" };
+              }
+              const row = dbA.prepare("SELECT status FROM approvals WHERE id=?").get(approvalId) as any;
+              if (row?.status === "allowed") return baseRegistry.execute(name, input, ctx);
+              if (row?.status === "denied")
+                return { output: null, error: `审批被拒：${name} ${String(detail).slice(0, 120)}` };
+              if (Date.now() > deadline) {
+                dbA.prepare("UPDATE approvals SET status='timeout', resolved_at=? WHERE id=? AND status='pending'").run(Date.now(), approvalId);
+                return { output: null, error: "审批超时（10 分钟无人处理），本次操作未执行" };
+              }
+            }
+          },
+        }
+      : baseRegistry;
     // 排队/转向：会话有任务在跑 → 入队，运行循环会并入当前上下文
     // （带图消息不入队：转向链路只支持纯文本，直接走本轮附带）
     if (
@@ -985,7 +1057,29 @@ export function createApp(deps: ServerDeps): Hono {
       )
       .all(since) as any[];
     for (const a of byAgent) a.cost = roundCost(a.cost);
-    return c.json({ days, totals, daily: daily.reverse(), byModel, byAgent });
+    // 按 agent 的每日成本（2026-11-10 堆叠图）
+    const dailyAgents = db2
+      .prepare(
+        `SELECT strftime('%Y-%m-%d', t.created_at/1000, 'unixepoch') day, s.agent_id agent,
+                SUM(COALESCE(t.cost_usd,0)) cost, SUM(t.total_tokens) total
+         FROM token_usage t JOIN sessions s ON s.id = t.session_id
+         WHERE t.created_at >= ? GROUP BY day, agent ORDER BY day`,
+      )
+      .all(since) as any[];
+    for (const x of dailyAgents) x.cost = roundCost(x.cost) ?? 0;
+    // 预算护栏状态（今日已用，本地零点）
+    let budget: any = null;
+    if (deps.config.budget) {
+      const midnight = new Date();
+      midnight.setHours(0, 0, 0, 0);
+      const spent = Number(
+        (db2
+          .prepare("SELECT COALESCE(SUM(cost_usd),0) c FROM token_usage WHERE created_at >= ?")
+          .get(midnight.getTime()) as any)?.c ?? 0,
+      );
+      budget = { ...deps.config.budget, spentToday: Math.round(spent * 1e6) / 1e6 };
+    }
+    return c.json({ days, totals, daily: daily.reverse(), byModel, byAgent, dailyAgents, budget });
   });
 
   // ── 知识拓扑图：记忆知识点（向量相似）+ agent 归属 + 会话关联；?q= 切换为检索模式 ──
@@ -1191,6 +1285,152 @@ export function createApp(deps: ServerDeps): Hono {
     if (!deps.cron) return c.json({ error: "cron 不可用" }, 503);
     deps.cron.delete(c.req.param("id"));
     return c.json({ ok: true });
+  });
+
+  // ── 发件箱（2026-11-10）：网关告警/cron 定向投递统一写入，wecom 桥接轮询消费 ──
+  app.post("/api/outbox", async (c) => {
+    const body = await c.req.json().catch(() => ({} as any));
+    const chatId = String(body.chatId ?? deps.config.wecom?.alertChatId ?? "");
+    const text = String(body.text ?? "").slice(0, 8000);
+    if (!chatId || !text.trim())
+      return c.json({ error: "需要 chatId（或配置 wecom.alertChatId）与 text" }, 400);
+    const r = getDatabase()
+      .prepare("INSERT INTO outbox (chat_id, text, created_at) VALUES (?,?,?)")
+      .run(chatId, text, Date.now());
+    return c.json({ id: Number(r.lastInsertRowid) }, 201);
+  });
+  app.get("/api/outbox", (c) => {
+    const rows = getDatabase()
+      .prepare(
+        "SELECT id, chat_id as chatId, text, created_at as createdAt FROM outbox WHERE sent_at IS NULL ORDER BY id ASC LIMIT 20",
+      )
+      .all();
+    return c.json({ pending: rows });
+  });
+  app.post("/api/outbox/:id/ack", (c) => {
+    getDatabase()
+      .prepare("UPDATE outbox SET sent_at = ? WHERE id = ?")
+      .run(Date.now(), Number(c.req.param("id")));
+    return c.json({ ok: true });
+  });
+
+  // ── 工具审批（2026-11-10 接通 PermissionManager ask/deny）──
+  app.get("/api/approvals", (c) => {
+    const rows = getDatabase()
+      .prepare(
+        `SELECT id, session_id as sessionId, agent_id as agent, tool_name as tool,
+                detail, reason, created_at as createdAt
+         FROM approvals WHERE status = 'pending' ORDER BY id ASC LIMIT 20`,
+      )
+      .all();
+    return c.json({ pending: rows, enabled: !!deps.config.approvals?.enabled });
+  });
+  app.post("/api/approvals/:id/resolve", async (c) => {
+    const body = await c.req.json().catch(() => ({} as any));
+    const status = body.action === "allow" ? "allowed" : body.action === "deny" ? "denied" : null;
+    if (!status) return c.json({ error: "action 必须是 allow|deny" }, 400);
+    const r = getDatabase()
+      .prepare("UPDATE approvals SET status = ?, resolved_at = ? WHERE id = ? AND status = 'pending'")
+      .run(status, Date.now(), Number(c.req.param("id")));
+    return c.json({ ok: r.changes > 0 });
+  });
+
+  // 会话导出（2026-11-10）：md（人类读）/ json（机器）；含归档全量历史
+  app.get("/api/sessions/:id/export", (c) => {
+    const id = c.req.param("id");
+    const sess = deps.sessions.get(id);
+    if (!sess) return c.json({ error: "not found" }, 404);
+    const fmt = c.req.query("format") === "json" ? "json" : "md";
+    const msgs = deps.sessions.getFullMessages(id);
+    const safeTitle = (sess.title ?? "会话").replace(/["\\/]/g, "_").slice(0, 40);
+    if (fmt === "json") {
+      return c.json({ session: sess, messages: msgs });
+    }
+    const ROLE: Record<string, string> = { user: "👤 用户", assistant: "🤖 助手", system: "⚙️ 系统", tool: "🔧 工具" };
+    const lines = [`# ${sess.title ?? "未命名会话"}`, "", `- agent: ${sess.agentId} · model: ${sess.model} · ${msgs.length} 条`, ""];
+    for (const m of msgs as any[]) {
+      const time = m.createdAt ? new Date(m.createdAt).toLocaleString("zh-CN") : "";
+      let text = String(m.content ?? "");
+      try {
+        const p = JSON.parse(text);
+        if (p && typeof p === "object") {
+          const names = Array.isArray(p.toolCalls) ? p.toolCalls.map((t: any) => t.name).join(",") : "";
+          text = `${p.text ?? ""}${names ? `\n（调用工具：${names}）` : ""}`;
+        }
+      } catch {}
+      lines.push(`## ${ROLE[m.role] ?? m.role} · ${time}${m.archived ? " ·[已归档]" : ""}`, "", text.trim() || "（空）", "");
+    }
+    // 文件名可能含中文 → RFC 5987 编码（裸中文头值非法，会导致整个 headers 被丢弃）
+    const fname = encodeURIComponent(`session-${safeTitle}.md`);
+    return c.body(lines.join("\n"), 200, {
+      "Content-Type": "text/markdown; charset=utf-8",
+      "Content-Disposition": `attachment; filename="session-export.md"; filename*=UTF-8''${fname}`,
+    });
+  });
+
+  // ── 技能管理（2026-11-10）：工作区 skills/<name>/SKILL.md 的 CRUD + 触发词测试 ──
+  const SKILL_NAME = /^[\w\u4e00-\u9fa5-]{1,40}$/;
+  function skillWorkspace(agentName?: string): string | null {
+    const a = agentName ? deps.agents[agentName] : deps.agents[Object.keys(deps.agents)[0]];
+    return (a as any)?.workspaceDir ?? null;
+  }
+  app.get("/api/skills", async (c) => {
+    const wd = skillWorkspace(c.req.query("agent") || undefined);
+    if (!wd) return c.json({ error: "agent 不存在" }, 404);
+    const sm = new SkillManager(path.join(wd, "skills"));
+    await sm.scan();
+    return c.json({
+      workspace: wd,
+      skills: sm.list().map((s) => ({ name: s.name, description: s.description, triggers: s.triggers })),
+    });
+  });
+  app.get("/api/skills/:name", async (c) => {
+    const wd = skillWorkspace(c.req.query("agent") || undefined);
+    if (!wd) return c.json({ error: "agent 不存在" }, 404);
+    const file = path.join(wd, "skills", c.req.param("name"), "SKILL.md");
+    try {
+      return c.json({ markdown: await fs.promises.readFile(file, "utf-8") });
+    } catch {
+      return c.json({ error: "技能不存在" }, 404);
+    }
+  });
+  app.put("/api/skills/:name", async (c) => {
+    const wd = skillWorkspace(c.req.query("agent") || undefined);
+    if (!wd) return c.json({ error: "agent 不存在" }, 404);
+    const name = c.req.param("name");
+    if (!SKILL_NAME.test(name)) return c.json({ error: "技能名只允许字母数字中文_-（≤40）" }, 400);
+    const body = await c.req.json().catch(() => ({} as any));
+    let md = String(body.markdown ?? "");
+    if (!md.startsWith("---")) {
+      const tr = Array.isArray(body.triggers) ? `[${body.triggers.map((t: string) => JSON.stringify(t)).join(",")}]` : "[]";
+      md = `---\nname: ${name}\ndescription: ${body.description ?? ""}\ntriggers: ${tr}\n---\n\n${body.body ?? "# 使用说明"}\n`;
+    }
+    const dir = path.join(wd, "skills", name);
+    await fs.promises.mkdir(dir, { recursive: true });
+    await fs.promises.writeFile(path.join(dir, "SKILL.md"), md, "utf-8");
+    return c.json({ ok: true, file: path.join(dir, "SKILL.md") });
+  });
+  app.delete("/api/skills/:name", async (c) => {
+    const wd = skillWorkspace(c.req.query("agent") || undefined);
+    if (!wd) return c.json({ error: "agent 不存在" }, 404);
+    const name = c.req.param("name");
+    if (!SKILL_NAME.test(name)) return c.json({ error: "非法技能名" }, 400);
+    const dir = path.join(wd, "skills", name);
+    try {
+      await fs.promises.rm(dir, { recursive: true, force: true });
+      return c.json({ ok: true });
+    } catch (e: any) {
+      return c.json({ error: String(e?.message) }, 500);
+    }
+  });
+  app.post("/api/skills/test", async (c) => {
+    const body = await c.req.json().catch(() => ({} as any));
+    const wd = skillWorkspace(body.agent || undefined);
+    if (!wd) return c.json({ error: "agent 不存在" }, 404);
+    const sm = new SkillManager(path.join(wd, "skills"));
+    await sm.scan();
+    const hit = sm.match(String(body.text ?? ""));
+    return c.json({ matched: hit ? hit.name : null, total: sm.list().length });
   });
 
   // 子 Agent 运行记录（拓扑数据）

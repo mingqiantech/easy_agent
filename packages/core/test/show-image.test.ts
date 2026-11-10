@@ -42,10 +42,27 @@ describe("show_image", () => {
     expect(mixed.warnings.length).toBe(1);
   });
 
-  it("schema 限 1-4 张", () => {
-    expect(tool.inputSchema.safeParse({ paths: [] }).success).toBe(false);
+  it("schema 限 ≤4 张；空输入运行时兜底报错", async () => {
+    expect(tool.inputSchema.safeParse({ paths: [] }).success).toBe(true); // 允许空（靠 dir）
     expect(
       tool.inputSchema.safeParse({ paths: ["a", "b", "c", "d", "e"] }).success,
     ).toBe(false);
+    const empty: any = await tool.execute({ paths: [] } as any, ctx);
+    expect(empty.error).toContain("至少提供一个");
+  });
+  it("dir 批量：收目录图片按名排序，超 4 张截断提示", async () => {
+    const sub = path.join(workDir, "gallery");
+    fs.mkdirSync(sub, { recursive: true });
+    for (const n of ["b.png", "a.png", "c.png"]) fs.writeFileSync(path.join(sub, n), PNG_1PX);
+    const r: any = await tool.execute({ dir: sub }, ctx);
+    const urls = (r.markdown.match(/\/uploads\/show-[0-9a-f]{16}\.png/g) ?? []);
+    expect(urls.length).toBe(3); // 同内容去重后仍 3 行引用（同 hash）
+    expect(r.served).toBe(3);
+    const many = path.join(workDir, "many");
+    fs.mkdirSync(many, { recursive: true });
+    for (let i = 0; i < 6; i++) fs.writeFileSync(path.join(many, `img${i}.png`), Buffer.concat([PNG_1PX, Buffer.from(`x${i}`)]));
+    const r2: any = await tool.execute({ dir: many }, ctx);
+    expect(r2.served).toBe(4);
+    expect(r2.markdown).toContain("仅前 4 张");
   });
 });

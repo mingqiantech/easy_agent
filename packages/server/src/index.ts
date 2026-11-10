@@ -315,6 +315,15 @@ async function main() {
   // 工具裁剪：配置 tools.disable=[...] 注销对应工具（对所有 agent 生效）
   for (const name of config.tools?.disable ?? []) tools.unregister(name);
 
+  // 外部 MCP server 接入（2026-11-10 elf 点单）：stdio 拉起注册 <srv>__<tool>；异步不阻塞启动
+  if (config.mcpServers && Object.keys(config.mcpServers).length) {
+    import("@easy-agent/core/mcp/client")
+      .then(({ connectMcpServers }) =>
+        connectMcpServers(tools, config.mcpServers!, (m) => console.log(m)),
+      )
+      .catch((e) => console.warn("🔌 MCP 客户端异常:", String(e?.message).slice(0, 140)));
+  }
+
   // Week8: 监控告警（默认规则：库过大/错误率飙升）
   const monitoring = new MonitoringSystem();
   monitoring.addDefaultRules(async (msg) => console.error(msg));
@@ -459,7 +468,7 @@ async function main() {
 
   // cron / 事件 watcher：watch 命中前静默检查（零 LLM 成本），命中才执行 payload
   const cron = new CronManager();
-  const runCronTurn = async (text: string, name: string, agentName?: string) => {
+  const runCronTurn = async (text: string, name: string, agentName?: string, deliverChatId?: string) => {
     // 任务可指定在哪个 agent 名下跑（监视/定时巡检场景，2026-10-31）；未知名字回退 default
     const agent =
       (agentName ? (agents as any)[agentName] : undefined) ??
@@ -482,11 +491,25 @@ async function main() {
           ? await agent.memory.buildSystemPrompt()
           : undefined,
       });
-    await sessions.run(s.id, text, {
+    const cronResult = await sessions.run(s.id, text, {
       toolRegistry: tools,
       workDir: (agent as any)?.workspaceDir,
       thinking: (agent as any)?.thinking,
     });
+    // 定向投递（2026-11-10 elf 点单）：payload.deliver=<企微chatId> 时结果进 outbox，桥接推送到会话
+    if (deliverChatId) {
+      try {
+        getDatabase()
+          .prepare("INSERT INTO outbox (chat_id, text, created_at) VALUES (?,?,?)")
+          .run(
+            deliverChatId,
+            `⏰ cron「${name}」：\n${String(cronResult ?? "").slice(0, 4000) || "（本轮无文本输出）"}`,
+            Date.now(),
+          );
+      } catch (e: any) {
+        console.warn(`cron "${name}" deliver 入队失败:`, String(e?.message).slice(0, 120));
+      }
+    }
   };
   const cronScheduler = new CronScheduler(cron, async (job) => {
     if (job.schedule.kind === "watch") {
@@ -496,6 +519,7 @@ async function main() {
         `⚡ 事件 watcher "${job.name}" 命中${hit.message ? `：${hit.message}` : ""}\n${job.payload.message ?? ""}`.trim(),
         job.name,
         (job.payload as any).agent,
+        (job.payload as any).deliver,
       );
       return;
     }
@@ -507,7 +531,7 @@ async function main() {
       return;
     }
     if (job.payload.kind === "agentTurn" && job.payload.message) {
-      await runCronTurn(job.payload.message, job.name, (job.payload as any).agent);
+      await runCronTurn(job.payload.message, job.name, (job.payload as any).agent, (job.payload as any).deliver);
     }
   });
   cronScheduler.start();

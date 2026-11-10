@@ -48,6 +48,15 @@ usage() {
   ea-config tts speed    <0.5-2.0>
   ea-config tts show / off
 
+■ budget（成本护栏，当日总费用）
+  ea-config budget daily <usd>   # 如 2.5
+  ea-config budget mode  <alert|block>
+  ea-config budget show / off
+■ approvals（工具审批：bash 白名单外/write 敏感路径等需人工批准）
+  ea-config approvals on|off|show
+■ alert（向企微告警会话推一条，需先配 alert-chat 或带参）
+  ea-config alert "<文本>" [chatId]
+
 ■ auth（网关访问令牌；网关默认监听全网卡，局域网共享必配）
   ea-config auth token  <<6-128位密钥>  # /api /uploads 需凭证；/health 豁免
   ea-config auth show / off
@@ -57,6 +66,7 @@ usage() {
   ea-config wecom default-agent <name>
   ea-config wecom pin   <chatId> <agentName>   # 固定会话→agent
   ea-config wecom unpin <chatId>
+  ea-config wecom alert-chat <chatId>  # 告警/cron 投递目标会话
   ea-config wecom list
 
 ■ 定时任务/监巡视（PATCH 风格同 agent）
@@ -191,6 +201,28 @@ case "$cmd" in
       off)     edit_cfg 'del(.tts)' ;;
       *) usage; exit 1 ;;
     esac; do_restart gateway ;;
+  budget)
+    sub="${1:-}"; val="${2:-}"
+    case "$sub" in
+      daily) edit_cfg '.budget = ((.budget // {}) + {dailyUsd: ($v|tonumber)})' --arg v "$val"; do_restart gateway ;;
+      mode)  edit_cfg '.budget = ((.budget // {}) + {mode: $v})' --arg v "$val"; do_restart gateway ;;
+      show)  jq -r '.budget // "未配置（不限预算）"' "$CFG" ;;
+      off)   edit_cfg 'del(.budget)'; do_restart gateway ;;
+      *) usage; exit 1 ;;
+    esac ;;
+  approvals)
+    case "${1:-}" in
+      on)  edit_cfg '.approvals = {enabled: true}'; do_restart gateway ;;
+      off) edit_cfg '.approvals = {enabled: false}'; do_restart gateway ;;
+      show) jq -r 'if (.approvals.enabled // false) then "✅ 审批门开启：ask 规则工具需 Web/企微批准" else "⚪ 审批门关闭（默认，工具直接执行）" end' "$CFG" ;;
+      *) usage; exit 1 ;;
+    esac ;;
+  alert)
+    TEXT="${1:-}"; CHAT="${2:-}"
+    [[ -z $TEXT ]] && { echo "用法: ea-config alert \"文本\" [chatId]"; exit 1; }
+    if [[ -n $CHAT ]]; then BODY=$(jq -n --arg t "$TEXT" --arg c "$CHAT" '{text:$t,chatId:$c}')
+    else BODY=$(jq -n --arg t "$TEXT" '{text:$t}'); fi
+    gwc -X POST "$GW/api/outbox" -H 'Content-Type: application/json' -d "$BODY" | head -c 200; echo ;;
   auth)
     sub="${1:-}"; val="${2:-}"
     case "$sub" in
@@ -213,7 +245,8 @@ case "$cmd" in
       default-agent) edit_cfg '.wecom = ((.wecom // {}) + {agentId: $v})' --arg v "$a2"; do_restart wecom ;;
       pin)   edit_cfg '.wecom = ((.wecom // {}) | .chatAgents = ((.chatAgents // {}) + {($k): $v}))' --arg k "$a2" --arg v "$a3"; do_restart wecom ;;
       unpin) edit_cfg 'del(.wecom.chatAgents[$k])' --arg k "$a2"; do_restart wecom ;;
-      list)  jq '{defaultAgent: .wecom.agentId, pinned: (.wecom.chatAgents // {}), allowed: (.wecom.allowedUserIds // [])}' "$CFG" ;;
+      alert-chat) edit_cfg '.wecom = ((.wecom // {}) + {alertChatId: $v})' --arg v "$a2"; do_restart wecom ;;
+      list)  jq '{defaultAgent: .wecom.agentId, alertChat: .wecom.alertChatId, pinned: (.wecom.chatAgents // {}), allowed: (.wecom.allowedUserIds // [])}' "$CFG" ;;
       *) usage; exit 1 ;;
     esac ;;
   get) jq "${1:-.}" "$CFG" ;;
@@ -222,7 +255,8 @@ case "$cmd" in
     exit_err=0
     ok()   { echo "  ✅ $1"; }
     warn() { echo "  ⚠️ $1"; }
-    bad()  { echo "  ❌ $1"; exit_err=$((exit_err+1)); }
+    bad()  { echo "  ❌ $1"; exit_err=$((exit_err+1)); BADS+=("$1"); }
+    BADS=()
     LIVE=""; [[ "${1:-}" == "--live" ]] && LIVE=1
     STATE=$(dirname "$CFG"); DB="$STATE/agent.db"
 
@@ -322,7 +356,13 @@ case "$cmd" in
 
     echo "----"
     if (( exit_err )); then echo "🔴 check 完成：$exit_err 项失败"; else echo "🟢 check 全部通过"; fi
-    exit $exit_err ;;
+    # 失败自动告警（2026-11-10）：有 alert-chat 且距上次 ≥6h 才推 outbox（wecom 桥接投递），防每 30min 刷屏
+    alert_sent_ts=$(stat -c %Y ${HOME}/.easy-agent/.check-alert.sent 2>/dev/null || echo 0)
+    if (( exit_err > 0 )) && [[ -f ${HOME}/.easy-agent/.check-alert.on ]] && (( $(date +%s) - alert_sent_ts > 21600 )); then
+      AL="$(printf 'ea-config check: %s 项失败\n' "$exit_err"; printf -- '- ❌ %s\n' "${BADS[@]}")"
+      gwc -X POST "$GW/api/outbox" -H 'Content-Type: application/json' -d "$(jq -n --arg t "$AL" '{text:$t}')" >/dev/null 2>&1 && touch ${HOME}/.easy-agent/.check-alert.sent
+    fi
+$1exit $exit_err ;;
   cron)
     sub="${1:-list}"; shift || true
     case "$sub" in

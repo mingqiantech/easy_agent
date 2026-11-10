@@ -37,11 +37,15 @@ const MAX_PATHS = 4;
 const ShowImageInput = z.object({
   paths: z
     .array(z.string())
-    .min(1)
     .max(MAX_PATHS)
+    .optional()
     .describe(
       `本地图片文件路径（绝对或相对工作目录），最多 ${MAX_PATHS} 张。支持 ${Object.keys(EXT_MIME).join("/")}`,
     ),
+  dir: z
+    .string()
+    .optional()
+    .describe("图片目录：自动收目录内图片（按文件名排序，与 paths 合计≤4 张；批量交付场景用）"),
   alt: z
     .string()
     .max(80)
@@ -53,15 +57,37 @@ export function createShowImageTool(): Tool {
   return {
     name: "show_image",
     description:
-      "在聊天窗口展示本地图片。传入图片文件路径，返回 Markdown 图片语法——把返回的 markdown 原样贴进最终回复文本，用户即可在对话里直接看图（不要只给文件路径让用户自己打开）。",
+      "在聊天窗口展示本地图片。传入图片路径或整个目录（dir，批量交付），返回 Markdown 图片语法——把返回的 markdown 原样贴进最终回复文本，用户即可在对话里直接看图（不要只给文件路径让用户自己打开）。",
     inputSchema: ShowImageInput,
 
     async execute(input, ctx: ToolContext) {
+      // 汇总待发布文件：显式 paths + dir 自动扫图（排序后补齐到 MAX_PATHS 上限）
+      const files: string[] = Array.isArray(input.paths) ? [...input.paths] : [];
+      let truncated = false;
+      if (input.dir) {
+        const d = path.isAbsolute(input.dir) ? input.dir : path.resolve(ctx.workDir, input.dir);
+        try {
+          const imgs = fs
+            .readdirSync(d)
+            .filter((f) => EXT_MIME[f.split(".").pop()?.toLowerCase() ?? ""])
+            .sort();
+          for (const f of imgs) {
+            if (files.length >= MAX_PATHS) {
+              truncated = true;
+              break;
+            }
+            files.push(path.join(d, f));
+          }
+        } catch {
+          if (!files.length) return { error: `目录不存在或不可读: ${d}` };
+        }
+      }
+      if (!files.length) return { error: "paths 与 dir 至少提供一个" };
       const out: string[] = [];
       const errors: string[] = [];
       const UP = uploadsDir();
       fs.mkdirSync(UP, { recursive: true });
-      for (const p of input.paths) {
+      for (const p of files) {
         const abs = path.isAbsolute(p) ? p : path.resolve(ctx.workDir, p);
         let st: fs.Stats;
         try {
@@ -103,7 +129,7 @@ export function createShowImageTool(): Tool {
       if (!out.length)
         return { error: errors.join("；") || "没有可展示的图片" };
       return {
-        markdown: out.join("\n"),
+        markdown: out.join("\n") + (truncated ? `\n（目录图片多于 ${MAX_PATHS} 张，本次仅前 ${MAX_PATHS} 张）` : ""),
         served: out.length,
         hint: "把 markdown 字段原样贴进最终回复文本，聊天窗口会内嵌渲染这些图。",
         ...(errors.length ? { warnings: errors } : {}),
