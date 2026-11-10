@@ -213,22 +213,37 @@ export class WeComAdapter implements ChannelAdapter {
   /** 发图（2026-11-10 elf 点单）：本地文件 → uploadMedia → image 消息。
    * 失败不抛（调用方继续发文本），返回是否成功。media_id 3 天有效即发即弃。 */
   async sendImage(chatId: string, filePath: string): Promise<boolean> {
+    return this.sendMedia(chatId, filePath, "image");
+  }
+
+  /** 发语音（2026-11-10 tts 接线）：优先 voice 消息，格式不适则降级 file 消息。
+   * 均失败返回 false（调用方保留文本链接）。 */
+  async sendVoice(chatId: string, filePath: string): Promise<boolean> {
+    if (await this.sendMedia(chatId, filePath, "voice")) return true;
+    return this.sendMedia(chatId, filePath, "file");
+  }
+
+  private async sendMedia(
+    chatId: string,
+    filePath: string,
+    type: "image" | "voice" | "file",
+  ): Promise<boolean> {
     if (!this.client) return false;
     try {
       const buf = fs.readFileSync(filePath);
       const r = await (this.client as any).uploadMedia(buf, {
-        type: "image",
+        type,
         filename: path.basename(filePath),
       });
       if (!r?.media_id) return false;
       await this.client.sendMessage(chatId, {
-        msgtype: "image",
-        image: { media_id: r.media_id },
+        msgtype: type,
+        [type]: { media_id: r.media_id },
       } as any);
       return true;
     } catch (e: any) {
       console.warn(
-        `wecom sendImage 失败 (${path.basename(filePath)}):`,
+        `wecom sendMedia(${type}) 失败 (${path.basename(filePath)}):`,
         String(e?.message).slice(0, 140),
       );
       return false;

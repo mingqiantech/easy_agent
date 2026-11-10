@@ -224,5 +224,20 @@ export const ConfigSchema = z.object({
     .optional(),
   /** 图片生成模型（ref 或 alias） */
   imageGenModel: z.string().optional(),
+  /** 语音合成（2026-11-10 elf 点单）：OpenAI 兼容 /audio/speech 接口（Ark/DashScope 兼容模式等）。
+   * apiKey 支持 ${ENV_VAR} 引用（复用 providers 同款插值：loader 只处理 providers，
+   * tts 节插值在接线处做）；不配或空→tts 工具不注册，零开销 */
+  tts: z
+    .object({
+      apiKey: z.string().default(""),
+      /** 缺省 https://api.openai.com/v1 */
+      baseUrl: z.string().optional(),
+      /** tts-1 / cosyvoice-v1(兼容模式) 等，缺省 tts-1 */
+      model: z.string().optional(),
+      /** alloy / 中文厂商音色名 */
+      voice: z.string().optional(),
+      speed: z.number().min(0.25).max(4).optional(),
+    })
+    .optional(),
 });
 export type Config = z.infer<typeof ConfigSchema>;

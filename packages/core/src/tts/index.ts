@@ -27,6 +27,7 @@ export class TextToSpeech {
   async synthesize(
     text: string,
     outputDir = path.join(process.env.HOME ?? "/tmp", ".local", "share", "easy-agent", "tts"),
+    overrides?: { voice?: string; speed?: number; model?: string },
   ): Promise<{ path: string; bytes: number; durationMs: number }> {
     if (!this.available) throw new Error("TTS not configured (no API key)");
 
@@ -41,10 +42,11 @@ export class TextToSpeech {
         Authorization: `Bearer ${this.config.apiKey}`,
       },
       body: JSON.stringify({
-        model: this.config.model ?? "tts-1",
-        voice: this.config.voice ?? "alloy",
-        speed: this.config.speed ?? 1,
+        model: overrides?.model ?? this.config.model ?? "tts-1",
+        voice: overrides?.voice ?? this.config.voice ?? "alloy",
+        speed: overrides?.speed ?? this.config.speed ?? 1,
         input: text,
+        response_format: "mp3",
       }),
     });
 

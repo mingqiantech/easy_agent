@@ -24,6 +24,8 @@ import { createSubAgentTool } from "@easy-agent/core/agent/sub-agent-tool";
 import { createAgentStatusTool } from "@easy-agent/core/agent/agent-status-tool";
 import { createVisionTool } from "@easy-agent/core/tool/builtins/vision";
 import { createShowImageTool } from "@easy-agent/core/tool/builtins/show-image";
+import { createTtsTool } from "@easy-agent/core/tool/builtins/tts";
+import { TextToSpeech } from "@easy-agent/core/tts/index";
 import { ImageGenerator } from "@easy-agent/core/image-gen/index";
 import { createImageGenTool } from "@easy-agent/core/tool/builtins/image-gen";
 import { createTraeTool } from "@easy-agent/core/tool/builtins/trae-agent";
@@ -280,6 +282,24 @@ async function main() {
 
   // 图片展示（2026-11-02 elf 点单）：本地图片发布到 uploads，回复贴 markdown 即内嵌渲染
   tools.register(createShowImageTool());
+
+  // 语音合成（2026-11-10 elf 点单自制）：仅配置了 tts.apiKey 才注册，未配零开销
+  if (config.tts?.apiKey) {
+    tools.register(
+      createTtsTool(
+        new TextToSpeech({
+          apiKey: config.tts.apiKey,
+          baseUrl: config.tts.baseUrl,
+          model: config.tts.model,
+          voice: config.tts.voice,
+          speed: config.tts.speed,
+        }),
+      ),
+    );
+    console.log(
+      `🔊 TTS 工具已启用 (${config.tts.model ?? "tts-1"}/${config.tts.voice ?? "alloy"})`,
+    );
+  }
 
   // Week8: 图片生成工具
   tools.register(

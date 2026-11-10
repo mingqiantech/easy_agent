@@ -27,6 +27,14 @@ usage() {
   ea-config websearch ollama-url <url>
   ea-config websearch key        <tavily|brave|bocha> <key>
 
+■ tts（编辑配置文件；不配 apiKey 则 tts 工具不注册）
+  ea-config tts key      <apikey>              # OpenAI 兼容 /audio/speech 服务密钥
+  ea-config tts baseurl  <url>                 # 缺省 https://api.openai.com/v1
+  ea-config tts model    <model>               # 缺省 tts-1（中文服务如 cosyvoice-v1 兼容模式）
+  ea-config tts voice    <voice>               # 缺省 alloy（中文服务常需改）
+  ea-config tts speed    <0.5-2.0>
+  ea-config tts show / off
+
 ■ wecom（编辑配置文件）
   ea-config wecom default-agent <name>
   ea-config wecom pin   <chatId> <agentName>   # 固定会话→agent
@@ -153,6 +161,18 @@ case "$cmd" in
         esac; do_restart gateway ;;
       *) usage; exit 1 ;;
     esac ;;
+  tts)
+    sub="${1:-}"; val="${2:-}"
+    case "$sub" in
+      key)     edit_cfg '.tts = ((.tts // {}) + {apiKey: $v})' --arg v "$val" ;;
+      baseurl) edit_cfg '.tts = ((.tts // {}) + {baseUrl: $v})' --arg v "$val" ;;
+      model)   edit_cfg '.tts = ((.tts // {}) + {model: $v})' --arg v "$val" ;;
+      voice)   edit_cfg '.tts = ((.tts // {}) + {voice: $v})' --arg v "$val" ;;
+      speed)   edit_cfg '.tts = ((.tts // {}) + {speed: ($v|tonumber)})' --arg v "$val" ;;
+      show)    jq '{model: (.tts.model // "tts-1"), voice: (.tts.voice // "alloy"), speed: (.tts.speed // 1), baseUrl: (.tts.baseUrl // "https://api.openai.com/v1"), apiKey: (if (.tts.apiKey // "") != "" then "***（已配）" else "未配置（tts 工具不注册）" end)}' "$CFG" ;;
+      off)     edit_cfg 'del(.tts)' ;;
+      *) usage; exit 1 ;;
+    esac; do_restart gateway ;;
   wecom)
     sub="${1:-}"; a2="${2:-}"; a3="${3:-}"
     case "$sub" in

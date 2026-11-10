@@ -24,6 +24,10 @@ const ALLOWED_EXT: Record<string, string> = {
 export const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 export const MAX_IMAGES_PER_MESSAGE = 4;
 
+/** 仅供 /uploads 服务回放的音频扩展（2026-11-10 tts）：agent 工具产出的 mp3 直接落盘，
+ * 不走前端图片上传校验；投递侧（wecom 桥接）从同目录读文件 */
+const SERVED_ONLY_EXT: Record<string, string> = { mp3: "audio/mpeg" };
+
 export interface ImageRef {
   file: string;
   mimeType: string;
@@ -153,7 +157,7 @@ function cleanupOldUploads(): void {
 export function resolveUploadFile(name: string): string | null {
   const base = path.basename(name);
   const ext = base.split(".").pop() ?? "";
-  if (!ALLOWED_EXT[ext]) return null;
+  if (!ALLOWED_EXT[ext] && !SERVED_ONLY_EXT[ext]) return null;
   const abs = path.join(UPLOADS_DIR, base);
   return fs.existsSync(abs) ? abs : null;
 }

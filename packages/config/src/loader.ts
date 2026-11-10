@@ -162,6 +162,11 @@ function interpolateEnvRefs(merged: any): void {
     if (typeof p.apiKey === "string") p.apiKey = subst(p.apiKey);
     if (typeof p.baseUrl === "string") p.baseUrl = subst(p.baseUrl);
   }
+  // tts 节同样支持 ${ENV_VAR}（2026-11-10）
+  if (merged.tts && typeof merged.tts === "object") {
+    if (typeof merged.tts.apiKey === "string") merged.tts.apiKey = subst(merged.tts.apiKey);
+    if (typeof merged.tts.baseUrl === "string") merged.tts.baseUrl = subst(merged.tts.baseUrl);
+  }
 }
 
 function loadEnvOverrides(): Partial<Config> {

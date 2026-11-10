@@ -3,10 +3,15 @@ import path from "node:path";
 import os from "node:os";
 import type { Message } from "@easy-agent/schema/llm";
 
-/** 图片附件存储目录（与 server 上传路由一致，可用 env 覆盖） */
-export const UPLOADS_DIR =
-  process.env.EASY_AGENT_UPLOADS_DIR ??
-  path.join(os.homedir(), ".easy-agent", "uploads");
+/** 图片附件存储目录（与 server 上传路由一致，可用 env 覆盖）。
+ * 运行时解析（2026-11-10 修）：模块级常量会在全量测试首次 import 时冻结 env，
+ * 被任意先跑测试文件的 EASY_AGENT_UPLOADS_DIR 污染（历史上 show-image 写进真实 uploads 同根） */
+export function uploadsDir(): string {
+  return (
+    process.env.EASY_AGENT_UPLOADS_DIR ??
+    path.join(os.homedir(), ".easy-agent", "uploads")
+  );
+}
 
 /** 发给 LLM 时只保留最近 N 张图：旧图 token 成本高且模型大概率已看过/已处理 */
 const KEEP_IMAGES = 3;
@@ -14,7 +19,7 @@ const KEEP_IMAGES = 3;
 /** 图片文件 → dataURL；读不到（文件被清理）降级为文本占位，不阻断请求 */
 function toDataUrl(img: { file: string; mimeType?: string; name?: string }): string | null {
   try {
-    const abs = path.isAbsolute(img.file) ? img.file : path.join(UPLOADS_DIR, path.basename(img.file));
+    const abs = path.isAbsolute(img.file) ? img.file : path.join(uploadsDir(), path.basename(img.file));
     const buf = readFileSync(abs);
     const mime = img.mimeType || (abs.endsWith(".png") ? "image/png" : abs.endsWith(".gif") ? "image/gif" : abs.endsWith(".webp") ? "image/webp" : abs.endsWith(".svg") ? "image/svg+xml" : "image/jpeg");
     return `data:${mime};base64,${buf.toString("base64")}`;

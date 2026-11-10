@@ -123,6 +123,19 @@ export function extractImages(reply: string): { files: string[]; cleaned: string
   return { files, cleaned };
 }
 
+/** tts 工具的投递标记（2026-11-10）：[[audio: /uploads/tts-xxx.mp3]] → 本地路径，
+ * 标记行从文本剥离；[[audio_as_voice]] 一并剥离（那是通道指令不是正文） */
+const AUDIO_MD = /\[\[audio:\s*\/(?:uploads\/)?([\w.-]+\.mp3)\]\]/g;
+export function extractAudio(reply: string): { file: string | null; cleaned: string } {
+  let file: string | null = null;
+  let cleaned = reply.replace(AUDIO_MD, (_m, f) => {
+    if (!file) file = path.join(UPLOADS_DIR, f);
+    return "";
+  });
+  cleaned = cleaned.replace(/\[\[audio_as_voice\]\]\n?/g, "").trimEnd();
+  return { file, cleaned };
+}
+
 async function main() {
   const config = loadConfig();
   if (!config.wecom?.botId || !config.wecom?.secret) {
@@ -221,11 +234,13 @@ async function main() {
     }
     try {
       // 图先发（wecom 出图 2026-11-10）：agent 贴的 /uploads/ 图发成 image 消息
-      const { files, cleaned } = extractImages(reply);
+      const { files, cleaned: c2 } = extractImages(reply);
+      const { file: audio, cleaned } = extractAudio(c2);
       for (const f of files.slice(0, 4)) {
         await adapter.sendImage(msg.chatId, f);
       }
-      await adapter.sendMessage(msg.chatId, cleaned);
+      if (audio) await adapter.sendVoice(msg.chatId, audio);
+      if (cleaned.trim()) await adapter.sendMessage(msg.chatId, cleaned);
     } catch (e: any) {
       console.error("wecom 回复发送失败:", String(e?.message).slice(0, 150));
     }

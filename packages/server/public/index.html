@@ -138,6 +138,7 @@
     .img-chip .rm{position:absolute;top:-7px;right:-7px;background:#c26d64;color:#fff;border:none;border-radius:50%;width:18px;height:18px;font-size:11px;cursor:pointer;line-height:18px;padding:0}
     .img-thumbs{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px}
     .md-img{max-width:min(100%,480px);max-height:360px;border-radius:10px;border:1px solid var(--border);cursor:zoom-in;display:block;margin:6px 0}
+    .md-audio{width:min(100%,360px);margin:6px 0}
     .img-thumbs img{max-width:220px;max-height:200px;border-radius:10px;border:1px solid var(--border);cursor:zoom-in;display:block}
     .send-btn:hover{opacity:.9}
     .send-btn:disabled{opacity:.4;cursor:not-allowed}
@@ -649,6 +650,9 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
       s=s.replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>');
       // 图片语法（2026-11-02 增加图片展示）：/uploads 与 http(s) 链接；src 已被 esc，属性注入安全
       s=s.replace(/!\[([^\]\n]*)\]\((https?:\/\/[^)\s]+|\/uploads\/[^)\s]+)\)/g,(m0,alt,src)=>`<img class="md-img" src="${src}" alt="${alt}" loading="lazy" onclick="window.open(this.src)">`);
+      // tts 投递标记（2026-11-10）：[[audio: /uploads/xxx.mp3]] → 播放器；[[audio_as_voice]] 隐去（通道指令非正文）
+      s=s.replace(/\[\[audio:\s*(\/uploads\/[\w.-]+\.mp3)\]\]/g,(m0,src)=>`<audio class="md-audio" controls preload="none" src="${src}"></audio>`);
+      s=s.replace(/\[\[audio_as_voice\]\]/g,'');
       return s;
     }
     /* ── 轻量代码高亮（纯 JS 无依赖）：按语言族逐 token 着色，未知语言原样输出 ── */

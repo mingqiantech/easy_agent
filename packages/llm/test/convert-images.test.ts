@@ -1,10 +1,15 @@
 import { describe, it, expect } from "bun:test";
-import { toCoreMessages } from "../src/convert.js";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 
-const DIR = path.join(os.homedir(), ".easy-agent", "uploads");
+// 隔离目录（2026-11-10）：convert 改运行时解析后，本测试自设 env 自包含，
+// 不再被其它测试文件的 env 泄漏/真实 homedir 串扰
+const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "ea-convert-up-"));
+process.env.EASY_AGENT_UPLOADS_DIR = TMP;
+const { toCoreMessages } = await import("../src/convert.js");
+
+const DIR = TMP;
 const PNG = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
   "base64",

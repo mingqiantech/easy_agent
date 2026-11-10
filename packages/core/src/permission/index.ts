@@ -82,5 +82,6 @@ export const defaultRules: PermissionRule[] = [
   },
   { tool: "image_gen", default: "allow" },
   { tool: "show_image", default: "allow" },
+  { tool: "tts", default: "allow" },
   { tool: "extract", default: "allow" },
 ];
