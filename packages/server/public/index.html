@@ -288,7 +288,7 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
 </head>
 <body>
   <div class="sidebar" id="sidebar">
-    <div class="brand">⚡ Easy Agent <span style="font-size:10px;color:var(--muted);font-weight:400" title="构建水印：看不到 1104i 说明浏览器还在用旧缓存">1104i</span></div>
+    <div class="brand">⚡ Easy Agent <span style="font-size:10px;color:var(--muted);font-weight:400" title="构建水印：看不到 1104j 说明浏览器还在用旧缓存">1104j</span></div>
     <div class="agent-pick"><select id="agentSel" onchange="switchAgent()"></select></div>
     <div class="top-row">
       <div class="new-btn" onclick="goHome()" title="2026-11-02 起单会话滚动：日常对话都进首页会话">⌂ 首页会话</div>
@@ -1717,7 +1717,20 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
         const lbl=daily.length<=16||i%Math.ceil(daily.length/10)===0?`<text x="${x+bw/2}" y="${H-12}" font-size="9" fill="#8b93a3" text-anchor="middle">${d.day.slice(5)}</text>`:'';
         return `<g>${bars}${zone}</g>${lbl}`;
       }).join('')+`<text x="${W-pad}" y="14" font-size="10" fill="#8b93a3" text-anchor="end">峰值 ${fmtK(max)}</text>`
-        +'<g transform="translate(10,6)">'+[['未缓存输入','#5b7a8c'],['缓存读入','#a8c0d0'],['缓存写入','#c9b8d8'],['输出','#8a85a3']].map(([lab,c],ix)=>`<rect x="${ix*92}" y="0" width="8" height="8" rx="2" fill="${c}"/><text x="${ix*92+11}" y="8" font-size="9" fill="#8b93a3">${lab}</text>`).join('')+'</g>';
+        +'<g transform="translate(10,6)">'+[['未缓存输入','#5b7a8c'],['缓存读入','#a8c0d0'],['缓存写入','#c9b8d8'],['输出','#8a85a3']].map(([lab,c],ix)=>`<rect x="${ix*92}" y="0" width="8" height="8" rx="2" fill="${c}"/><text x="${ix*92+11}" y="8" font-size="9" fill="#8b93a3">${lab}</text>`).join('')+'</g>'
+        // 缓存命中率折线（2026-11-10 elf 点单）：叠加在柱图上层，绿实线带点；
+        // 只画真报了缓存的日子（denom>0），无缓存日断开不成误导连续线
+        +(()=>{
+          const pts=daily.map((d,i)=>{
+            const denom=d.promptCacheable||d.prompt;
+            if(!(denom>0)||!(d.cacheRead>0))return null;
+            return [pad+i*step+(step-bw/2), H-30-((d.cacheRead/denom)*(H-56))];
+          }).filter(Boolean);
+          if(!pts.length)return '';
+          const d=pts.map(p=>`<circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="2.5" fill="#5f9470"/>`).join('');
+          const path=pts.map((p,i)=>`${i?'L':'M'}${p[0].toFixed(1)} ${p[1].toFixed(1)}`).join(' ');
+          return `<path d="${path}" fill="none" stroke="#5f9470" stroke-width="1.5" opacity=".85"/>${d}`;
+        })();
     }
 
     (async function init(){

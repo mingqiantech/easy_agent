@@ -13,6 +13,10 @@ import { getStateDir } from "@easy-agent/config/path";
  */
 
 const GW = process.env.EASY_AGENT_GATEWAY ?? "http://127.0.0.1:4096";
+/** uploads 目录：与网关同机同盘（server/uploads.ts 同规则；运行时解析 env） */
+const UPLOADS_DIR =
+  process.env.EASY_AGENT_UPLOADS_DIR ??
+  path.join(process.env.HOME ?? "/home", ".easy-agent", "uploads");
 
 interface BridgeState {
   sessionId: string;
@@ -104,6 +108,19 @@ function refineText(text: string, uploadedPaths: string[], hasImages: boolean): 
     t = t.replace(new RegExp(`\n?已保存到 ${p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}（[^\n]*）`), "");
   if (hasImages) t = t.replace(/\n?\[用户发来图片\]/g, "");
   return t.trim();
+}
+
+/** 从回复文本中提取 /uploads/ 图片引用（2026-11-10 wecom 出图）：
+ * agent 用 show_image 贴的 ![alt](/uploads/xxx.png) → 文件路径；
+ * 发送时图先发（media），文本再把已发的图换成纯 alt 行，不重复贴 URL */
+const UPLOAD_MD = /!\[([^\]\n]*)\]\(\/(?:uploads\/)?((?:show-)?[\w.-]+\.(?:png|jpe?g|gif|webp|bmp))\)/g;
+export function extractImages(reply: string): { files: string[]; cleaned: string } {
+  const files: string[] = [];
+  const cleaned = reply.replace(UPLOAD_MD, (_m, alt, file) => {
+    files.push(path.join(UPLOADS_DIR, file));
+    return alt ? `[图: ${alt}]` : "";
+  });
+  return { files, cleaned };
 }
 
 async function main() {
@@ -203,7 +220,12 @@ async function main() {
       reply = `⚠️ 处理失败：${msgErr.slice(0, 200)}`;
     }
     try {
-      await adapter.sendMessage(msg.chatId, reply);
+      // 图先发（wecom 出图 2026-11-10）：agent 贴的 /uploads/ 图发成 image 消息
+      const { files, cleaned } = extractImages(reply);
+      for (const f of files.slice(0, 4)) {
+        await adapter.sendImage(msg.chatId, f);
+      }
+      await adapter.sendMessage(msg.chatId, cleaned);
     } catch (e: any) {
       console.error("wecom 回复发送失败:", String(e?.message).slice(0, 150));
     }
@@ -217,7 +239,10 @@ async function main() {
   );
 }
 
-main().catch((e) => {
-  console.error(e);
-  process.exit(1);
-});
+// 直接运行（非被 import）才启动桥接：测试 import 提取函数不触发 main
+if (import.meta.main) {
+  main().catch((e) => {
+    console.error(e);
+    process.exit(1);
+  });
+}

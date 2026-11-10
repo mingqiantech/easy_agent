@@ -209,4 +209,29 @@ export class WeComAdapter implements ChannelAdapter {
       markdown: { content: text },
     });
   }
+
+  /** 发图（2026-11-10 elf 点单）：本地文件 → uploadMedia → image 消息。
+   * 失败不抛（调用方继续发文本），返回是否成功。media_id 3 天有效即发即弃。 */
+  async sendImage(chatId: string, filePath: string): Promise<boolean> {
+    if (!this.client) return false;
+    try {
+      const buf = fs.readFileSync(filePath);
+      const r = await (this.client as any).uploadMedia(buf, {
+        type: "image",
+        filename: path.basename(filePath),
+      });
+      if (!r?.media_id) return false;
+      await this.client.sendMessage(chatId, {
+        msgtype: "image",
+        image: { media_id: r.media_id },
+      } as any);
+      return true;
+    } catch (e: any) {
+      console.warn(
+        `wecom sendImage 失败 (${path.basename(filePath)}):`,
+        String(e?.message).slice(0, 140),
+      );
+      return false;
+    }
+  }
 }
