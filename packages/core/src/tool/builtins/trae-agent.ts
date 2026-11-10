@@ -93,7 +93,7 @@ export function createTraeTool(cfg: TraeToolConfig = {}): Tool {
       const permArgs = [
         ...(cfg.yolo ? ["--yolo"] : []),
         ...(cfg.permissionMode ? ["--permission-mode", cfg.permissionMode] : []),
-        ...((input.allowedTools ?? cfg.allowedTools ?? []).flatMap((t) => ["--allowed-tool", t])),
+        ...((input.allowedTools ?? cfg.allowedTools ?? []).flatMap((t: string) => ["--allowed-tool", t])),
       ];
       const args = [
         ...baseArgs,

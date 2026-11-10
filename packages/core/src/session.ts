@@ -10,6 +10,17 @@ import type {
   ToolDefinition,
 } from "@easy-agent/schema/llm";
 import type { ToolRegistry } from "./tool/registry.js";
+
+/** 会话运行依赖的最小工具面（结构类型）：完整 ToolRegistry 满足它；
+ * server 的 agent 工具黑名单裁剪代理也满足（修 2026-11-10 类型遗留） */
+export interface ToolRegistryLike {
+  getDefinitions(): import("@easy-agent/schema/llm").ToolDefinition[];
+  execute(
+    name: string,
+    input: unknown,
+    ctx: any,
+  ): Promise<import("./tool/types.js").ToolResult>;
+}
 import { pruneToolResults, pruneWatermark } from "./context.js";
 import { WORKSPACE_PROMPT_HEADER } from "./memory/basic.js";
 
@@ -578,7 +589,10 @@ export class SessionManager {
     sessionId: string,
     userText: string | null,
     options?: {
-      toolRegistry?: ToolRegistry;
+      /** 工具注册表：完整 ToolRegistry 或裁剪视图（结构类型：会话只依赖
+       * getDefinitions/execute 两个成员；server 侧 agent 工具黑名单的
+       * 动态裁剪代理由此合法化，不再拿完整 registry 伪装） */
+      toolRegistry?: ToolRegistryLike;
       workDir?: string;
       thinking?: "off" | "low" | "medium" | "high";
       /** 每轮动态附加的 system 提示（注入在头部 system 块之后，前缀缓存友好） */
