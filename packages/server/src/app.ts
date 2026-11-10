@@ -505,6 +505,21 @@ export function createApp(deps: ServerDeps): Hono {
       const suffix = `\n监视职责：你负责监视 ${watchList.join(", ")}。需要了解对方时用 agent_status 工具查运行状态（在跑什么/卡在哪步/多久没动静）；发现异常（长时间卡在同一步、连续报错）主动向用户报告，不要无打扰地虚构对方状态。`;
       extraSystem = extraSystem ? extraSystem + suffix : suffix.trimStart();
     }
+    // 技能触发词注入（2026-11-10）：本轮用户文本命中该 agent 工作区技能触发词 →
+    // SKILL.md 正文直接入本轮 system（不再只靠模型自觉 read）；per-request 不落库
+    if (agent && typeof body.text === "string" && body.text.trim()) {
+      try {
+        const skill = await agent.memory.matchSkill(body.text);
+        if (skill) {
+          const body8k = skill.instructions.length > 8000 ? skill.instructions.slice(0, 8000) + "\n…（技能正文已截断，完整版用 read 工具读 " + skill.dir + "/SKILL.md）" : skill.instructions;
+          const suffix = `\n<skill name="${skill.name}">\n本轮命中技能「${skill.name}」，按以下指引执行：\n${body8k}\n</skill>`;
+          extraSystem = extraSystem ? extraSystem + suffix : suffix.trimStart();
+          console.log(`🎯 skill 命中: ${agent.name}/${skill.name}`);
+        }
+      } catch (e: any) {
+        console.warn("skill 匹配失败:", String(e?.message).slice(0, 120));
+      }
+    }
     const toolRegistry = dis.size
       ? {
           getDefinitions: () => deps.tools.getDefinitions().filter((d) => !dis.has(d.name)),

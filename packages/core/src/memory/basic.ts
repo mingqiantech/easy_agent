@@ -21,6 +21,16 @@ export class BasicMemory {
     return new SkillManager(path.join(this.workDir, "skills")).scan();
   }
 
+  /** 触发词命中的技能（2026-11-10 接通 match 死代码）：命中返回 Skill，调用方把
+   * SkillManager.buildSkillPrompt(skills) 追加进本轮 extraSystem——per-request 注入，
+   * 不落库不动 prompt 前缀缓存 */
+  async matchSkill(text: string) {
+    if (!text?.trim()) return null;
+    const sm = new SkillManager(path.join(this.workDir, "skills"));
+    await sm.scan();
+    return sm.match(text);
+  }
+
   async readMemory(): Promise<string> {
     try {
       return await fs.readFile(path.join(this.workDir, "MEMORY.md"), "utf-8");
