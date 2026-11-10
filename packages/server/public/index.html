@@ -289,7 +289,7 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
 </head>
 <body>
   <div class="sidebar" id="sidebar">
-    <div class="brand">⚡ Easy Agent <span style="font-size:10px;color:var(--muted);font-weight:400" title="构建水印：看不到 1110k 说明浏览器还在用旧缓存">1110k</span></div>
+    <div class="brand">⚡ Easy Agent <span style="font-size:10px;color:var(--muted);font-weight:400" title="构建水印：看不到 1110b 说明浏览器还在用旧缓存">1110b</span></div>
     <div class="agent-pick"><select id="agentSel" onchange="switchAgent()"></select></div>
     <div class="top-row">
       <div class="new-btn" onclick="goHome()" title="2026-11-02 起单会话滚动：日常对话都进首页会话">⌂ 首页会话</div>
@@ -1753,10 +1753,12 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
           const pts=daily.map((d,i)=>{
             const denom=d.promptCacheable||d.prompt;
             if(!(denom>0)||!(d.cacheRead>0))return null;
-            return [pad+i*step+(step-bw/2), H-30-((d.cacheRead/denom)*(H-56))];
+            const ratio=d.cacheRead/denom;
+            // x=柱列真实中心（与柱子 x+bw/2 同一表达式）：1104k~1110k 两次提交都没改到这行，本次补实
+            return [pad+i*step+step/2, H-30-(ratio*(H-56)), ratio];
           }).filter(Boolean);
           if(!pts.length)return '';
-          const d=pts.map(p=>`<circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="2.5" fill="#5f9470"/>`).join('');
+          const d=pts.map(p=>`<circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="2.5" fill="#5f9470"><title>缓存命中率 ${(p[2]*100).toFixed(1)}%</title></circle>`).join('');
           const path=pts.map((p,i)=>`${i?'L':'M'}${p[0].toFixed(1)} ${p[1].toFixed(1)}`).join(' ');
           return `<path d="${path}" fill="none" stroke="#5f9470" stroke-width="1.5" opacity=".85"/>${d}`;
         })();
