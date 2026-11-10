@@ -472,7 +472,9 @@ export class SessionManager {
     const db = getDatabase();
     const result = await compactHistory(this.llm, session.model, messages);
 
-    // 保留段（未折叠的最近消息，按原 id 识别）原地不动；被折叠的旧消息归档
+    // 保留段（未折叠的最近消息，按原 id 识别）原地不动；被折叠的旧消息归档。
+    // 滚动单摘要（2026-11-10）：旧 [对话摘要] system 消息一并归档出 LLM 上下文
+    //（UI 全量历史仍可见分隔条）；工作区头部等非摘要 system 永不动
     const keepIds = new Set(
       result.compacted
         .filter((m) => m.role !== "system")
@@ -480,7 +482,11 @@ export class SessionManager {
         .filter(Boolean),
     );
     const toArchive = (messages as any[]).filter(
-      (m) => m.role !== "system" && m.id && !keepIds.has(m.id),
+      (m) =>
+        m.id &&
+        !keepIds.has(m.id) &&
+        (m.role !== "system" ||
+          String(m.content ?? "").includes("[对话摘要]")),
     );
     const summary = result.compacted.findLast(
       (m) => m.role === "system" && m.content.includes("[对话摘要]"),

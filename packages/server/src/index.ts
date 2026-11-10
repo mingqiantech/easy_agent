@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import { statSync } from "node:fs";
 import path from "node:path";
 import { createApp } from "./app.js";
+import { purgeUploads } from "./uploads.js";
 import { LLMClient } from "@easy-agent/llm/client";
 import { SessionManager } from "@easy-agent/core/session";
 import { ToolRegistry } from "@easy-agent/core/tool/registry";
@@ -672,6 +673,23 @@ async function main() {
       };
       setTimeout(runArchive, 8000);
       setInterval(runArchive, 12 * 3600000);
+      // uploads 回收（引用感知，2026-11-10）：搭同一调度，无引用且超保留期才删
+      const purgeDays = Number(process.env.EASY_AGENT_UPLOADS_PURGE_DAYS ?? 14);
+      if (Number.isFinite(purgeDays) && purgeDays > 0) {
+        const runPurge = () => {
+          try {
+            const r = purgeUploads(purgeDays);
+            if (r.removed)
+              console.log(
+                `🧹 uploads 回收: ${r.removed} 个无引用文件 (${(r.freedBytes / 1024).toFixed(0)}KB，保留期 ${purgeDays} 天)`,
+              );
+          } catch (e: any) {
+            console.warn("🧹 uploads 回收失败:", String(e?.message).slice(0, 140));
+          }
+        };
+        setTimeout(runPurge, 20000);
+        setInterval(runPurge, 12 * 3600000);
+      }
     }
   }
 

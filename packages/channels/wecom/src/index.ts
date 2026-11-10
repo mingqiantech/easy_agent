@@ -151,12 +151,26 @@ async function main() {
     console.error("❌ wecom 未配置：~/.easy-agent/easy-agent.json → wecom.botId / secret");
     process.exit(1);
   }
-  // 网关在线检查（不在线直接退出，systemd 下轮重启再来）
-  try {
-    await gwFetch("/health");
-  } catch (e: any) {
-    console.error("❌ 网关不可达", GW, String(e?.message).slice(0, 120));
-    process.exit(1);
+  // 网关在线等待（2026-11-10 容错）：网关重启窗口内直接退要等 systemd 下一轮，
+  // 改为最多等 90s（每 3s 重试）；确实起不来再退出
+  {
+    const deadline = Date.now() + 90_000;
+    let up = false;
+    for (;;) {
+      try {
+        await gwFetch("/health");
+        up = true;
+        break;
+      } catch {
+        if (Date.now() >= deadline) break;
+        console.log("⏳ 网关未就绪，3s 后重试…");
+        await new Promise((r) => setTimeout(r, 3000));
+      }
+    }
+    if (!up) {
+      console.error("❌ 网关不可达（等待 90s 超时）", GW);
+      process.exit(1);
+    }
   }
 
   const defaultAgent = config.wecom.agentId || "default";

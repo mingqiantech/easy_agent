@@ -97,8 +97,13 @@ export async function compactHistory(
   model: string,
   messages: Message[],
 ): Promise<CompactionResult> {
-  // 分离系统消息
+  // 分离系统消息（2026-11-10 滚动单摘要）：旧 [对话摘要] 不再只增不并——
+  // 本次生成把旧摘要一并喂入，输出只留新摘要一条（旧摘要由调用方归档出 LLM 上下文）
   const systemMsgs = messages.filter((m) => m.role === "system");
+  const isSummaryMsg = (m: Message) =>
+    m.role === "system" && String(m.content ?? "").includes("[对话摘要]");
+  const oldSummaries = systemMsgs.filter(isSummaryMsg);
+  const baseSystem = systemMsgs.filter((m) => !isSummaryMsg(m));
   const conversation = messages.filter((m) => m.role !== "system");
 
   if (conversation.length <= KEEP_RECENT) {
@@ -109,8 +114,11 @@ export async function compactHistory(
   const toCompact = conversation.slice(0, -KEEP_RECENT);
   const toKeep = conversation.slice(-KEEP_RECENT);
 
-  // 用 LLM 生成摘要（清洗后的可消化文本）
-  const cleanLines = digestible(toCompact);
+  // 用 LLM 生成摘要（清洗后的可消化文本；旧摘要置前一并吸收，三段式约束自然限长）
+  const cleanLines = [
+    ...oldSummaries.map((m) => `[历史摘要（请融合进新摘要，勿丢弃其中硬信息）]\n${String(m.content).replace("[对话摘要]", "").trim()}`),
+    ...digestible(toCompact),
+  ];
   const compactText = cleanLines.join("\n\n");
 
   let summary = "";
@@ -130,7 +138,16 @@ export async function compactHistory(
       // 落入兕底
     }
   }
-  if (!summary) summary = extractiveDigest(toCompact);
+  if (!summary)
+    summary = [
+      extractiveDigest(toCompact),
+      ...oldSummaries.map((m) =>
+        String(m.content).replace("[对话摘要]", "").trim(),
+      ),
+    ]
+      .filter(Boolean)
+      .join("\n\n")
+      .slice(0, 1600); // 兜底也是滚动合并：旧摘要尾巴拼在后面，不丢硬信息
 
   // 构建压缩后的消息列表
   const summaryMessage: Message = {
@@ -139,7 +156,7 @@ export async function compactHistory(
   };
 
   return {
-    compacted: [...systemMsgs, summaryMessage, ...toKeep],
+    compacted: [...baseSystem, summaryMessage, ...toKeep],
     summary,
     removed: toCompact.length,
   };

@@ -2,6 +2,7 @@ import path from "node:path";
 import os from "node:os";
 import fs from "node:fs";
 import crypto from "node:crypto";
+import { getDatabase } from "@easy-agent/core/database";
 
 /**
  * 图片上传落盘（Web UI / API 共用）：
@@ -86,7 +87,6 @@ export function saveImageUploads(
     }
     const id = crypto.randomUUID();
     const file = `${id}.${sniffed.ext}`;
-    cleanupOldUploads();
     fs.writeFileSync(path.join(uploadsDir(), file), buf);
     refs.push({
       file,
@@ -132,7 +132,6 @@ export function offloadLongText(text: string): string {
   if (LONG_TEXT_MIN_CHARS <= 0 || text.length <= LONG_TEXT_MIN_CHARS)
     return text;
   fs.mkdirSync(uploadsDir(), { recursive: true });
-  cleanupOldUploads();
   const id = crypto.randomUUID();
   const abs = path.join(uploadsDir(), `longtext-${id}.txt`);
   fs.writeFileSync(abs, text, "utf-8");
@@ -144,17 +143,51 @@ export function offloadLongText(text: string): string {
   ].join("\n");
 }
 
-/** 懒清理：uploads 目录只增不减，写入新文件时顺手扫掉 30 天前的旧附件 */
-function cleanupOldUploads(): void {
+/** uploads 回收（引用感知，2026-11-10 重写）：旧版“写入时懒清 30 天”不查引用，
+ * 会把仍在消息里引用的附件误删（断链/OCR 丢文件）。现改为：
+ * 扫 messages + messages_archive 的 content/metadata 拼成引用文本，
+ * 文件名不出现在其中且 mtime 超保留期的才删（保留期可 EASY_AGENT_UPLOADS_PURGE_DAYS，0=关）。
+ * 子串匹配涵盖三种引用形态：/uploads/<名>、metadata.file=<名>、长文本绝对路径 /<...>/<名>。
+ * 调用：网关启动 20s 后 + 每 12h（搭时间归档同一调度）。
+ */
+export function purgeUploads(retentionDays = 14): {
+  removed: number;
+  freedBytes: number;
+} {
+  if (retentionDays <= 0) return { removed: 0, freedBytes: 0 };
+  let blob = "";
   try {
-    const cutoff = Date.now() - 30 * 86400_000;
+    const db = getDatabase();
+    const rows = db
+      .prepare(
+        `SELECT content, metadata FROM messages
+         UNION ALL SELECT content, metadata FROM messages_archive`,
+      )
+      .all() as any[];
+    blob = rows.map((r) => `${r.content ?? ""}\n${r.metadata ?? ""}`).join("\n");
+  } catch (e: any) {
+    // 数据库不可用 → 宁可本次不清，不可误删
+    console.warn("uploads 清理跳过（引用扫描失败）:", String(e?.message).slice(0, 120));
+    return { removed: 0, freedBytes: 0 };
+  }
+  let removed = 0;
+  let freedBytes = 0;
+  const cutoff = Date.now() - retentionDays * 86400_000;
+  try {
     for (const f of fs.readdirSync(uploadsDir())) {
+      if (f.length >= 4 && blob.includes(f)) continue; // 被任意消息引用 → 永久保留
       const p = path.join(uploadsDir(), f);
       try {
-        if (fs.statSync(p).mtimeMs < cutoff) fs.rmSync(p, { force: true });
+        const st = fs.statSync(p);
+        if (st.isFile() && st.mtimeMs < cutoff) {
+          freedBytes += st.size;
+          fs.rmSync(p, { force: true });
+          removed++;
+        }
       } catch {}
     }
   } catch {}
+  return { removed, freedBytes };
 }
 
 /** 安全解析 uploads 文件名（防目录穿越）；非法返回 null */

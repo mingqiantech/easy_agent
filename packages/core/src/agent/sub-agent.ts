@@ -94,15 +94,19 @@ export class SubAgentManager {
 
         if (llmResponse.usage) {
           totalTokens += llmResponse.usage.totalTokens ?? 0;
+          // 缓存列一并记账（2026-11-10 修统计缺口）：subagent 用量此前不报
+          // cached_read/write → 📊 页缓存折线对子任务失真（显示为 0）
           db.prepare(
-            `INSERT INTO token_usage (session_id, model, prompt_tokens, completion_tokens, total_tokens, cost_usd, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            `INSERT INTO token_usage (session_id, model, prompt_tokens, completion_tokens, total_tokens, cached_read_tokens, cached_write_tokens, cost_usd, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           ).run(
             sessionId,
             model,
             llmResponse.usage.promptTokens ?? 0,
             llmResponse.usage.completionTokens ?? 0,
             llmResponse.usage.totalTokens ?? 0,
+            llmResponse.usage.cacheReadTokens ?? 0,
+            llmResponse.usage.cacheWriteTokens ?? 0,
             estimateCostUsd(model, llmResponse.usage) ?? null,
             Date.now(),
           );

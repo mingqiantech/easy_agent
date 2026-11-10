@@ -11,9 +11,14 @@ describe("compactIfNeeded 归档（不删除历史）", () => {
     process.env.EASY_AGENT_COMPACT_MAX_TOKENS = "8000";
     getDatabase(":memory:");
     let n = 0;
+    let lastPrompt = "";
     const fakeLlm: any = {
-      generate: async () => ({ content: `这是第 ${++n} 次压缩摘要` }),
+      generate: async (req: any) => {
+        lastPrompt = String(req.messages?.[0]?.content ?? "");
+        return { content: `这是第 ${++n} 次压缩摘要，包含足够的长度以通过质量闸门检查。` };
+      },
     };
+    (globalThis as any).__eaLastPrompt = () => lastPrompt;
     sessions = new SessionManager(fakeLlm, { defaultModel: "test/model" });
   });
 
@@ -54,7 +59,7 @@ describe("compactIfNeeded 归档（不删除历史）", () => {
     expect(old[old.length - 1].role).toBeTruthy();
   });
 
-  it("二次压缩：新摘要追加，旧摘要保留，历史继续完整", async () => {
+   it("二次压缩：滚动单摘要——新摘要吸收旧摘要，旧摘要归档出 LLM 上下文，历史仍完整", async () => {
     const s = sessions.list(10)[0];
     const sid = s.id;
     for (let i = 0; i < 60; i++) {
@@ -73,12 +78,19 @@ describe("compactIfNeeded 归档（不删除历史）", () => {
     const summaries = activeAfter.filter(
       (m) => m.role === "system" && m.content.includes("[对话摘要]"),
     );
-    expect(summaries.length).toBe(2); // 两次摘要都在（内容不同）
+    // 滚动单摘要（2026-11-10 改）：LLM 上下文只保留本次新摘要一条
+    expect(summaries.length).toBe(1);
     expect(activeAfter.length).toBeLessThan(activeBefore);
+    // 滚动吸收：本次压缩的输入里必须带着历史摘要标记（fake llm 捕获请求原文）
+    expect((globalThis as any).__eaLastPrompt()).toContain("历史摘要");
 
-    // 全量历史只增不减（新增 1 条摘要，其余从 active 挪到 archive）
+    // 全量历史只增不减：旧摘要没被销毁，只是挪进归档（UI 分隔条仍在）
     const fullAfter = sessions.getFullMessages(sid);
     expect(fullAfter.length).toBe(fullBefore + 1);
+    const archivedSummaries = fullAfter.filter(
+      (m: any) => m.archived && m.role === "system" && m.content.includes("[对话摘要]"),
+    );
+    expect(archivedSummaries.length).toBe(1); // 第 1 次的摘要在归档里
   });
 });
 
