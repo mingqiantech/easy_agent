@@ -224,6 +224,20 @@ export const ConfigSchema = z.object({
     .optional(),
   /** 图片生成模型（ref 或 alias） */
   imageGenModel: z.string().optional(),
+  /** 网关访问控制（2026-11-10 elf 点单"增加密钥类"）：网关监听全网卡（WSL2 NAT 下
+   * Windows 浏览器靠本机 IP 访它，环回绑死会断），局域网共享必须配这把 token：
+   * Bearer 头或 ea_token cookie 任一匹配才放行（/health 豁免免监控误报）；
+   * 未配 = 不鉴权（启动日志会⚠️提醒）。设置：ea-config auth token <密钥> */
+  gateway: z
+    .object({
+      token: z
+        .string()
+        .min(6)
+        .max(128)
+        .regex(/^[\w.-]+$/, "token 只允许字母数字 . - _")
+        .optional(),
+    })
+    .optional(),
   /** 语音合成（2026-11-10 elf 点单）：OpenAI 兼容 /audio/speech 接口（Ark/DashScope 兼容模式等）。
    * apiKey 支持 ${ENV_VAR} 引用（复用 providers 同款插值：loader 只处理 providers，
    * tts 节插值在接线处做）；不配或空→tts 工具不注册，零开销 */

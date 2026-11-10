@@ -23,9 +23,15 @@ interface BridgeState {
   agentId: string;
 }
 
+/** 网关访问令牌（2026-11-10）：main() 从 env/config 解析后注入；网关开鉴权时桥接免 401 */
+let GW_TOKEN = String();
+
 async function gwFetch(path: string, init?: RequestInit): Promise<any> {
   const res = await fetch(GW + path, {
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      ...(GW_TOKEN ? { Authorization: `Bearer ${GW_TOKEN}` } : {}),
+    },
     ...init,
   });
   const data = await res.json().catch(() => ({}));
@@ -140,6 +146,7 @@ export function extractAudio(reply: string): { file: string | null; cleaned: str
 
 async function main() {
   const config = loadConfig();
+  GW_TOKEN = process.env.EASY_AGENT_TOKEN ?? config.gateway?.token ?? "";
   if (!config.wecom?.botId || !config.wecom?.secret) {
     console.error("❌ wecom 未配置：~/.easy-agent/easy-agent.json → wecom.botId / secret");
     process.exit(1);

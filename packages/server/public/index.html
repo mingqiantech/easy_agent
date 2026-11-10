@@ -431,6 +431,31 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
 
   <script>
     const API='';
+    /* 访问令牌（2026-11-10）：网关配了 gateway.token 时 /api /uploads 需鉴权。
+       包装 fetch：带 Bearer（localStorage）；401 → 弹框录入一次并重试；
+       服务端 Bearer 验证通过会种 ea_token cookie，EventSource/媒体请求靠它通行 */
+    (function(){
+      const of=window.fetch.bind(window);
+      window.fetch=async(u,o)=>{
+        o=o||{};
+        const h=new Headers(o.headers||{});
+        const t=localStorage.getItem('ea.token')||'';
+        if(t&&!h.has('Authorization'))h.set('Authorization','Bearer '+t);
+        o={...o,headers:h};
+        let r=await of(u,o);
+        if(r.status===401){
+          // 未带令牌或令牌错 → 弹框录入（错令牌重弹覆盖），成功则重试一次
+          const tok=prompt('此网关已启用访问令牌（服务端配置：ea-config auth token <密钥>）\n请输入令牌：');
+          if(tok&&tok.trim()){
+            localStorage.setItem('ea.token',tok.trim());
+            h.set('Authorization','Bearer '+tok.trim());
+            r=await of(u,{...o,headers:h});
+            if(r.status===401)localStorage.removeItem('ea.token');
+          }
+        }
+        return r;
+      };
+    })();
     let sid=null, agent='default', topoTimer=null, usageTimer=null, models=[];  let es=null, esSid=null, live=null;
     let liveRaw='', liveRT=null;   /* 流式增量 md 渲染：原始文本缓冲 + 节流定时器 */
     let hlTerm='';                 /* 搜索结果跳转后的一次性高亮词 */

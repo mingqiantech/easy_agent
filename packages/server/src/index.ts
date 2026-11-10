@@ -685,13 +685,15 @@ async function main() {
     process.exit(1);
   }
 
-  // 监听地址（安全默认 2026-11-10）：旧版 serve() 未指定 hostname → 绑 *，
-  // 局域网内任意设备无鉴权读写会话/记忆。要局域网访问显式设 EASY_AGENT_HOST=0.0.0.0
-  const host = process.env.EASY_AGENT_HOST ?? "127.0.0.1";
+  // 监听地址：默认全网卡（Windows 宿主浏览器经 WSL2 NAT 访的是本机 IP，环回绑死会断连——
+  // 2026-11-10 实测教训）；安全靠 gateway.token 鉴权层保障（ea-config auth token）。
+  // EASY_AGENT_HOST=127.0.0.1 可供纯本机部署收紧。
+  const host = process.env.EASY_AGENT_HOST ?? "0.0.0.0";
   serve({ fetch: app.fetch, port, hostname: host });
+  const authed = !!(process.env.EASY_AGENT_TOKEN || config.gateway?.token);
   console.log(
     `Gateway: http://${host === "0.0.0.0" ? "<本机IP>" : host}:${port}` +
-      (host === "127.0.0.1" ? "（仅本机；局域网访问设 EASY_AGENT_HOST=0.0.0.0）" : "⚠️ 全网卡监听，网关无鉴权注意风险"),
+      (authed ? "（已启用 token 鉴权 ✓）" : "⚠️ 未设 gateway.token，局域网内任意设备可访问——建议：ea-config auth token <密钥>"),
   );
 }
 

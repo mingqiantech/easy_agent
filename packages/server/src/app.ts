@@ -23,7 +23,7 @@ import {
   resolveUploadFile,
   ocrImage,
   offloadLongText,
-  UPLOADS_DIR,
+  uploadsDir,
 } from "./uploads.js";
 import path from "node:path";
 import os from "node:os";
@@ -95,6 +95,28 @@ export function createApp(deps: ServerDeps): Hono {
   const app = new Hono();
   app.use("*", cors());
   app.use("*", logger());
+
+  // 访问令牌鉴权（2026-11-10 elf 点单）：网关监听全网卡，局域网共享必须配 token。
+  // 范围：/api/* 与 /uploads/*；/static、/、/health 公开（登录前 UI 要能加载）。
+  // 凭证：Authorization: Bearer <token>（fetch 包装注入）或 cookie ea_token=<token>
+  //（服务端认证成功后种下 → <img>/<audio> 子请求自动携带）。
+  // env EASY_AGENT_TOKEN 优先于配置（密钥不落 json 的用法）。
+  const gwToken = () =>
+    process.env.EASY_AGENT_TOKEN || deps.config?.gateway?.token || "";
+  app.use("*", async (c, next) => {
+    const p = c.req.path;
+    if (!(p.startsWith("/api/") || p.startsWith("/uploads/"))) return next();
+    const tok = gwToken();
+    if (!tok) return next();
+    const hdr = c.req.header("authorization") ?? "";
+    const cookie = (c.req.header("cookie") ?? "").match(/(?:^|;\s*)ea_token=([^;]+)/)?.[1];
+    if (hdr !== `Bearer ${tok}` && cookie !== tok)
+      return c.json({ error: "unauthorized：缺少或错误的访问令牌", code: "UNAUTHORIZED" }, 401);
+    await next();
+    // Bearer 验证通过 → 种 cookie，后续媒体子请求（<img src=/uploads>）免提示
+    if (hdr === `Bearer ${tok}` && cookie !== tok)
+      c.res.headers.append("Set-Cookie", `ea_token=${tok}; Path=/; SameSite=Lax`);
+  });
 
   // UI 单文件迭代快，no-cache 避免改动被浏览器强缓存吞掉（仍支持 ETag/304 协商缓存）
   app.use("/static/*", async (c, next) => {
@@ -465,7 +487,7 @@ export function createApp(deps: ServerDeps): Hono {
       const vision = /vl|vision|qvq|omni|minimax|gemini/i.test(modelRef);
       if (!vision) {
         for (const ref of imageRefs) {
-          const txt = await ocrImage(path.join(UPLOADS_DIR, ref.file));
+          const txt = await ocrImage(path.join(uploadsDir(), ref.file));
           if (txt) {
             ref.ocr = txt;
             body.text = `${String(body.text ?? "").trim()}\n\n【图片 ${ref.name} OCR 识别内容】\n${txt}`.trim();

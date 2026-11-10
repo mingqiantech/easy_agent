@@ -9,6 +9,19 @@ set -euo pipefail
 CFG="${EASY_AGENT_CONFIG:-$HOME/.easy-agent/easy-agent.json}"
 GW="${EASY_AGENT_GATEWAY:-http://127.0.0.1:4096}"
 
+# 网关访问令牌（2026-11-10）：配了 gateway.token 时所有网关 API 调用自动带 Bearer 头
+gwc() {
+  local tok="${EASY_AGENT_TOKEN:-}"
+  if [[ -z $tok ]]; then
+    tok="$(jq -r '.gateway.token // empty' "$CFG" 2>/dev/null)"
+  fi
+  if [[ -n $tok ]]; then
+    command curl -sS -H "Authorization: Bearer $tok" "${@}"
+  else
+    command curl -sS "${@}"
+  fi
+}
+
 usage() {
   cat <<'EOF'
 用法: ea-config <命令> ... [--restart]
@@ -34,6 +47,11 @@ usage() {
   ea-config tts voice    <voice>               # 缺省 alloy（中文服务常需改）
   ea-config tts speed    <0.5-2.0>
   ea-config tts show / off
+
+■ auth（网关访问令牌；网关默认监听全网卡，局域网共享必配）
+  ea-config auth token  <<6-128位密钥>  # /api /uploads 需凭证；/health 豁免
+  ea-config auth show / off
+  # 或 env EASY_AGENT_TOKEN 注入（systemd unit Environment=，密钥不落 json；env 优先）
 
 ■ wecom（编辑配置文件）
   ea-config wecom default-agent <name>
@@ -84,12 +102,12 @@ do_restart() { # gateway|wecom|both
     both)    systemctl --user restart easy-agent.service easy-agent-wecom.service ;;
   esac
   sleep 3
-  curl -s "$GW/health" >/dev/null && echo "🟢 网关健康" || echo "🔴 网关未响应！journalctl --user -u easy-agent.service -n 30"
+  gwc "$GW/health" >/dev/null && echo "🟢 网关健康" || echo "🔴 网关未响应！journalctl --user -u easy-agent.service -n 30"
 }
 
 patch_agent() { # <name> <json-body>
   local code
-  code=$(curl -s -o /tmp/ea-config-resp.json -w "%{http_code}" -X PATCH "$GW/api/agents/$1" \
+  code=$(gwc -o /tmp/ea-config-resp.json -w "%{http_code}" -X PATCH "$GW/api/agents/$1" \
     -H 'Content-Type: application/json' -d "$2")
   [[ $code == 200 ]] || { echo "❌ PATCH $1 失败 HTTP $code: $(cat /tmp/ea-config-resp.json)"; exit 1; }
   echo "✅ $1 已更新（即时生效，已写回 $CFG）"
@@ -130,12 +148,12 @@ case "$cmd" in
       thinking) patch_agent "$name" "{\"thinking\":\"$val\"}" ;;
       tools-off)
         IFS=',' read -ra ts <<< "$val"
-        cur=$(curl -s "$GW/api/agents" | jq -r --arg n "$name" '.agents[]|select(.name==$n).toolsDisable[]?')
+        cur=$(gwc "$GW/api/agents" | jq -r --arg n "$name" '.agents[]|select(.name==$n).toolsDisable[]?')
         merged=$( { [[ -n ${cur:-} ]] && printf '%s\n' $cur; printf '%s\n' "${ts[@]}"; } | grep -v '^$' | jq -Rn '[inputs]|unique')
         patch_agent "$name" "{\"toolsDisable\":$merged}" ;;
       tools-on)
         IFS=',' read -ra ts <<< "$val"
-        cur=$(curl -s "$GW/api/agents" | jq -r --arg n "$name" '.agents[]|select(.name==$n).toolsDisable[]?')
+        cur=$(gwc "$GW/api/agents" | jq -r --arg n "$name" '.agents[]|select(.name==$n).toolsDisable[]?')
         merged=$( { [[ -n ${cur:-} ]] && printf '%s\n' $cur; } | { grep -vxF "${ts[@]}" || true; } | jq -Rn '[inputs]' )
         patch_agent "$name" "{\"toolsDisable\":$merged}" ;;
       related) patch_agent "$name" "{\"relatedAgents\":$(jq -R 'split(",")' <<< "$val")}" ;;
@@ -143,7 +161,7 @@ case "$cmd" in
       hint)
         if [[ $val == "-" ]]; then patch_agent "$name" '{"extraPrompt":null}'
         else patch_agent "$name" "{\"extraPrompt\":$(jq -Rs . <<< "$val")}"; fi ;;
-      list) curl -s "$GW/api/agents" | jq '.agents' ;;
+      list) gwc "$GW/api/agents" | jq '.agents' ;;
       *) usage; exit 1 ;;
     esac ;;
   websearch)
@@ -173,6 +191,22 @@ case "$cmd" in
       off)     edit_cfg 'del(.tts)' ;;
       *) usage; exit 1 ;;
     esac; do_restart gateway ;;
+  auth)
+    sub="${1:-}"; val="${2:-}"
+    case "$sub" in
+      token) edit_cfg '.gateway = ((.gateway // {}) + {token: $v})' --arg v "$val"; do_restart gateway ;;
+      off)   edit_cfg 'del(.gateway.token)'; do_restart gateway ;;
+      show)
+        tok="$(jq -r '.gateway.token // empty' "$CFG" 2>/dev/null)"
+        if [[ -n "${EASY_AGENT_TOKEN:-}" ]]; then
+          echo "✅ 令牌经 env EASY_AGENT_TOKEN 注入（网关运行时 env 优先于配置文件）"
+        elif [[ -n "$tok" ]]; then
+          echo "✅ 已启用：***（完整值：$CFG → gateway.token）"
+        else
+          echo "⚠️ 未启用：网关监听全网卡，局域网内任意设备可读写会话/记忆。设置：ea-config auth token <密钥>"
+        fi ;;
+      *) usage; exit 1 ;;
+    esac ;;
   wecom)
     sub="${1:-}"; a2="${2:-}"; a3="${3:-}"
     case "$sub" in
@@ -209,7 +243,7 @@ case "$cmd" in
       st=$(systemctl --user is-active "$s.service" 2>/dev/null || true)
       [[ $st == active ]] && ok "$s active" || bad "$s $st"
     done
-    H=$(curl -s --max-time 5 "$GW/health" || true)
+    H=$(gwc --max-time 5 "$GW/health" || true)
     [[ -n $H ]] && ok "网关响应（uptime $(jq -r '.uptime' <<< "$H")s）" || bad "网关 /health 不可达"
 
     echo "L2 数据"
@@ -220,7 +254,7 @@ case "$cmd" in
       (( wal < 20*1048576 )) && ok "WAL $(numfmt --to=iec "$wal" 2>/dev/null || echo "$wal")" || warn "WAL 过大 $((wal/1048576))MB（重启后应 checkpoint）"
       stale=$(sqlite3 "$DB" "SELECT COUNT(*) FROM active_turns WHERE last_step_at < (strftime('%s','now')*1000 - 15*60000);" 2>/dev/null || echo 0)
       (( stale == 0 )) && ok "无僵尸轮次台账" || warn "发现 $stale 个 >15min 未推进的 active_turns（重启会自愉续跑）"
-      nb=$(curl -s --max-time 5 "$GW/api/backup" 2>/dev/null || true)
+      nb=$(gwc --max-time 5 "$GW/api/backup" 2>/dev/null || true)
       last=$(jq -r '.backups[0].name // empty' <<< "$nb" 2>/dev/null)
       if [[ -n $last ]]; then
         age_h=$(( ( $(date +%s)*1000 - $(jq -r '.backups[0].createdAt // 0' <<< "$nb" | cut -d. -f1) ) / 3600000 + 1 ))
@@ -261,7 +295,7 @@ case "$cmd" in
     else warn "wecom 无近期认证成功日志"; fi
     pinned=$(jq -r '.wecom.chatAgents // {} | to_entries[].value' "$CFG" 2>/dev/null)
     if [[ -n $pinned ]]; then
-      agents_json=$(curl -s --max-time 5 "$GW/api/agents" || true)
+      agents_json=$(gwc --max-time 5 "$GW/api/agents" || true)
       for pa in $pinned; do
         jq -e --arg n "$pa" '.agents[]|select(.name==$n)' <<< "$agents_json" >/dev/null 2>&1 && ok "固定会话 agent $pa 存在" || bad "固定会话指向不存在的 agent: $pa"
       done
@@ -282,7 +316,7 @@ case "$cmd" in
           else { console.log("  ❌ websearch 实测无结果: " + JSON.stringify(o).slice(0,120)); process.exitCode = 1; }
         ' 2>/dev/null) || { echo "  ❌ websearch 实测失败"; exit_err=$((exit_err+1)); }
       fi
-      edges=$(curl -s --max-time 5 "$GW/api/topology" | jq '.edges | length' 2>/dev/null || true)
+      edges=$(gwc --max-time 5 "$GW/api/topology" | jq '.edges | length' 2>/dev/null || true)
       [[ -n $edges ]] && ok "拓扑可读（$edges 条边）" || bad "拓扑接口不可读"
     fi
 
@@ -292,7 +326,7 @@ case "$cmd" in
   cron)
     sub="${1:-list}"; shift || true
     case "$sub" in
-      list) curl -s "$GW/api/cron" | jq '.jobs[]|{id,name,description,schedule:.schedule.kind,everyH:((.schedule.everyMs//0)/3600000),payloadAgent:.payload.agent,enabled,runCount,lastRunAt:(if (.lastRunAt//0)>0 then (.lastRunAt/1000|strftime("%m-%d %H:%M")) else "从未" end)}' ;;
+      list) gwc "$GW/api/cron" | jq '.jobs[]|{id,name,description,schedule:.schedule.kind,everyH:((.schedule.everyMs//0)/3600000),payloadAgent:.payload.agent,enabled,runCount,lastRunAt:(if (.lastRunAt//0)>0 then (.lastRunAt/1000|strftime("%m-%d %H:%M")) else "从未" end)}' ;;
       watch)
         ag="${1:-}"; targets="${2:-}"; hrs="${3:-2}"
         [[ -n $ag && -n $targets ]] || { usage; exit 1; }
@@ -303,11 +337,11 @@ case "$cmd" in
            payload:{kind:"agentTurn", agent:$ag,
              message:("【定时巡检】用 agent_status 查看 agent：" + $t + "。仅异常（卡在同一步>10min/连续 error/长时间 busy 不推进）才详细说明；正常则一行 ✅ 概要。")}}
           ')
-        curl -s -X POST "$GW/api/cron" -H "Content-Type: application/json" -d "$BODY" | jq -r '"✅ 已创建 id=" + (.id // "FAIL")'
+        gwc -X POST "$GW/api/cron" -H "Content-Type: application/json" -d "$BODY" | jq -r '"✅ 已创建 id=" + (.id // "FAIL")'
         ;;
       run)
         key="${1:-}"
-        id=$(curl -s "$GW/api/cron" | jq -r --arg k "$key" '.jobs[]|select(.name==$k or .id==$k).id' | head -1)
+        id=$(gwc "$GW/api/cron" | jq -r --arg k "$key" '.jobs[]|select(.name==$k or .id==$k).id' | head -1)
         [[ -n $id ]] || { echo "❌ 找不到任务 $key"; exit 1; }
         sqlite3 "$(dirname "$CFG")/agent.db" "UPDATE cron_jobs SET next_run_at=$(date +%s%3N), enabled=1 WHERE id='$id';" \
           && echo "▶️ $key 已置为到期，≤60s 内调度器执行（会话标题 [cron] $key；结果：ea-config cron last $key）"
@@ -320,17 +354,17 @@ case "$cmd" in
         ;;
       rm)
         key="${1:-}"
-        id=$(curl -s "$GW/api/cron" | jq -r --arg k "$key" '.jobs[]|select(.name==$k or .id==$k).id' | head -1)
+        id=$(gwc "$GW/api/cron" | jq -r --arg k "$key" '.jobs[]|select(.name==$k or .id==$k).id' | head -1)
         [[ -n $id ]] || { echo "❌ 找不到任务 $key"; exit 1; }
-        curl -s -X DELETE "$GW/api/cron/$id" >/dev/null && echo "🗑 已删除 $key ($id)" ;;
+        gwc -X DELETE "$GW/api/cron/$id" >/dev/null && echo "🗑 已删除 $key ($id)" ;;
       *) usage; exit 1 ;;
     esac ;;
   restart)
     RESTART=1; do_restart "${1:-both}" ;;
   know)
     case "${1:-}" in
-      reindex) curl -s -X POST "$GW/api/reindex" --max-time 120 | jq . ;;
-      stats)   curl -s "$GW/api/retrieval" | jq '{entries, embedding: .embedding.model, reindexMin: .reindexIntervalMinutes, dreaming: .dreaming.enabled}' ;;
+      reindex) gwc -X POST "$GW/api/reindex" --max-time 120 | jq . ;;
+      stats)   gwc "$GW/api/retrieval" | jq '{entries, embedding: .embedding.model, reindexMin: .reindexIntervalMinutes, dreaming: .dreaming.enabled}' ;;
       *) usage; exit 1 ;;
     esac ;;
   cron-install)

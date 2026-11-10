@@ -8,9 +8,13 @@ import crypto from "node:crypto";
  * - base64 → ~/.easy-agent/uploads/<id>.<ext>，DB 只存文件引用（metadata.images）
  * - 与 llm/convert.ts 的 UPLOADS_DIR 解析保持一致
  */
-export const UPLOADS_DIR =
-  process.env.EASY_AGENT_UPLOADS_DIR ??
-  path.join(os.homedir(), ".easy-agent", "uploads");
+/** 运行时解析（2026-11-10 根治模块级常量冻结 env 的串扰坑，同 convert.ts） */
+export function uploadsDir(): string {
+  return (
+    process.env.EASY_AGENT_UPLOADS_DIR ??
+    path.join(os.homedir(), ".easy-agent", "uploads")
+  );
+}
 
 const ALLOWED_EXT: Record<string, string> = {
   png: "image/png",
@@ -51,7 +55,7 @@ export function saveImageUploads(
     errors.push(`单条消息最多 ${MAX_IMAGES_PER_MESSAGE} 张图片`);
     return { refs, errors };
   }
-  fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+  fs.mkdirSync(uploadsDir(), { recursive: true });
   for (const [i, img] of images.entries()) {
     const raw = String((img as any)?.dataBase64 ?? "");
     const declaredMime = String((img as any)?.mimeType ?? "");
@@ -83,7 +87,7 @@ export function saveImageUploads(
     const id = crypto.randomUUID();
     const file = `${id}.${sniffed.ext}`;
     cleanupOldUploads();
-    fs.writeFileSync(path.join(UPLOADS_DIR, file), buf);
+    fs.writeFileSync(path.join(uploadsDir(), file), buf);
     refs.push({
       file,
       mimeType: sniffed.mime,
@@ -127,10 +131,10 @@ const LONG_TEXT_PREVIEW_CHARS = 400;
 export function offloadLongText(text: string): string {
   if (LONG_TEXT_MIN_CHARS <= 0 || text.length <= LONG_TEXT_MIN_CHARS)
     return text;
-  fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+  fs.mkdirSync(uploadsDir(), { recursive: true });
   cleanupOldUploads();
   const id = crypto.randomUUID();
-  const abs = path.join(UPLOADS_DIR, `longtext-${id}.txt`);
+  const abs = path.join(uploadsDir(), `longtext-${id}.txt`);
   fs.writeFileSync(abs, text, "utf-8");
   return [
     `[长文本已存文件：${abs}（共 ${text.length} 字符）。需要细节用 read 工具按 offset/limit 分段读取，不要整份复述。]`,
@@ -144,8 +148,8 @@ export function offloadLongText(text: string): string {
 function cleanupOldUploads(): void {
   try {
     const cutoff = Date.now() - 30 * 86400_000;
-    for (const f of fs.readdirSync(UPLOADS_DIR)) {
-      const p = path.join(UPLOADS_DIR, f);
+    for (const f of fs.readdirSync(uploadsDir())) {
+      const p = path.join(uploadsDir(), f);
       try {
         if (fs.statSync(p).mtimeMs < cutoff) fs.rmSync(p, { force: true });
       } catch {}
@@ -158,7 +162,7 @@ export function resolveUploadFile(name: string): string | null {
   const base = path.basename(name);
   const ext = base.split(".").pop() ?? "";
   if (!ALLOWED_EXT[ext] && !SERVED_ONLY_EXT[ext]) return null;
-  const abs = path.join(UPLOADS_DIR, base);
+  const abs = path.join(uploadsDir(), base);
   return fs.existsSync(abs) ? abs : null;
 }
 
