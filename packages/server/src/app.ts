@@ -99,7 +99,13 @@ export function createApp(deps: ServerDeps): Hono {
   let budgetAlerted = "";
   const permMgr = new PermissionManager(defaultRules);
   app.use("*", cors());
-  app.use("*", logger());
+  // 降噪 logger（2026-11-11）：wecom 桥接/UI 的 outbox/approvals 每 5-10s 轮询，
+  // 全量进 journal 一天刷 1-2 万行把用户日志顶满 → 这两个 GET 不记，其余照旧
+  const QUIET_POLL = /^\/api\/(outbox|approvals)(\/|$|\?)/;
+  app.use("*", async (c, next) => {
+    if (c.req.method === "GET" && QUIET_POLL.test(c.req.path)) { await next(); return; }
+    return logger()(c, next);
+  });
 
   // 访问令牌鉴权（2026-11-10 elf 点单）：网关监听全网卡，局域网共享必须配 token。
   // 范围：/api/* 与 /uploads/*；/static、/、/health 公开（登录前 UI 要能加载）。
