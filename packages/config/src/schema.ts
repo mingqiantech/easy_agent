@@ -176,6 +176,20 @@ export const ConfigSchema = z.object({
   approvals: z
     .object({ enabled: z.boolean().default(false) })
     .optional(),
+  /** 检索式记忆（2026-11-11）：每轮回答前按用户问题从记忆/会话索引捞相关片段，
+   *  作临时 system 追加在请求末尾（不落库、不动缓存前缀）。默认关——
+   *  开启需 bge 向量服务在线；ea-config recall on 打开 */
+  recall: z
+    .object({
+      enabled: z.boolean().default(false),
+      /** 最多注入片段数 */
+      topK: z.number().int().min(1).max(8).default(3),
+      /** 融合分低于此直接丢弃（噪声闸门） */
+      minScore: z.number().min(0).max(1).default(0.35),
+      /** 注入总字符预算（防上下文膨胀） */
+      maxChars: z.number().int().min(200).max(6000).default(1600),
+    })
+    .optional(),
   /** 外部 MCP server 接入（2026-11-10）：stdio 拉起，工具注册为 <srv>__<tool> */
   mcpServers: z
     .record(

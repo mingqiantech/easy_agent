@@ -143,3 +143,34 @@ describe("预算护栏", () => {
     expect(((await r.json() as any).error)).toContain("预算护栏");
   });
 });
+
+describe("检索式记忆 provider（recall.ts）", () => {
+  it("buildRecallNote：minScore 过滤 + topK 截断 + 总预算封顶", async () => {
+    const { buildRecallNote } = await import("../src/recall.js");
+    const hits = [
+      { combinedScore: 0.9, excerpt: "最相关结论".repeat(200), path: "memory/.dreams/session-corpus/abc.md" },
+      { combinedScore: 0.6, excerpt: "次相关", path: "MEMORY.md" },
+      { combinedScore: 0.2, excerpt: "低分噪声", path: "x.md" },
+    ] as any;
+    const note = buildRecallNote(hits, { topK: 3, minScore: 0.35, maxChars: 1600 });
+    expect(note).toContain("【检索片段】");
+    expect(note).toContain("0.90");
+    expect(note).not.toContain("低分噪声");
+    expect((note!.match(/(^|\n)\d+\./g) ?? []).length).toBe(2); // 0.2 噪声被过滤，恰好 2 条编号行
+    // 预算小于标题开销 → 宁缺毋滥 null（不注入半截话）
+    expect(buildRecallNote(hits, { topK: 3, minScore: 0.35, maxChars: 200 })).toBeNull();
+    // 预算够标题 → 首条截断装入，总长受控
+    const n2 = buildRecallNote([{ combinedScore: 0.9, excerpt: "y".repeat(3000), path: "a.md" }] as any, { topK: 1, minScore: 0.35, maxChars: 600 });
+    expect(n2).toContain("y");
+    expect(n2!.length).toBeLessThanOrEqual(600 + 240); // 标题固定 ~240 字 + 正文预算
+  });
+  it("provider：hybrid 缺失/检索抛错 → null 不炸链路", async () => {
+    const { createRecallProvider } = await import("../src/recall.js");
+    const p1 = createRecallProvider(() => undefined, {});
+    expect(await p1("问题", "x")).toBeNull();
+    const boom = { search: async () => { throw new Error("bge down"); } } as any;
+    const p2 = createRecallProvider(() => boom, {});
+    expect(await p2("问题", "x")).toBeNull();
+    expect(await createRecallProvider(() => ({ search: async () => ({ hits: [] }) } as any), {})("你好")).toBeNull();
+  });
+});

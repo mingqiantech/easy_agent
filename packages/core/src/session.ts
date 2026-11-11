@@ -603,6 +603,8 @@ export class SessionManager {
       thinking?: "off" | "low" | "medium" | "high";
       /** 每轮动态附加的 system 提示（注入在头部 system 块之后，前缀缓存友好） */
       extraSystem?: string;
+      /** 检索式记忆片段（2026-11-11）：拼进本轮最后一条 user 消息的请求副本末尾，不落库 */
+      recallNote?: string;
       /** 本轮用户消息附带的图片（服务端 uploads 文件引用，存 metadata.images） */
       images?: Array<{ file: string; mimeType: string; name?: string }>;
       onText?: (text: string) => void;
@@ -701,9 +703,22 @@ export class SessionManager {
                 return [...messages.slice(0, at), { role: "system" as const, content: options.extraSystem! }, ...messages.slice(at)];
               })()
             : messages;
+          // 检索式记忆尾巴：本轮捞回片段**拼进最后一条 user 消息的请求副本**（不落库）。
+          // 不能新增末尾 system——ai-sdk anthropic 拒 "user/assistant 分隔的多 system"
+          // （2026-11-11 E2E 抓到）；合并进 user 尾巴同样纯追加不动历史前缀。
+          let reqMessagesFinal = reqMessages;
+          if (options?.recallNote) {
+            const li = reqMessages.findLastIndex((m: any) => m.role === "user");
+            reqMessagesFinal =
+              li >= 0
+                ? reqMessages.map((m: any, i) =>
+                    i === li ? { ...m, content: `${m.content}\n\n${options.recallNote}` } : m,
+                  )
+                : [...reqMessages, { role: "user" as const, content: options.recallNote }];
+          }
           const request: LLMRequest = {
             model: session.model,
-            messages: reqMessages,
+            messages: reqMessagesFinal,
             tools: toolDefs,
             toolChoice: toolDefs?.length ? "auto" : undefined,
             generation:

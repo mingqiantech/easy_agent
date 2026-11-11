@@ -79,6 +79,8 @@ export interface ServerDeps {
   agents: Record<string, AgentRuntime>;
   /** 梦境单轮执行器（index.ts 注入：接线 + 防并发） */
   runDreaming?: () => Promise<Record<string, unknown>>;
+  /** 检索式记忆 provider（2026-11-10）：本轮问题 → 相关历史片段文本（无命中 null） */
+  recallFor?: (text: string, agentId?: string) => Promise<string | null>;
   /** 强制重建记忆/会话语料索引（知识拓扑立即刷新用；index.ts 注入闭包） */
   reindex?: () => Promise<{ files: number; chunks: number }>;
   /** 备份管理器（设置页备份卡片 + 定时调度共用） */
@@ -645,12 +647,20 @@ export function createApp(deps: ServerDeps): Hono {
     const bus = (e: Record<string, unknown>) =>
       emitEvents(id, { sessionId: id, ts: Date.now(), ...e });
     bus({ type: "run_start" });
+    // 检索式记忆（2026-11-11）：配置开且本轮有文本 → 先捞片段（失败静默不阻断）
+    let recallNote: string | undefined;
+    // 排队分支用不到 recall（ drained 后重拼复杂，第一版不管）；仅直跑轮生效
+    const rawQ = typeof body.text === "string" ? body.text.trim() : "";
+    if (deps.recallFor && deps.config.recall?.enabled !== false && rawQ)
+      recallNote =
+        (await deps.recallFor(rawQ, sess?.agentId).catch(() => null)) ?? undefined;
     try {
       const response = await deps.sessions.run(id, body.text ?? "", {
         toolRegistry,
         // 工具有效工作目录 = 会话所属 agent 的隔离工作区（memory_search 分发也靠它）
         workDir: agent?.workspaceDir,
         extraSystem: extraSystem || undefined,
+        ...(recallNote ? { recallNote } : {}),
         ...(imageRefs.length ? { images: imageRefs } : {}),
         thinking: agent?.thinking as
           | "off"

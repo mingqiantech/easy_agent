@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import { statSync } from "node:fs";
 import path from "node:path";
 import { createApp } from "./app.js";
+import { createRecallProvider } from "./recall.js";
 import { purgeUploads } from "./uploads.js";
 import { LLMClient } from "@easy-agent/llm/client";
 import { SessionManager } from "@easy-agent/core/session";
@@ -607,6 +608,19 @@ async function main() {
     config,
     agents,
     embedding,
+    // 检索式记忆（2026-11-11）：配置 recall.enabled 才接线（默认关）；
+    // 每轮问题先经本 agent 工作区的混合索引捞片段，注入请求末尾（缓存友好）
+    recallFor:
+      config.recall?.enabled === true
+        ? createRecallProvider(
+            (agentId) => {
+              const a = agentId ? (agents as Record<string, any>)[agentId] : undefined;
+              return resourcesFor(a?.workspaceDir ?? workspaceDir).hybrid;
+            },
+            config.recall,
+            (m) => console.log(m),
+          )
+        : undefined,
     runDreaming: runDreamingCycle,
     reindex: reindexMemory,
     cron,

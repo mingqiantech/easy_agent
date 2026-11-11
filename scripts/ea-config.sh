@@ -52,6 +52,10 @@ usage() {
   ea-config budget daily <usd>   # 如 2.5
   ea-config budget mode  <alert|block>
   ea-config budget show / off
+■ recall（检索式记忆：每轮按问题从记忆/会话归档索引捞相关片段，注入请求末尾）
+  ea-config recall on|off|show
+  ea-config recall topk <1-8> | min <0-1>   # 片段数 / 相关度闸门
+
 ■ approvals（工具审批：bash 白名单外/write 敏感路径等需人工批准）
   ea-config approvals on|off|show
 ■ alert（向企微告警会话推一条，需先配 alert-chat 或带参）
@@ -208,6 +212,15 @@ case "$cmd" in
       mode)  edit_cfg '.budget = ((.budget // {}) + {mode: $v})' --arg v "$val"; do_restart gateway ;;
       show)  jq -r '.budget // "未配置（不限预算）"' "$CFG" ;;
       off)   edit_cfg 'del(.budget)'; do_restart gateway ;;
+      *) usage; exit 1 ;;
+    esac ;;
+  recall)
+    case "${1:-}" in
+      on)    edit_cfg '.recall = ((.recall // {}) + {enabled: true})'; do_restart gateway ;;
+      off)   edit_cfg '.recall = ((.recall // {}) + {enabled: false})'; do_restart gateway ;;
+      topk)  edit_cfg '.recall = ((.recall // {}) + {topK: ($v|tonumber)})' --arg v "${2:-}"; do_restart gateway ;;
+      min)   edit_cfg '.recall = ((.recall // {}) + {minScore: ($v|tonumber)})' --arg v "${2:-}"; do_restart gateway ;;
+      show)  jq -r 'if (.recall.enabled // false) then "✅ 检索式记忆开启：每轮问题自动捞片段注入 (topK=" + ((.recall.topK // 3)|tostring) + " minScore=" + ((.recall.minScore // 0.35)|tostring) + ")" else "⚪ 检索式记忆关闭（历史全靠窗口内摘要+全量重放）" end' "$CFG" ;;
       *) usage; exit 1 ;;
     esac ;;
   approvals)
