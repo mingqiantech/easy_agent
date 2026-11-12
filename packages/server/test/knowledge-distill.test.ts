@@ -35,7 +35,7 @@ describe("collectDistillInput（蒸馏输入清洗）", () => {
     const long = Array.from({ length: 60 }, (_, i) =>
       ({ role: i % 2 ? "assistant" : "user", content: "x".repeat(1500) }) as any);
     const out = collectDistillInput(long)!;
-    expect(out.length).toBeLessThanOrEqual(25000);
+    expect(out.length).toBeLessThanOrEqual(42000);
   });
 });
 

@@ -33,11 +33,11 @@ export function collectDistillInput(
       // 知识回答里的图片/音频投递标记保留 URL 无意义，剥掉标记壳
       text = text.replace(/\[\[audio[^\]]*\]\]/g, "").replace(/!\[([^\]]*)\]\([^)]*\)/g, "[$1]").trim();
       if (!text || NOISE.test(text)) continue;
-      lines.push(`🤖 ${text.slice(0, 800)}`);
+      lines.push(`🤖 ${text.slice(0, 1500)}`);
     } else {
       lines.push(`👤 ${text.slice(0, 300)}`);
     }
-    if (lines.join("\n").length > 24000) break; // 输入预算
+    if (lines.join("\n").length > 40000) break; // 输入预算（11-12 放宽：知识点完整性优先）
   }
   return lines.length >= MIN_MESSAGES ? lines.join("\n") : null;
 }
@@ -47,7 +47,7 @@ const KP_SYSTEM =
   "## 结论与事实\n（每条一行，保留具体数字/命令/路径/commit 等硬信息，注明适用条件）\n" +
   "## 方法与经验\n（可复用的做法、踩过的坑）\n" +
   "## 未决问题\n（当时没解决/存疑的，没有就省略本节）\n" +
-  "只写有信息量的条目，寒暄与流水账直接丢弃；总长 600 字以内。";
+  "只写有信息量的条目，寒暄与流水账直接丢弃；**宁全勿简**——数字/型号/价格/命令/结论/坑等硬信息一条不许丢，篇幅随内容走（一般 1500 字内，内容多可更长）。";
 
 export interface DistillResult {
   file: string;
@@ -75,7 +75,7 @@ export async function distillSession(
         model: sess.model || defaultModel,
         system: KP_SYSTEM,
         messages: [{ role: "user", content: input }],
-        generation: { maxTokens: 1600 },
+        generation: { maxTokens: 2600 },
       });
       body = String(resp.content ?? "").trim();
     } catch (e: any) {
@@ -120,7 +120,7 @@ export function archiveHomeMessagesForRotation(sessionId: string, db = getDataba
     const rows = db
       .prepare(
         `SELECT id, role, content, metadata, created_at FROM messages WHERE session_id = ?
-         AND (role != 'system' OR content LIKE '%[对话摘要]%')`,
+         AND (role != 'system' OR content LIKE '%[对话摘要]%' OR content LIKE '【知识要点】%')`,
       )
       .all(sessionId) as any[]; // 历史摘要条一并归档：换届后页面只留工作区头部+知识卡（2026-11-12 elf）
     if (!rows.length) return 0;
