@@ -143,8 +143,10 @@ export function archiveOlderThan(sessionId: string, cutoff: number, db = getData
     const rows = db
       .prepare(
         `SELECT id, role, content, metadata, created_at FROM messages WHERE session_id = ?
-         AND created_at < ?
-         AND (role != 'system' OR content LIKE '%[对话摘要]%' OR content LIKE '【知识要点】%')`,
+         AND (
+           (created_at < ? AND (role != 'system' OR content LIKE '%[对话摘要]%'))
+           OR content LIKE '【知识要点】%'  -- 旧卡无条件让位：蒸馏必产新卡，重复卡片会堆叠（11-12 修）
+         )`,
       )
       .all(sessionId, cutoff) as any[];
     if (!rows.length) return 0;

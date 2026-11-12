@@ -104,6 +104,9 @@
     .sn-item.sn-active:hover{transform:scale(1.3)}
     .sn-item.sn-active::before{content:"";position:absolute;left:50%;top:-24px;height:58px;width:1px;margin-left:-0.5px;background:var(--accent);z-index:-1}
     .sn-item.sn-summ{background:var(--accent2)}
+    .sn-item.sn-know{background:var(--warn)}
+    .sn-item.sn-know:hover{background:var(--accent2)}
+    .kp-sec.flash{outline:2px solid var(--accent);box-shadow:0 0 0 6px rgba(95,148,112,.15)}
     .nav-tip{position:absolute;right:46px;max-width:340px;background:var(--card);border:1px solid var(--border);border-radius:9px;padding:6px 10px;box-shadow:var(--shadow);font-size:11px;line-height:1.45;color:var(--fg);z-index:9;display:none;pointer-events:none;word-break:break-all}
     .nav-tip .nt-ts{color:var(--muted);font-size:9.5px;margin-bottom:2px}
     .message.summ .summ-body{font-size:12.5px;color:var(--muted);margin-top:4px;white-space:pre-wrap}
@@ -307,7 +310,7 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
 </head>
 <body>
   <div class="sidebar" id="sidebar">
-    <div class="brand">⚡ Easy Agent <span style="font-size:10px;color:var(--muted);font-weight:400" title="构建水印：看不到 1112h 说明浏览器还在用旧缓存">1112h</span></div>
+    <div class="brand">⚡ Easy Agent <span style="font-size:10px;color:var(--muted);font-weight:400" title="构建水印：看不到 1112i 说明浏览器还在用旧缓存">1112i</span></div>
     <div class="agent-pick"><select id="agentSel" onchange="switchAgent()"></select></div>
     <div class="top-row">
       <div class="new-btn" onclick="goHome()" title="2026-11-02 起单会话滚动：日常对话都进首页会话">⌂ 首页会话</div>
@@ -1077,6 +1080,11 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
       const nav=document.getElementById('summNav');
       const anchors=(messages||[]).flatMap((m,i)=>{
         if(m.role==='user') return [{kind:'q',m}];
+        if(m.role==='system'&&String(m.content||'').startsWith('【知识要点】')){
+          // 蒸馏知识卡：每个 ## 小节一个圆点（不同主题分别定位，elf 11-12 点单）
+          return String(m.content).slice(6).trim().split(/^##\s+/m).map((x,j)=>j===0?x:'## '+x).filter(x=>x.trim())
+            .map(sec=>({kind:'k',m,title:((/^##\s*(.+)/m.exec(sec)||[])[1]||'要点').trim()}));
+        }
         if(m.role==='system'&&String(m.content||'').includes('[对话摘要]')) return [{kind:'s',m}];
         return [];
       });
@@ -1085,8 +1093,9 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
         const ts=x.m.createdAt?dts(x.m.createdAt):'';
         let body,tag='';
         if(x.kind==='s'){body=navPreview(String(x.m.content).split('[对话摘要]')[1]||'');tag='🗜 压缩 · ';}
+        else if(x.kind==='k'){body=x.title;tag='📚 知识点 · ';}
         else body=navPreview(x.m.content)||((x.m.metadata&&x.m.metadata.images&&x.m.metadata.images.length)?`🖼 图片 ×${x.m.metadata.images.length}`:'（空消息）');
-        return `<div class="sn-item${x.kind==='s'?' sn-summ':''}" onclick="jumpNav(${idx})" data-a="${a}" data-b="${b}" data-ts="${esc(tag+ts)}" data-body="${esc(body.slice(0,200))}"${b>a?` data-n="${b-a+1}"`:''}></div>`;
+        return `<div class="sn-item${x.kind==='s'?' sn-summ':''}${x.kind==='k'?' sn-know':''}" onclick="jumpNav(${idx})" data-a="${a}" data-b="${b}" data-ts="${esc(tag+ts)}" data-body="${esc(body.slice(0,200))}"${b>a?` data-n="${b-a+1}"`:''}></div>`;
       };
       let html='';
       if(anchors.length<=MAX_DOTS){
@@ -1098,7 +1107,7 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
         const flush=()=>{ if(run) html+=mk(anchors[run.a],run.a,run.a,run.b); run=null; };
         for(;i<split;i++){
           const x=anchors[i];
-          if(x.kind==='s'){flush();html+=mk(x,i,i,i);}
+          if(x.kind==='s'||x.kind==='k'){flush();html+=mk(x,i,i,i);}
           else{ run? run.b=i : run={a:i,b:i}; }
         }
         flush();
@@ -1133,7 +1142,7 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
       const dots=document.querySelectorAll('#summNav .sn-item');
       if(!dots.length)return;
       const c=document.getElementById('messages');
-      const anchors=document.querySelectorAll('#messages .message.user, #messages .message.summ.titem');
+      const anchors=document.querySelectorAll('#messages .message.user, #messages .message.summ.titem, #messages .kp-sec');
       if(!anchors.length)return;
       const line=c.scrollTop+c.clientHeight*0.33;
       let act=-1;
@@ -1149,7 +1158,7 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
     }
     function jumpNav(idx){
       // DOM 里用户消息按气泡类匹配；工具内嵌的 user 变体不存在，顺位与 anchors 一致
-      const els=document.querySelectorAll('#messages .message.user, #messages .message.summ.titem');
+      const els=document.querySelectorAll('#messages .message.user, #messages .message.summ.titem, #messages .kp-sec');
       const el=els[idx];if(!el)return;
       el.closest("details")&&el.closest("details").setAttribute("open",""); // 归档折叠块内锚点先展开再跳
       hideNavTip();
