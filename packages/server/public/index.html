@@ -298,7 +298,7 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
 </head>
 <body>
   <div class="sidebar" id="sidebar">
-    <div class="brand">⚡ Easy Agent <span style="font-size:10px;color:var(--muted);font-weight:400" title="构建水印：看不到 1112c 说明浏览器还在用旧缓存">1112c</span></div>
+    <div class="brand">⚡ Easy Agent <span style="font-size:10px;color:var(--muted);font-weight:400" title="构建水印：看不到 1112d 说明浏览器还在用旧缓存">1112d</span></div>
     <div class="agent-pick"><select id="agentSel" onchange="switchAgent()"></select></div>
     <div class="top-row">
       <div class="new-btn" onclick="goHome()" title="2026-11-02 起单会话滚动：日常对话都进首页会话">⌂ 首页会话</div>
@@ -506,6 +506,7 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
     }
     const esc=t=>{const d=document.createElement('div');d.textContent=t;return d.innerHTML};
     const hhmm=ts=>new Date(ts).toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'});
+    const dts=ts=>{if(!ts)return'';const d=new Date(ts),n=new Date();return d.toDateString()===n.toDateString()?hhmm(ts):(d.getMonth()+1)+'-'+d.getDate()+' '+hhmm(ts);};
 
     /* ── Agents ── */
     async function loadAgents(){
@@ -570,7 +571,7 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
         <div class="session-item ${s.id===sid?'active':''}" onclick="selectSession('${s.id}')">
           <div class="s-main">
             <div class="session-title">${s.pinned?'<span class="home-tag">⌂</span>':''}${esc(s.title||'新会话')}</div>
-            <div class="session-meta">${s.messageCount} 条 · ${hhmm(s.updateAt)} · ${esc((s.model||'').split('/').pop())}</div>
+            <div class="session-meta">${s.messageCount} 条 · ${dts(s.updateAt)} · ${esc((s.model||'').split('/').pop())}</div>
           </div>
           ${s.pinned?'':`<button class="act-btn" title="蒸馏知识点（提炼后归档）" onclick="event.stopPropagation();distillSession('${s.id}')">🧪</button>
           <button class="act-btn" title="重命名" onclick="event.stopPropagation();renameSession('${s.id}')">✎</button>
@@ -656,12 +657,12 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
         // 压缩产物（[对话摘要] system 消息）渲染为流内分隔条：历史不再隐形，也供右侧导航定位
         if(String(m.content||'').includes('[对话摘要]')){
           const body=String(m.content).split('[对话摘要]')[1]?.trim()||String(m.content);
-          const ts=m.createdAt?`<div class="ts">${hhmm(m.createdAt)}</div>`:'';
+          const ts=m.createdAt?`<div class="ts">${dts(m.createdAt)}</div>`:'';
           return '<div class="message summ titem"><div class="avatar">🗜</div><div class="bubble"><b style="font-size:12px;color:var(--accent2)">—— 更早对话已压缩 ——</b><div class="summ-body">'+esc(clip(body,300))+'</div>'+ts+'</div></div>';
         }
         return '';
       }
-      const ts=m.createdAt?`<div class="ts">${hhmm(m.createdAt)}</div>`:'';
+      const ts=m.createdAt?`<div class="ts">${dts(m.createdAt)}</div>`:'';
       if(m.role==='tool'){
         // 工具结果→卡片行：头部一行（名字+输出预览），展开看完整 OUTPUT
         let t=null;try{t=JSON.parse(m.content);}catch(e){}
@@ -1058,7 +1059,7 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
       });
       if(!anchors.length){nav.classList.remove('show');nav.innerHTML='';return;}
       const mk=(x,idx,a,b)=>{
-        const ts=x.m.createdAt?hhmm(x.m.createdAt):'';
+        const ts=x.m.createdAt?dts(x.m.createdAt):'';
         let body,tag='';
         if(x.kind==='s'){body=navPreview(String(x.m.content).split('[对话摘要]')[1]||'');tag='🗜 压缩 · ';}
         else body=navPreview(x.m.content)||((x.m.metadata&&x.m.metadata.images&&x.m.metadata.images.length)?`🖼 图片 ×${x.m.metadata.images.length}`:'（空消息）');
@@ -1955,7 +1956,7 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
         const q=sel.value?`?agent=${encodeURIComponent(sel.value)}`:'';
         const j=await (await fetch(`${API}/api/knowledge${q}`)).json();
         const el=document.getElementById('kpList');
-        if(!(j.items||[]).length){el.innerHTML='<div class="card" style="grid-column:1/-1"><h3>暂无知识点</h3><div class="hint" style="margin-top:0">会话沉寂 ≥21 天会自动蒸馏；或在左侧会话条目点 🧪 立即蒸馏。</div></div>';return;}
+        if(!(j.items||[]).length){el.innerHTML='<div class="card" style="grid-column:1/-1"><h3>暂无知识点</h3><div class="hint" style="margin-top:0">会话沉寂 ≥10 天会自动蒸馏；或在左侧会话条目点 🧪 立即蒸馏。</div></div>';return;}
         el.innerHTML=j.items.map(k=>`<div class="card"><h3>📚 ${esc(k.name)}</h3>
           <div class="hint" style="margin-top:0">${esc(k.agent)} · ${new Date(k.mtime).toLocaleDateString('zh-CN')} · ${(k.chars/1024).toFixed(1)}KB
           <span class="expand-btn" onclick="kpOpen('${esc(k.file)}',this)">展开全文 ▾</span></div>

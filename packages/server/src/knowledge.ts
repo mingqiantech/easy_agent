@@ -102,8 +102,7 @@ export async function distillSession(
   return { file, points, archived: true };
 }
 
-/** 自动蒸馏：idle ≥ idleDays 且未蒸馏的非置顶 active 会话（12h 调度搭车） */
-export async function autoDistillIdle(
+/** 自动蒸馏：idle ≥ idleDays 且未蒸馏的非置顶 active 会话（12h 调度搭车） */export async function autoDistillIdle(
   llm: LLMClient,
   sessions: SessionManager,
   opts: {
@@ -137,4 +136,153 @@ export async function autoDistillIdle(
     }
   }
   return done;
+}
+
+/* ── 知识修订回路（2026-11-12 elf 点单）：知识库新陈代谢 ──
+ * dreaming 式周期扫 memory/knowledge/*.md：拿文件正文去混合索引捞
+ * “文件写完之后”的新会话语料/知识，同主题出现更新结论时 LLM 输出
+ * 修订动作 JSON，安全校验（只准改本文件、必须带修订历史头）后回写。 */
+
+export interface ReviseAction {
+  action: "revise" | "append" | "void" | "none";
+  reason?: string;
+  newContent?: string;
+}
+
+const REVISE_SYSTEM =
+  "你是知识库修订助手。给你一份既有知识文件（Markdown）和它写完之后新产生的对话片段。" +
+  "判断新内容是否推翻/补充文件里的结论：\n" +
+  "- 有直接矛盾的结论 → action=revise，newContent=整份改后文件（保留原结构，改错处，" +
+  "并在文件最末尾追加一行 `> 修订 <今天日期>：<一句话原因>`）\n" +
+  "- 同主题的新事实/新坑但不矛盾 → action=append，newContent=在原文末尾追加 `## 补充（<日期>）` 小节后的整份文件" +
+  "（并追加修订行）\n" +
+  "- 新片段与文件主题无关或无信息增量 → action=none（宁缺毋滥，拿不准就 none）\n" +
+  "只输出一个 JSON 对象：{\"action\":\"revise|append|none|void\",\"reason\":\"…\",\"newContent\":\"…\"}，" +
+  "newContent 为空表示不改。不要输出 JSON 以外的任何文字。";
+
+/** 单文件修订判定：返回动作；无新料/LLM 拒判/结果不合法 → none */
+export async function decideRevision(
+  llm: LLMClient,
+  model: string,
+  fileText: string,
+  newSnippets: Array<{ excerpt: string; ts?: number }>,
+  today: string,
+): Promise<ReviseAction> {
+  if (!newSnippets.length) return { action: "none" };
+  const input = [
+    `【知识文件（现状）】\n${fileText.slice(0, 4000)}`,
+    `【文件写完后新产生的相关对话（${today} 检视）】`,
+    ...newSnippets.map((s) => `---\n${String(s.excerpt).slice(0, 600)}`),
+  ].join("\n\n");
+  try {
+    const resp = await llm.generate({
+      model,
+      system: REVISE_SYSTEM,
+      messages: [{ role: "user", content: input }],
+      generation: { maxTokens: 2000 },
+    });
+    let text = String(resp.content ?? "").trim();
+    // 剥围栏
+    const fence = /^```(?:json)?\s*([\s\S]*?)\s*```$/.exec(text);
+    if (fence) text = fence[1]!;
+    const j = JSON.parse(text) as ReviseAction;
+    if (!["revise", "append", "void", "none"].includes(j.action)) return { action: "none" };
+    if (j.action === "none") return j;
+    if (j.action === "void") return { action: "void", reason: j.reason };
+    const body = String(j.newContent ?? "").trim();
+    // 安全闸门：结果必须保留原文件的标题行（防 LLM 写成摘要/换题），且足够长
+    const firstHeading = /^#\s.+/m.exec(fileText)?.[0]?.trim();
+    if (body.length < fileText.length * 0.3 || (firstHeading && !body.includes(firstHeading.slice(0, 20))))
+      return { action: "none" };
+    return { action: j.action, reason: j.reason, newContent: body };
+  } catch {
+    return { action: "none" };
+  }
+}
+
+/** 回写（调用方已过闸门）：void → 文件头插作废标记；revise/append → 整体替换 */
+export function applyRevision(
+  file: string,
+  a: ReviseAction,
+  day: string,
+): boolean {
+  try {
+    if (a.action === "void") {
+      const old = fs.readFileSync(file, "utf-8");
+      if (old.startsWith("<!--voided")) return false;
+      fs.writeFileSync(file, `<!--voided ${day}: ${a.reason ?? "已被后续对话推翻"}-->\n${old}`);
+      return true;
+    }
+    if ((a.action === "revise" || a.action === "append") && a.newContent) {
+      if (!fs.existsSync(file)) return false; // 文件已被删：不复活
+      fs.writeFileSync(file, a.newContent.endsWith("\n") ? a.newContent : a.newContent + "\n");
+      return true;
+    }
+  } catch {
+    return false;
+  }
+  return false;
+}
+
+/**
+ * 周期扫尾（每 12h 搭蒸馏调度）：每个 agent 取最近 maxPerRun 个
+ * 写完后又满 minAgeDays 的知识文件 → 检索文件落盘后的新语料 → 判定 → 回写。
+ * hybrid 不可用（无向量服务）时跳过——纯关键词二查信噪比太低不值得。
+ */
+export async function reviseKnowledgeSweep(
+  llm: LLMClient,
+  opts: {
+    agents: Record<string, { name: string; workspaceDir: string; model?: string }>;
+    hybridFor: (wsDir: string) => { search: (q: string, o?: any) => Promise<{ hits: any[] }> } | undefined;
+    model: string;
+    minAgeDays: number;
+    maxPerRun: number;
+    log?: (m: string) => void;
+  },
+): Promise<number> {
+  const log = opts.log ?? (() => {});
+  const today = new Date().toISOString().slice(0, 10);
+  const minAge = opts.minAgeDays * 86400000;
+  let touched = 0;
+  for (const a of Object.values(opts.agents)) {
+    const dir = path.join(a.workspaceDir, "memory", "knowledge");
+    let files: string[] = [];
+    try {
+      files = fs
+        .readdirSync(dir)
+        .filter((f) => f.endsWith(".md"))
+        .map((f) => path.join(dir, f))
+        .sort((x, y) => fs.statSync(y).mtimeMs - fs.statSync(x).mtimeMs)
+        .slice(0, opts.maxPerRun);
+    } catch {
+      continue; // 无知识目录
+    }
+    for (const file of files) {
+      const st = fs.statSync(file);
+      if (Date.now() - st.mtimeMs < minAge) continue; // 太新，大概率还没“后来者”
+      const text = fs.readFileSync(file, "utf-8");
+      if (text.startsWith("<!--voided")) continue;
+      if (/修订 \d{4}-\d{2}-\d{2}/.test(text.slice(-200)) && Date.now() - st.mtimeMs < 7 * 86400000) continue; // 刚修订过
+      const hybrid = opts.hybridFor(a.workspaceDir);
+      if (!hybrid) continue;
+      try {
+        // 检索词：标题 + 正文前 200 字足够定位同主题新语料
+        const query = text.split("\n").slice(0, 6).join(" ").replace(/[#>*`]/g, "").slice(0, 240);
+        const { hits } = await hybrid.search(query, { limit: 8 });
+        // 只要文件落盘“之后”的新料（含别的知识文件与 session-corpus 新会话）
+        const fresh = (hits as any[]).filter(
+          (h) => (h.ts ?? 0) > st.mtimeMs && path.resolve(h.path) !== path.resolve(file),
+        );
+        const act = await decideRevision(llm, opts.model, text, fresh, today);
+        if (act.action === "none") continue;
+        if (applyRevision(file, act, today)) {
+          log(`🔄 知识修订 ${a.name}/${path.basename(file)}: ${act.action}（${(act.reason ?? "").slice(0, 60)}）`);
+          touched++;
+        }
+      } catch (e: any) {
+        log(`🔄 修订跳过 ${path.basename(file)}: ${String(e?.message).slice(0, 90)}`);
+      }
+    }
+  }
+  return touched;
 }

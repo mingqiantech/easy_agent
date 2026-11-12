@@ -5,7 +5,7 @@ import path from "node:path";
 import { createApp } from "./app.js";
 import { createRecallProvider } from "./recall.js";
 import { purgeUploads } from "./uploads.js";
-import { autoDistillIdle } from "./knowledge.js";
+import { autoDistillIdle, reviseKnowledgeSweep } from "./knowledge.js";
 import { LLMClient } from "@easy-agent/llm/client";
 import { SessionManager } from "@easy-agent/core/session";
 import { ToolRegistry } from "@easy-agent/core/tool/registry";
@@ -717,7 +717,7 @@ async function main() {
       if (config.knowledge?.enabled !== false) {
         const runDistill = () =>
           autoDistillIdle(llm, sessions, {
-            idleDays: config.knowledge?.idleDays ?? 21,
+            idleDays: config.knowledge?.idleDays ?? 10,
             maxPerRun: config.knowledge?.maxPerRun ?? 3,
             agents: agents as unknown as Record<string, { workspaceDir: string }>,
             defaultModel: config.defaultModel,
@@ -725,6 +725,21 @@ async function main() {
           }).catch(() => {});
         setTimeout(runDistill, 180000);
         setInterval(runDistill, 12 * 3600000);
+      }
+      // 知识修订回路（2026-11-12 elf 点单）：扫知识文件 → 检索其落盘后的新语料 →
+      // LLM 判 revise/append/void 带修订历史头回写；首跑延后 5min 避启动高峰，每 12h
+      {
+        const runRevise = () =>
+          reviseKnowledgeSweep(llm, {
+            agents: agents as any,
+            hybridFor: (wsDir: string) => resourcesFor(wsDir).hybrid,
+            model: config.defaultModel,
+            minAgeDays: config.knowledge?.reviseMinAgeDays ?? 3,
+            maxPerRun: config.knowledge?.reviseMaxPerRun ?? 4,
+            log: (m) => console.log(m),
+          }).catch(() => {});
+        setTimeout(runRevise, 300000);
+        setInterval(runRevise, 12 * 3600000);
       }
       // uploads 回收（引用感知，2026-11-10）：搭同一调度，无引用且超保留期才删
       const purgeDays = Number(process.env.EASY_AGENT_UPLOADS_PURGE_DAYS ?? 14);

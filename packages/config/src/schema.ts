@@ -181,9 +181,14 @@ export const ConfigSchema = z.object({
   knowledge: z
     .object({
       enabled: z.boolean().default(true),
-      idleDays: z.number().int().min(3).max(90).default(21),
+      idleDays: z.number().int().min(3).max(90).default(10),
       /** 单次最多蒸馏几场（LLM 成本防抖） */
       maxPerRun: z.number().int().min(1).max(10).default(3),
+      /** 修订回路（2026-11-12）：enabled=false 关；文件落盘≥minAgeDays 才检视；
+       *  每轮每 agent 最多检视几个 */
+      revise: z.boolean().default(true),
+      reviseMinAgeDays: z.number().int().min(1).max(60).default(3),
+      reviseMaxPerRun: z.number().int().min(1).max(10).default(4),
     })
     .optional(),
   /** 检索式记忆（2026-11-11）：每轮回答前按用户问题从记忆/会话索引捞相关片段，
