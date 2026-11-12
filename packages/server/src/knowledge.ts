@@ -53,6 +53,7 @@ export interface DistillResult {
   file: string;
   points: number;
   archived: boolean;
+  archivedN?: number;
 }
 
 export async function distillSession(
@@ -61,13 +62,20 @@ export async function distillSession(
   sessionId: string,
   workspaceDir: string,
   defaultModel: string,
+  olderThanDays = 10,
 ): Promise<DistillResult> {
   const sess = sessions.get(sessionId);
   if (!sess) throw new Error("会话不存在");
+  const cutoff = Date.now() - olderThanDays * 86400000;
   const db = getDatabase();
   const full = sessions.getFullMessages(sessionId) as any[];
-  const input = collectDistillInput(full);
-  if (!input) throw new Error("有效内容太少，不值得蒸馏");
+  // 只蒸 cutoff 之前的旧段落（elf 11-12 定稿）：十天内的对话保持原样继续显示/使用
+  const oldMsgs = full.filter((m) => !m.archived && (m.createdAt ?? 0) < cutoff);
+  const input = collectDistillInput(oldMsgs);
+  if (!input) throw new Error(`没有 ${olderThanDays} 天前的可蒸馏内容`);
+  const recentCts = full
+    .filter((m) => !m.archived && m.role !== "system" && (m.createdAt ?? 0) >= cutoff)
+    .map((m) => m.createdAt as number);
   let body = "";
   for (let attempt = 0; attempt < 2 && body.length < 40; attempt++) {
     try {
@@ -92,37 +100,40 @@ export async function distillSession(
   let file = path.join(dir, `${day}_${safe}.md`);
   let n = 1;
   while (fs.existsSync(file)) file = path.join(dir, `${day}_${safe}-${n++}.md`);
-  const head = `# 知识点 · ${sess.title ?? sessionId}\n\n> 蒸馏自 ${new Date(sess.createAt ?? full[0]?.createdAt ?? Date.now()).toLocaleDateString("zh-CN")}–${new Date(sess.updateAt).toLocaleDateString("zh-CN")} 的会话（${full.length} 条），原会话已归档可查。\n\n`;
+  const head = `# 知识点 · ${sess.title ?? sessionId}\n\n> 蒸馏自 ${new Date(oldMsgs[0]?.createdAt ?? sess.createAt).toLocaleDateString("zh-CN")}–${new Date(oldMsgs[oldMsgs.length - 1]?.createdAt ?? Date.now()).toLocaleDateString("zh-CN")} 的对话（${oldMsgs.length} 条，已归档可查）${recentCts.length ? `；${olderThanDays} 天内的 ${recentCts.length} 条新对话保留原样` : ""}。\n\n`;
   fs.writeFileSync(file, head + body + "\n", "utf-8");
   db.prepare("UPDATE sessions SET distilled_at = ? WHERE id = ?").run(Date.now(), sessionId);
   // 非置顶整场隐藏出列表（数据全留可查）。首页置顶就地换届（2026-11-12 elf：“不自建新页面，页面自己更新”）：
   // 不建新会话——把非 system 消息全部移入 messages_archive（UI 默认折叠可展开，搜索命中），
   // 工作区头部保留，会话继续 id 不变从干净上下文滚动；旧事实靠知识文件 + recall 召回
-  if (!sess.pinned) {
+  // 就地换届（2026-11-12 elf 定稿）：只把 cutoff 前的旧消息移入归档表（页面不再渲染
+  // 归档原文，搜索/导出仍可查）；十天内的活跃对话原位保留。知识卡插在“旧↔新”
+  // 分界时间戳：页面顺序 = 头部 → 📚知识卡 → 近期对话；卡同时进 LLM 上下文
+  const archivedN = archiveOlderThan(sessionId, cutoff, db);
+  const cardTs = recentCts.length ? Math.min(...recentCts) - 1 : Date.now();
+  db.prepare(
+    `INSERT INTO messages (id, session_id, role, content, metadata, created_at)
+     VALUES (?, ?, 'system', ?, '{}', ?)`,
+  ).run(Date.now().toString(36) + "-kp", sessionId, `【知识要点】\n${body}`, cardTs);
+  // 会话隐藏仅限“无保留内容可用”的非置顶（全是旧内容的专题/cron 会话）；
+  // 有十天内存活对话的留在列表，用户接着聊
+  if (!sess.pinned && !recentCts.length)
     db.prepare("UPDATE sessions SET status = 'archived' WHERE id = ?").run(sessionId);
-  } else {
-    archiveHomeMessagesForRotation(sessionId, db);
-    // 知识要点回注会话头部之后：页面直接显示这份干净总结，同时进 LLM 上下文
-    //（比按 problem 碰运气召回稳）；UI 按【知识要点】渲染成知识卡
-    db.prepare(
-      `INSERT INTO messages (id, session_id, role, content, metadata, created_at)
-       VALUES (?, ?, 'system', ?, '{}', ?)`,
-    ).run(Date.now().toString(36) + "-kp", sessionId, `【知识要点】\n${body}`, Date.now());
-  }
   const points = (body.match(/^[-*]|^\d+\./gm) ?? []).length;
-  return { file, points, archived: !sess.pinned };
+  return { file, points, archived: !sess.pinned && !recentCts.length, archivedN };
 }
 
-/** 首页就地换届的搬运步骤（导出供测试）：非 system 消息全量移入归档表；
- * 失败只警告不阻断（知识文件已写成，宁多保留上下文不可丢数据） */
-export function archiveHomeMessagesForRotation(sessionId: string, db = getDatabase()): number {
+/** 换届搬运步骤（导出供测试）：cutoff 前的非 system 消息（含历史摘要/旧知识卡）
+ * 移入归档表，之后的原位保留；失败只警告不阻断（知识文件已写成，宁多保留上下文不可丢数据） */
+export function archiveOlderThan(sessionId: string, cutoff: number, db = getDatabase()): number {
   try {
     const rows = db
       .prepare(
         `SELECT id, role, content, metadata, created_at FROM messages WHERE session_id = ?
+         AND created_at < ?
          AND (role != 'system' OR content LIKE '%[对话摘要]%' OR content LIKE '【知识要点】%')`,
       )
-      .all(sessionId) as any[]; // 历史摘要条一并归档：换届后页面只留工作区头部+知识卡（2026-11-12 elf）
+      .all(sessionId, cutoff) as any[];
     if (!rows.length) return 0;
     const ts0 = Date.now();
     const ins = db.prepare(
@@ -197,7 +208,7 @@ export function listDistillCandidates(
     const ws = opts.agents[r.agent_id]?.workspaceDir;
     if (!ws) continue;
     try {
-      const res = await distillSession(llm, sessions, r.id, ws, opts.defaultModel);
+      const res = await distillSession(llm, sessions, r.id, ws, opts.defaultModel, opts.idleDays);
       log(`🧪 蒸馏完成: ${r.agent_id}/${r.id} → ${path.basename(res.file)}（${res.points} 条知识点）`);
       done++;
     } catch (e: any) {
@@ -205,7 +216,7 @@ export function listDistillCandidates(
       // 分流（2026-11-12）：真·无价值 → 永久跳过 + 非置顶直接归档隐藏
       //（elf：十天前的零散会话就该从列表消失——薄内容没知识可提炼，但同样该让位）；
       // 空返回/调用失败等 transient → 3 天重试冷却，绝不误标 distilled_at（那=已处理=永久隐藏误伤）
-      if (/太少/.test(msg)) {
+      if (/太少|没有 \d+ 天前的可蒸馏/.test(msg)) {
         getDatabase()
           .prepare("UPDATE sessions SET distilled_at = ?, status = CASE WHEN pinned=1 THEN status ELSE 'archived' END WHERE id = ?")
           .run(Date.now(), r.id);

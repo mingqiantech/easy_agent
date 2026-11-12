@@ -42,7 +42,7 @@ describe("collectDistillInput（蒸馏输入清洗）", () => {
 // ===== 选单扩容 + 就地换届测试（2026-11-12）：独立 :memory: 连接，绝不吃进程单例 =====
 // （背景：_gd() 无参版本在单独跑本文件时会把测试数据写进生产 agent.db，已发生过）
 import { Database } from "bun:sqlite";
-import { archiveHomeMessagesForRotation, listDistillCandidates } from "../src/knowledge.js";
+import { archiveOlderThan, listDistillCandidates } from "../src/knowledge.js";
 
 function freshDb() {
   const d = new Database(":memory:");
@@ -107,19 +107,25 @@ describe("listDistillCandidates 选单扩容", () => {
   });
 });
 
-describe("archiveHomeMessagesForRotation（首页就地换届搬运）", () => {
-  it("非 system 消息全量移入归档表；system 头部保留；重复调用幂等", () => {
+describe("archiveOlderThan（换届搬运：只动 cutoff 前）", () => {
+  it("旧消息入归档；头部与十天内对话原位保留；幂等；cutoff 推进后可继续搬", () => {
     const db = freshDb();
     db.prepare("INSERT INTO sessions (id,title,agent_id,model,status,pinned,created_at,updated_at) VALUES ('h','首页','a','m','active',1,1,1)").run();
     const ins = db.prepare("INSERT INTO messages (id,session_id,role,content,created_at) VALUES (?,?,?,?,?)");
+    const now = Date.now();
     ins.run("sys1", "h", "system", "工作区头部快照", 1);
-    ins.run("u1", "h", "user", "旧问题", 2);
-    ins.run("a1", "h", "assistant", "旧回答", 3);
-    expect(archiveHomeMessagesForRotation("h", db as any)).toBe(2);
-    const left = db.prepare("SELECT role, COUNT(*) c FROM messages WHERE session_id='h' GROUP BY role").all() as any[];
-    expect(left.length).toBe(1);
-    expect(left[0].role).toBe("system");
-    expect((db.prepare("SELECT COUNT(*) c FROM messages_archive WHERE session_id='h'").get() as any).c).toBe(2);
-    expect(archiveHomeMessagesForRotation("h", db as any)).toBe(0); // 幂等
+    ins.run("kp0", "h", "system", "【知识要点】旧卡", now - 20 * 86400000);
+    ins.run("u1", "h", "user", "旧问题", now - 15 * 86400000);
+    ins.run("a1", "h", "assistant", "旧回答", now - 12 * 86400000);
+    ins.run("u2", "h", "user", "十天内的新问题", now - 86400000);
+    ins.run("a2", "h", "assistant", "十天内的回答", now - 3600000);
+    // cutoff=10 天前：只搬旧的（含旧知识卡），十天内的原样保留
+    expect(archiveOlderThan("h", now - 10 * 86400000, db as any)).toBe(3);
+    const left = db.prepare("SELECT id FROM messages WHERE session_id='h' ORDER BY created_at").all() as any[];
+    expect(left.map((x) => x.id)).toEqual(["sys1", "u2", "a2"]); // 头部+近期保留
+    expect((db.prepare("SELECT COUNT(*) c FROM messages_archive WHERE session_id='h'").get() as any).c).toBe(3);
+    expect(archiveOlderThan("h", now - 10 * 86400000, db as any)).toBe(0); // 幂等
+    // 再等 10 天：近期也够旧了，能继续搬
+    expect(archiveOlderThan("h", now + 9 * 86400000, db as any)).toBe(2);
   });
 });
