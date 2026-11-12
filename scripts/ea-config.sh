@@ -52,6 +52,11 @@ usage() {
   ea-config budget daily <usd>   # 如 2.5
   ea-config budget mode  <alert|block>
   ea-config budget show / off
+■ sess（会话管理；删除一律走 API，禁止裸 SQL——触发器已兜底但 API 有权限校验）
+  ea-config sess list [agent]
+  ea-config sess rm <sessionId>
+  ea-config sess fix [--apply]        # 孤儿巡检/修复
+
 ■ recall（检索式记忆：每轮按问题从记忆/会话归档索引捞相关片段，注入请求末尾）
   ea-config recall on|off|show
   ea-config recall topk <1-8> | min <0-1>   # 片段数 / 相关度闸门
@@ -212,6 +217,38 @@ case "$cmd" in
       mode)  edit_cfg '.budget = ((.budget // {}) + {mode: $v})' --arg v "$val"; do_restart gateway ;;
       show)  jq -r '.budget // "未配置（不限预算）"' "$CFG" ;;
       off)   edit_cfg 'del(.budget)'; do_restart gateway ;;
+      *) usage; exit 1 ;;
+    esac ;;
+  sess)
+    sub="${1:-list}"; shift || true
+    DB="${STATE_DIR:-$HOME/.easy-agent}/agent.db"
+    case "$sub" in
+      list)
+        ag="${1:-}"
+        if [[ -n $ag ]]; then gwc "$GW/api/sessions?agent=$ag"
+        else gwc "$GW/api/sessions" | jq '{sessions: [.sessions[] | {id, title, agentId, messageCount, pinned}] | .[0:60]}'; fi ;;
+      rm)
+        id="${1:-}"; [[ -z $id ]] && { echo "用法: ea-config sess rm <sessionId>"; exit 1; }
+        res=$(gwc -X DELETE "$GW/api/sessions/$id")
+        echo "$res" | grep -q '"ok"' && echo "🗑 已删除 $id（子表触发器连带清理）" || { echo "❌ $res"; exit 1; } ;;
+      fix)
+        # 孤儿巡检/修复（历史遗留兜底；新删除路径已被触发器覆盖）
+        report=$(sqlite3 "$DB" "PRAGMA foreign_keys=ON; \
+          SELECT 'messages', COUNT(*) FROM messages WHERE session_id NOT IN (SELECT id FROM sessions) UNION ALL \
+          SELECT 'messages_archive', COUNT(*) FROM messages_archive WHERE session_id NOT IN (SELECT id FROM sessions) UNION ALL \
+          SELECT 'token_usage', COUNT(*) FROM token_usage WHERE session_id NOT IN (SELECT id FROM sessions) UNION ALL \
+          SELECT 'session_ingestion', COUNT(*) FROM session_ingestion WHERE session_id NOT IN (SELECT id FROM sessions) UNION ALL \
+          SELECT 'pending_queue', COUNT(*) FROM pending_queue WHERE session_id NOT IN (SELECT id FROM sessions);")
+        total=0; while read -r t c; do [[ $c -gt 0 ]] && echo "  ⚠️ $t 孤儿 $c 行"; total=$((total+c)); done <<< "$report"
+        if (( total == 0 )); then echo "✅ 无孤儿数据"; exit 0; fi
+        if [[ "${2:-}" != "--apply" ]]; then echo "（预览模式，加 --apply 删除）"; exit 1; fi
+        sqlite3 "$DB" "PRAGMA foreign_keys=ON; \
+          DELETE FROM messages WHERE session_id NOT IN (SELECT id FROM sessions); \
+          DELETE FROM messages_archive WHERE session_id NOT IN (SELECT id FROM sessions); \
+          DELETE FROM token_usage WHERE session_id NOT IN (SELECT id FROM sessions); \
+          DELETE FROM session_ingestion WHERE session_id NOT IN (SELECT id FROM sessions); \
+          DELETE FROM pending_queue WHERE session_id NOT IN (SELECT id FROM sessions);"
+        echo "🧹 已清理 $total 行孤儿" ;;
       *) usage; exit 1 ;;
     esac ;;
   recall)

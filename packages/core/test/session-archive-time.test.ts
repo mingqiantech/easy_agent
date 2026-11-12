@@ -127,3 +127,25 @@ describe("delete 连带清无-FK 关联表（2026-11-10 孤儿 token_usage 修�
     expect(q("audit_logs")).toBe(0);
   });
 });
+
+describe("sessions_child_cleanup 触发器（2026-11-12 根治 CLI 删会话孤儿）", () => {
+  it("foreign_keys=OFF 的会话（模拟 sqlite3 CLI）裸删 sessions，子表照样清空", () => {
+    const s = makeSessions();
+    const db = getDatabase();
+    const x = s.create({ agentId: "trg" });
+    s.addMessage(x.id, { role: "user", content: "hi" });
+    db.prepare("INSERT INTO token_usage (session_id, model, prompt_tokens, completion_tokens, total_tokens, created_at) VALUES (?,?,?,?,?,?)").run(x.id, "m", 1, 1, 2, Date.now());
+    db.prepare("INSERT INTO session_ingestion (session_id, snippet_count, ingested_at) VALUES (?,?,?)").run(x.id, 1, Date.now());
+    // 关掉本连接 FK（CLI 默认态）；bun:sqlite 允许随时切
+    db.exec("PRAGMA foreign_keys = OFF");
+    try {
+      db.prepare("DELETE FROM sessions WHERE id = ?").run(x.id); // 不走 SessionManager.delete
+      for (const t of ["messages", "token_usage", "session_ingestion", "messages_archive", "pending_queue"]) {
+        const c = (db.prepare(`SELECT COUNT(*) c FROM ${t} WHERE session_id = ?`).get(x.id) as any).c;
+        expect(`${t}:${c}`).toBe(`${t}:0`);
+      }
+    } finally {
+      db.exec("PRAGMA foreign_keys = ON");
+    }
+  });
+});

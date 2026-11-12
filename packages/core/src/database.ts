@@ -308,6 +308,22 @@ function initializeSchema(db: Database): void {
     CREATE INDEX IF NOT EXISTS idx_audit_action
       ON audit_logs(action, created_at DESC);
 
+    -- 会话子表级联清理触发器（2026-11-12 根治手搜 SQL 删会话造孤儿）：
+    -- sqlite3 CLI 连接默认 PRAGMA foreign_keys=OFF，ON DELETE CASCADE 形同虚设；
+    -- 触发器不依赖连接的 pragma、随 DB 文件生效——任何删除路径（API/CLI/其他进程）都连带清干净。
+    -- 与 FK CASCADE 并存无害（二次 DELETE 命中 0 行）；sub_agent_runs 台账故意不清（审计留痕）。
+    CREATE TRIGGER IF NOT EXISTS sessions_child_cleanup
+    AFTER DELETE ON sessions BEGIN
+      DELETE FROM messages         WHERE session_id = OLD.id;
+      DELETE FROM messages_archive WHERE session_id = OLD.id;
+      DELETE FROM pending_queue    WHERE session_id = OLD.id;
+      DELETE FROM token_usage      WHERE session_id = OLD.id;
+      DELETE FROM session_ingestion WHERE session_id = OLD.id;
+      DELETE FROM tool_calls       WHERE session_id = OLD.id;
+      DELETE FROM audit_logs       WHERE session_id = OLD.id;
+      DELETE FROM active_turns     WHERE session_id = OLD.id;
+    END;
+
     -- Week9: 团队表
     CREATE TABLE IF NOT EXISTS teams (
       id TEXT PRIMARY KEY,
