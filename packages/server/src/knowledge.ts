@@ -64,7 +64,6 @@ export async function distillSession(
 ): Promise<DistillResult> {
   const sess = sessions.get(sessionId);
   if (!sess) throw new Error("会话不存在");
-  if (sess.pinned) throw new Error("首页会话不蒸馏（滚动主会话由压缩/归档自动管理）");
   const db = getDatabase();
   const full = sessions.getFullMessages(sessionId) as any[];
   const input = collectDistillInput(full);
@@ -96,17 +95,53 @@ export async function distillSession(
   const head = `# 知识点 · ${sess.title ?? sessionId}\n\n> 蒸馏自 ${new Date(sess.createAt ?? full[0]?.createdAt ?? Date.now()).toLocaleDateString("zh-CN")}–${new Date(sess.updateAt).toLocaleDateString("zh-CN")} 的会话（${full.length} 条），原会话已归档可查。\n\n`;
   fs.writeFileSync(file, head + body + "\n", "utf-8");
   db.prepare("UPDATE sessions SET distilled_at = ? WHERE id = ?").run(Date.now(), sessionId);
-  // 整场隐藏出列表（数据全留；搜索/详情页仍可达）
-  db.prepare("UPDATE sessions SET status = 'archived' WHERE id = ? AND pinned = 0").run(sessionId);
+  // 非置顶整场隐藏出列表（数据全留可查）；首页置顶只提知识不隐藏（2026-11-12：
+  // 首页的零散旧内容由"知识文件+压缩+60天归档"三层消化，会话本体永不消失）
+  if (!sess.pinned)
+    db.prepare("UPDATE sessions SET status = 'archived' WHERE id = ?").run(sessionId);
   const points = (body.match(/^[-*]|^\d+\./gm) ?? []).length;
-  return { file, points, archived: true };
+  return { file, points, archived: !sess.pinned };
 }
 
-/** 自动蒸馏：idle ≥ idleDays 且未蒸馏的非置顶 active 会话（12h 调度搭车） */export async function autoDistillIdle(
+/**
+ * 蒸馏选单（2026-11-12 扩容，根治"零散会话漏网"）三类：
+ * ① 沉寂 ≥idleDays 的非置顶会话（原逻辑）
+ * ② 沉寂 ≥idleDays 的置顶首页（只提知识不隐藏——旧版一刀切拒绝导致
+ *    video/work 首页的零散内容永不处理）
+ * ③ [cron] 流水会话按体量触发（每 2h 一跑永不沉寂，200+ 条即蒸馏；
+ *    归档后 cron 侧 findByTitle 会新建滚动会话）
+ * 排除：仅**运行中**的子任务会话（旧版 NOT IN 全表把已完结的也永久排除，
+ * 10-30 的 [子]显卡对比 32 条即漏网案例）
+ */
+export function listDistillCandidates(
+  idleDays: number,
+  cronMessages: number,
+  max: number,
+  db = getDatabase(), // 测试可注入独立连接，不依赖进程单例（2026-11-12 曾误写生产库）
+) {
+  const cutoff = Date.now() - idleDays * 86400000;
+  return db
+    .prepare(
+      `SELECT id, agent_id, pinned FROM sessions
+       WHERE status='active' AND distilled_at IS NULL
+         AND id NOT IN (SELECT child_session_id FROM sub_agent_runs WHERE status='running')
+         AND (
+           updated_at < ?
+           OR (title LIKE '[cron]%' AND
+               (SELECT COUNT(*) FROM messages WHERE session_id = sessions.id) >= ?)
+         )
+       ORDER BY updated_at ASC LIMIT ?`,
+    )
+    .all(cutoff, cronMessages, max) as Array<{ id: string; agent_id: string; pinned: number }>;
+}
+
+/** 自动蒸馏：见 listDistillCandidates（12h 调度搭车） */export async function autoDistillIdle(
   llm: LLMClient,
   sessions: SessionManager,
   opts: {
     idleDays: number;
+    /** [cron] 流水会话条数达到即蒸馏（不等沉寂，默认 200） */
+    cronMessages?: number;
     maxPerRun: number;
     agents: Record<string, { workspaceDir: string }>;
     defaultModel: string;
@@ -114,15 +149,7 @@ export async function distillSession(
   },
 ): Promise<number> {
   const log = opts.log ?? (() => {});
-  const cutoff = Date.now() - opts.idleDays * 86400000;
-  const rows = getDatabase()
-    .prepare(
-      `SELECT id, agent_id FROM sessions
-       WHERE status='active' AND pinned=0 AND distilled_at IS NULL
-         AND updated_at < ? AND id NOT IN (SELECT child_session_id FROM sub_agent_runs)
-       ORDER BY updated_at ASC LIMIT ?`,
-    )
-    .all(cutoff, opts.maxPerRun) as any[];
+  const rows = listDistillCandidates(opts.idleDays, opts.cronMessages ?? 200, opts.maxPerRun);
   let done = 0;
   for (const r of rows) {
     const ws = opts.agents[r.agent_id]?.workspaceDir;
@@ -132,7 +159,11 @@ export async function distillSession(
       log(`🧪 蒸馏完成: ${r.agent_id}/${r.id} → ${path.basename(res.file)}（${res.points} 条知识点）`);
       done++;
     } catch (e: any) {
-      log(`🧪 蒸馏跳过 ${r.id}: ${String(e?.message).slice(0, 100)}`);
+      const msg = String(e?.message ?? e);
+      // 内容太少/结果过短的低价值会话：打标不再反复扫（省 12h 空转）
+      if (/太少|过短/.test(msg))
+        getDatabase().prepare("UPDATE sessions SET distilled_at = ? WHERE id = ?").run(Date.now(), r.id);
+      log(`🧪 蒸馏跳过 ${r.id}: ${msg.slice(0, 100)}`);
     }
   }
   return done;

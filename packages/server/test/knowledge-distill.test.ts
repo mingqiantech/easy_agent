@@ -38,3 +38,53 @@ describe("collectDistillInput（蒸馏输入清洗）", () => {
     expect(out.length).toBeLessThanOrEqual(25000);
   });
 });
+
+
+// ===== 选单扩容测试（2026-11-12）：独立 :memory: 连接，绝不吃进程单例 =====
+// （背景：_gd() 无参版本在单独跑本文件时会把测试数据写进生产 agent.db，已发生过）
+import { Database } from "bun:sqlite";
+import { listDistillCandidates } from "../src/knowledge.js";
+
+describe("listDistillCandidates 选单扩容", () => {
+  function freshDb() {
+    const d = new Database(":memory:");
+    d.exec(`CREATE TABLE sessions (id TEXT PRIMARY KEY, title TEXT, agent_id TEXT, model TEXT,
+      status TEXT, pinned INTEGER DEFAULT 0, created_at INTEGER, updated_at INTEGER, distilled_at INTEGER);
+      CREATE TABLE messages (id TEXT PRIMARY KEY, session_id TEXT, role TEXT, content TEXT, created_at INTEGER);
+      CREATE TABLE sub_agent_runs (id TEXT PRIMARY KEY, parent_session_id TEXT, child_session_id TEXT,
+      task TEXT, model TEXT, status TEXT, started_at INTEGER, finished_at INTEGER);`);
+    return d;
+  }
+
+  it("沉寂非置顶✓ 沉寂置顶✓ cron 超体量✓ 完结子任务✓；运行中子任务/近期/小 cron 排除；已蒸馏不重复", () => {
+    const db = freshDb();
+    const now = Date.now();
+    const old = now - 11 * 86400000;
+    const mk = (id: string, title: string, pinned: number, upd: number, msgs: number) => {
+      db.prepare("INSERT INTO sessions (id,title,agent_id,model,status,pinned,created_at,updated_at) VALUES (?,?,'a','m','active',?,?,?)")
+        .run(id, title, pinned, 1, upd);
+      for (let i = 0; i < msgs; i++)
+        db.prepare("INSERT INTO messages (id,session_id,role,content,created_at) VALUES (?,?,'user','x',?)").run(id + "-" + i, id, upd);
+    };
+    mk("idle-normal", "专题会话", 0, old, 8);
+    mk("idle-pinned", "首页", 1, old, 30);
+    mk("cron-huge", "[cron] work-watch-agents", 0, now, 210);
+    mk("cron-small", "[cron] other", 0, now, 50);
+    mk("fresh", "昨天还在聊", 0, now - 86400000, 3);
+    mk("child-running", "[子] 在跑", 0, old, 5);
+    db.prepare("INSERT INTO sub_agent_runs (id,parent_session_id,child_session_id,task,model,status,started_at) VALUES ('r1','p','child-running','t','m','running',?)").run(now);
+    mk("child-done", "[子] 完结", 0, old, 5);
+    db.prepare("INSERT INTO sub_agent_runs (id,parent_session_id,child_session_id,task,model,status,started_at,finished_at) VALUES ('r2','p','child-done','t','m','ok',?,?)").run(now, now);
+
+    const picked = new Set(listDistillCandidates(10, 200, 50, db as any).map((x) => x.id));
+    expect(picked.has("idle-normal")).toBe(true);
+    expect(picked.has("idle-pinned")).toBe(true);   // 首页纳入蒸馏（不隐藏）
+    expect(picked.has("cron-huge")).toBe(true);     // 体量触发
+    expect(picked.has("child-done")).toBe(true);    // 完结子任务不再被永久排除
+    expect(picked.has("child-running")).toBe(false);
+    expect(picked.has("cron-small")).toBe(false);
+    expect(picked.has("fresh")).toBe(false);
+    db.prepare("UPDATE sessions SET distilled_at=? WHERE id='idle-normal'").run(now);
+    expect(new Set(listDistillCandidates(10, 200, 50, db as any).map((x) => x.id)).has("idle-normal")).toBe(false);
+  });
+});

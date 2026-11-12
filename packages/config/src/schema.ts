@@ -176,7 +176,7 @@ export const ConfigSchema = z.object({
   approvals: z
     .object({ enabled: z.boolean().default(false) })
     .optional(),
-  /** 会话知识蒸馏（2026-11-12）：沉寂≥idleDays（默认 21 天）的非置顶会话自动提炼知识点入
+  /** 会话知识蒸馏（2026-11-12）：沉寂≥idleDays（默认 10 天）的非置顶会话自动提炼知识点入
    *  memory/knowledge/（可检索可展示），原会话归档隐藏；enabled=false 关闭自动（手动 API 仍可用） */
   knowledge: z
     .object({
@@ -184,6 +184,8 @@ export const ConfigSchema = z.object({
       idleDays: z.number().int().min(3).max(90).default(10),
       /** 单次最多蒸馏几场（LLM 成本防抖） */
       maxPerRun: z.number().int().min(1).max(10).default(3),
+      /** [cron] 流水会话蒸馏体量线（条数，不等沉寂；2026-11-12 选单扩容） */
+      cronMessages: z.number().int().min(20).max(2000).default(200),
       /** 修订回路（2026-11-12）：enabled=false 关；文件落盘≥minAgeDays 才检视；
        *  每轮每 agent 最多检视几个 */
       revise: z.boolean().default(true),
