@@ -169,3 +169,33 @@ describe("distillSession 截断续写", () => {
     expect(fs.readFileSync(f, "utf-8")).toContain("尾巴收尾");
   });
 });
+
+describe("packChunks / mergeKnowledgeSections（map-reduce 分块与合并）", () => {
+  it("packChunks 按行边界切块不丢行；小块不切", async () => {
+    const { packChunks } = await import("../src/knowledge.js");
+    const lines = Array.from({ length: 100 }, (_, i) => `👤 第${i}条 ${"x".repeat(200)}`);
+    const chunks = packChunks(lines, 1000);
+    expect(chunks.length).toBeGreaterThan(5);
+    expect(chunks.join("\n").split("\n").length).toBe(100);
+    expect(chunks.every((c) => c.length <= 1000 + 220)).toBe(true);
+    expect(packChunks(["a", "b"], 9000)).toEqual(["a\nb"]);
+  });
+
+  it("mergeKnowledgeSections：同名节合并、异名节保序、散行归 preamble", async () => {
+    const { mergeKnowledgeSections } = await import("../src/knowledge.js");
+    const text = [
+      "## 显卡",
+      "- A 结论",
+      "## 横向经验",
+      "- 坑1",
+      "## 显卡",
+      "- B 结论",
+      "## 接线",
+      "- C 结论",
+    ].join("\n");
+    const out = mergeKnowledgeSections(text);
+    expect(out.match(/^## /gm)).toHaveLength(3); // 显卡/横向经验/接线，重名归一
+    expect(out).toContain("## 显卡\n- A 结论\n- B 结论"); // 同节内容并在一起
+    expect(out.indexOf("## 接线")).toBeGreaterThan(out.indexOf("## 显卡"));
+  });
+});

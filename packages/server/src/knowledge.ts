@@ -16,38 +16,117 @@ const NOISE = /^✅ 巡检正常|^【系统恢复】|^\s*$|^\[用户发来图片
 const MIN_MESSAGES = 6; // 太短的会话没什么可蒸馏
 
 /** 蒸馏输入清洗：保 user/assistant 文本，剔工具轮、cron 流水、占位；每条截断 */
-export function collectDistillInput(
-  msgs: Array<{ role: string; content: string; metadata?: any }>,
-): string | null {
+/** 清洗：消息→蒸馏输入行（剔工具轮/流水账/占位；assistant 取 text 剥标记） */
+export function buildDistillLines(msgs: Array<{ role: string; content: string; metadata?: any }>): string[] {
   const lines: string[] = [];
   for (const m of msgs) {
     if (m.role === "system" || m.role === "tool") continue;
     let text = String(m.content ?? "").trim();
     if (!text || NOISE.test(text)) continue;
     if (m.role === "assistant") {
-      // {text,toolCalls} JSON 轮：只取文本
       try {
         const p = JSON.parse(text);
         if (p && typeof p === "object") text = String(p.text ?? "").trim();
       } catch {}
-      // 知识回答里的图片/音频投递标记保留 URL 无意义，剥掉标记壳
       text = text.replace(/\[\[audio[^\]]*\]\]/g, "").replace(/!\[([^\]]*)\]\([^)]*\)/g, "[$1]").trim();
       if (!text || NOISE.test(text)) continue;
       lines.push(`🤖 ${text.slice(0, 1500)}`);
     } else {
       lines.push(`👤 ${text.slice(0, 300)}`);
     }
-    if (lines.join("\n").length > 40000) break; // 输入预算（11-12 放宽：知识点完整性优先）
   }
-  return lines.length >= MIN_MESSAGES ? lines.join("\n") : null;
+  return lines;
+}
+
+/** 兼容入口（测试/小会话用）：行拼单串；总量封顶防爆预算 */
+export function collectDistillInput(
+  msgs: Array<{ role: string; content: string; metadata?: any }>,
+): string | null {
+  const lines = buildDistillLines(msgs);
+  if (lines.length < MIN_MESSAGES) return null;
+  const joined = lines.join("\n");
+  if (joined.length <= 40000) return joined;
+  // 超长保头尾弃中段（中段多为主题已展开的讨论细节；分块蒸馏路径不受此限）
+  const head = joined.slice(0, 10000);
+  let tailStart = Math.max(head.length, joined.length - 30000);
+  const nl = joined.indexOf("\n", tailStart);
+  if (nl > 0 && nl < tailStart + 500) tailStart = nl + 1;
+  return `${head}\n…（中段约 ${((tailStart - head.length) / 1000).toFixed(0)}k 字符省略）…\n${joined.slice(tailStart)}`;
+}
+
+/** 按行分块（map-reduce 的 map 单位）：每块 ≤chunkChars，主题按时间相邻自然聚合 */
+export function packChunks(lines: string[], chunkChars = 9000): string[] {
+  const out: string[] = [];
+  let cur: string[] = [], len = 0;
+  for (const l of lines) {
+    if (len + l.length > chunkChars && cur.length) {
+      out.push(cur.join("\n"));
+      cur = []; len = 0;
+    }
+    cur.push(l); len += l.length + 1;
+  }
+  if (cur.length) out.push(cur.join("\n"));
+  return out;
+}
+
+/** 合并各块的主题小节：同名 `## X` 节合并内容（横向经验等通用节去重关键） */
+export function mergeKnowledgeSections(joined: string): string {
+  const order: string[] = [];
+  const map = new Map<string, string[]>();
+  let curTitle = "", curBuf: string[] = [];
+  const flush = () => {
+    if (!curTitle && !curBuf.length) return;
+    const t = curTitle || "_preamble";
+    if (!map.has(t)) { map.set(t, []); order.push(t); }
+    map.get(t)!.push(...curBuf.filter(Boolean));
+    curBuf = [];
+  };
+  for (const line of joined.split("\n")) {
+    const h = /^## (.+?)\s*$/.exec(line);
+    if (h) { flush(); curTitle = h[1].trim(); }
+    else if (curTitle || line.trim()) curBuf.push(line);
+  }
+  flush();
+  return order
+    .map((t) => (t === "_preamble" ? map.get(t)!.join("\n") : `## ${t}\n${map.get(t)!.join("\n")}`))
+    .join("\n\n");
+}
+
+/** 知识提炼生成器（含 maxTokens 截断续写：finishReason=length → assistant 前缀接着要） */
+export async function generateKnowledge(
+  llm: LLMClient,
+  model: string,
+  input: string,
+): Promise<string> {
+  const msgs: any[] = [{ role: "user", content: input }];
+  let acc = "";
+  for (let seg = 0; seg < 3; seg++) {
+    const resp = await llm.generate({
+      model,
+      system: KP_SYSTEM,
+      messages: msgs,
+      generation: { maxTokens: 2600 },
+    });
+    acc += String(resp.content ?? "");
+    if (resp.finishReason !== "length" || seg === 2) break;
+    console.log(`✂️ 蒸馏输出截断，续写第 ${seg + 2} 段`);
+    msgs.push(
+      { role: "assistant", content: acc },
+      { role: "user", content: "从断点继续只写后半截，勿重复已输出；覆盖剩余主题后收束" },
+    );
+  }
+  return acc.trim();
 }
 
 const KP_SYSTEM =
-  "你是知识提炼助手。把下面的对话记录提炼为「知识点清单」，中文 Markdown：\n" +
-  "## 结论与事实\n（每条一行，保留具体数字/命令/路径/commit 等硬信息，注明适用条件）\n" +
-  "## 方法与经验\n（可复用的做法、踩过的坑）\n" +
-  "## 未决问题\n（当时没解决/存疑的，没有就省略本节）\n" +
-  "只写有信息量的条目，寒暄与流水账直接丢弃；**宁全勿简**——数字/型号/价格/命令/结论/坑等硬信息一条不许丢，篇幅随内容走（一般 1500 字内，内容多可更长）。";
+  "你是知识提炼助手。下面的对话记录跨越多个话题，请**按对话实际主题分节**提炼，中文 Markdown：\n" +
+  "- 每个主题一节 `## <主题名>`（如 `## Mac Studio 显卡选型`、`## ST3215 步进接线`、`## CAN 波特率配置`），\n" +
+  "  主题名从对话内容里概括，**对话里出现过的重要话题每个都要单独成节，不许合并成一坨、不许只写一个主题**\n" +
+  "- 节内条目：关键结论/数字/命令/路径等硬信息每条一行，注明适用条件；可复用的做法与踩过的坑并入同节\n" +
+  "- 该主题有未解决事项时，节末加一行 `未决：…`\n" +
+  "- 最后可加一节 `## 横向经验` 收纳跨主题的通用心得（没有就省略）\n" +
+  "只写有信息量的内容，寒暄与流水账丢弃；**宁全勿简**——硬信息一条不许丢，篇幅随内容走；" +
+  "输出前自查：按时间顺序通读对话，确保每个讨论过的主题都有对应小节。";
 
 export interface DistillResult {
   file: string;
@@ -71,40 +150,24 @@ export async function distillSession(
   const full = sessions.getFullMessages(sessionId) as any[];
   // 只蒸 cutoff 之前的旧段落（elf 11-12 定稿）：十天内的对话保持原样继续显示/使用
   const oldMsgs = full.filter((m) => !m.archived && (m.createdAt ?? 0) < cutoff);
-  const input = collectDistillInput(oldMsgs);
-  if (!input) throw new Error(`没有 ${olderThanDays} 天前的可蒸馏内容`);
   const recentCts = full
     .filter((m) => !m.archived && m.role !== "system" && (m.createdAt ?? 0) >= cutoff)
     .map((m) => m.createdAt as number);
+  const dLines = buildDistillLines(oldMsgs);
+  if (dLines.length < MIN_MESSAGES) throw new Error(`没有 ${olderThanDays} 天前的可蒸馏内容`);
+  // map-reduce：按时间块并行蒸馏（单块喂全史必然顾此失彼——11-12 实测 4 段续写
+  // 仍 0 主题；分块后每块只面对 ≤9k 字符，主题小节天然完整），再按节名合并
+  const chunks = packChunks(dLines);
+  console.log(`🧪 蒸馏 ${chunks.length} 块（${dLines.length} 行）`);
   let body = "";
-  for (let attempt = 0; attempt < 2 && body.length < 40; attempt++) {
-    try {
-      // maxTokens 截断续写（2026-11-12：知识卡尾部"• 双"拦腰断事故）：
-      // finishReason=length 且未到上限段数 → 把已输出做 assistant 前缀接着要
-      const msgs: any[] = [{ role: "user", content: input }];
-      let acc = "";
-      for (let seg = 0; seg < 3; seg++) {
-        const resp = await llm.generate({
-          model: sess.model || defaultModel,
-          system: KP_SYSTEM,
-          messages: msgs,
-          generation: { maxTokens: 2600 },
-        });
-        acc += String(resp.content ?? "");
-        if (resp.finishReason !== "length" || seg === 2) break;
-        console.log(`✂️ 蒸馏输出截断，续写第 ${seg + 2} 段`);
-        msgs.push(
-          { role: "assistant", content: acc },
-          { role: "user", content: "从上文断点处继续输出剩余内容，只写后半截，不要重复已输出部分" },
-        );
-      }
-      body = acc.trim();
-    } catch (e: any) {
-      if (attempt === 1) throw new Error(`蒸馏调用失败: ${String(e?.message).slice(0, 120)}`);
-    }
+  for (let ci = 0; ci < chunks.length; ci++) {
+    const part = await generateKnowledge(llm, sess.model || defaultModel, chunks[ci]);
+    if (part.length >= 40) body += (body ? "\n\n" : "") + part;
+    else console.warn(`🧪 块 ${ci + 1}/${chunks.length} 结果过短，跳过`);
   }
+  if (body) body = mergeKnowledgeSections(body);
   if (body.length < 40)
-    throw new Error(`蒸馏结果过短（${body.length} 字，已重试），放弃；原会话不动`);
+    throw new Error(`蒸馏结果过短（${body.length} 字），放弃；原会话不动`);
   // 知识文件进 memory/knowledge/：混合索引 10min 周期自动收录（session-corpus 之外第二猎场）
   const dir = path.join(workspaceDir, "memory", "knowledge");
   fs.mkdirSync(dir, { recursive: true });
