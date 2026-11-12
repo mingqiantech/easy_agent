@@ -118,8 +118,11 @@ export async function distillSession(
 export function archiveHomeMessagesForRotation(sessionId: string, db = getDatabase()): number {
   try {
     const rows = db
-      .prepare("SELECT id, role, content, metadata, created_at FROM messages WHERE session_id = ? AND role != 'system'")
-      .all(sessionId) as any[];
+      .prepare(
+        `SELECT id, role, content, metadata, created_at FROM messages WHERE session_id = ?
+         AND (role != 'system' OR content LIKE '%[对话摘要]%')`,
+      )
+      .all(sessionId) as any[]; // 历史摘要条一并归档：换届后页面只留工作区头部+知识卡（2026-11-12 elf）
     if (!rows.length) return 0;
     const ts0 = Date.now();
     const ins = db.prepare(

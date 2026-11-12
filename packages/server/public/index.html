@@ -125,6 +125,8 @@
     .message.summ .bubble{border-left:4px solid var(--accent2);background:rgba(139,92,246,.06)}
     .message.summ.kp .bubble{border-left:4px solid var(--accent);background:rgba(91,122,140,.05)}
     .kp-body{font-size:13.5px;margin-top:6px}
+    .message.summ.kp .kp-sec{margin:0}
+    .kp-h{display:block;font-size:12.5px;color:var(--accent);margin-bottom:2px}
     .arch-block{margin-bottom:14px}
     .arch-block summary{cursor:pointer;font-size:12px;color:var(--muted);background:var(--card);border:1px dashed var(--border);border-radius:10px;padding:7px 12px;user-select:none}
     .arch-block summary:hover{color:var(--accent);border-color:var(--accent)}
@@ -305,7 +307,7 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
 </head>
 <body>
   <div class="sidebar" id="sidebar">
-    <div class="brand">⚡ Easy Agent <span style="font-size:10px;color:var(--muted);font-weight:400" title="构建水印：看不到 1112f 说明浏览器还在用旧缓存">1112f</span></div>
+    <div class="brand">⚡ Easy Agent <span style="font-size:10px;color:var(--muted);font-weight:400" title="构建水印：看不到 1112h 说明浏览器还在用旧缓存">1112h</span></div>
     <div class="agent-pick"><select id="agentSel" onchange="switchAgent()"></select></div>
     <div class="top-row">
       <div class="new-btn" onclick="goHome()" title="2026-11-02 起单会话滚动：日常对话都进首页会话">⌂ 首页会话</div>
@@ -665,7 +667,13 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
         if(String(m.content||'').startsWith('【知识要点】')){
           const kp=String(m.content).slice(6).trim();
           const ts=m.createdAt?`<div class="ts">${dts(m.createdAt)}</div>`:'';
-          return `<div class="message summ kp"><div class="avatar">📚</div><div><div class="bubble"><b style="font-size:12px;color:var(--accent2)">—— 本次蒸馏的知识点 ——</b><div class="kp-body md">${mdToHtml(kp)}</div></div>${ts}</div></div>`;
+          // 按 ## 小节拆开：每节一张独立卡（不同内容分别显示，elf 11-12 定稿）
+          const secs=kp.split(/^##\s+/m).map((x,i)=>i===0?x:'## '+x).filter(x=>x.trim());
+          const cards=secs.map(sec=>{
+            const title=(/^##\s*(.+)/m.exec(sec)||[])[1];
+            return `<div class="bubble kp-sec">${title?`<b class="kp-h">${esc(title)}</b>`:''}<div class="kp-body md">${mdToHtml(sec.replace(/^##[^\n]*\n?/,''))}</div></div>`;
+          }).join('');
+          return `<div class="message summ kp"><div class="avatar">📚</div><div style="display:flex;flex-direction:column;gap:8px">${ts?`<div class="ts">蒸馏知识要点</div>`:''}${cards}${ts}</div></div>`;
         }
         // 压缩产物（[对话摘要] system 消息）渲染为流内分隔条：历史不再隐形，也供右侧导航定位
         if(String(m.content||'').includes('[对话摘要]')){
@@ -1035,7 +1043,7 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
       const c=document.getElementById('messages');
       // 蒸馏换届后的页面（elf 11-12 定稿）：归档原始流水一律不渲染（数据仍在库，
       // 搜索/导出可及）；页面=【知识要点】卡 + 摘要条 + 新对话
-      const rows=messages.filter(m=>!(m.archived&&m.role!=='system')).map(bubbleHtml).filter(Boolean).join('');
+      const rows=messages.filter(m=>!m.archived).map(bubbleHtml).filter(Boolean).join('');
       c.innerHTML=rows||'<div class="empty">开始对话吧</div>';
       groupToolMessages();
       decorateTables(c);
