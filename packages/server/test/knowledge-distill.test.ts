@@ -39,24 +39,25 @@ describe("collectDistillInput（蒸馏输入清洗）", () => {
   });
 });
 
-
-// ===== 选单扩容测试（2026-11-12）：独立 :memory: 连接，绝不吃进程单例 =====
+// ===== 选单扩容 + 就地换届测试（2026-11-12）：独立 :memory: 连接，绝不吃进程单例 =====
 // （背景：_gd() 无参版本在单独跑本文件时会把测试数据写进生产 agent.db，已发生过）
 import { Database } from "bun:sqlite";
-import { listDistillCandidates } from "../src/knowledge.js";
+import { archiveHomeMessagesForRotation, listDistillCandidates } from "../src/knowledge.js";
+
+function freshDb() {
+  const d = new Database(":memory:");
+  d.exec(`CREATE TABLE sessions (id TEXT PRIMARY KEY, title TEXT, agent_id TEXT, model TEXT,
+    status TEXT, pinned INTEGER DEFAULT 0, created_at INTEGER, updated_at INTEGER, distilled_at INTEGER, distill_skip_at INTEGER);
+    CREATE TABLE messages (id TEXT PRIMARY KEY, session_id TEXT, role TEXT, content TEXT, metadata TEXT DEFAULT '{}', created_at INTEGER);
+    CREATE TABLE messages_archive (id TEXT PRIMARY KEY, session_id TEXT, role TEXT, content TEXT,
+    metadata TEXT, created_at INTEGER, archived_at INTEGER);
+    CREATE TABLE sub_agent_runs (id TEXT PRIMARY KEY, parent_session_id TEXT, child_session_id TEXT,
+    task TEXT, model TEXT, status TEXT, started_at INTEGER, finished_at INTEGER);`);
+  return d;
+}
 
 describe("listDistillCandidates 选单扩容", () => {
-  function freshDb() {
-    const d = new Database(":memory:");
-    d.exec(`CREATE TABLE sessions (id TEXT PRIMARY KEY, title TEXT, agent_id TEXT, model TEXT,
-      status TEXT, pinned INTEGER DEFAULT 0, created_at INTEGER, updated_at INTEGER, distilled_at INTEGER, distill_skip_at INTEGER);
-      CREATE TABLE messages (id TEXT PRIMARY KEY, session_id TEXT, role TEXT, content TEXT, created_at INTEGER);
-      CREATE TABLE sub_agent_runs (id TEXT PRIMARY KEY, parent_session_id TEXT, child_session_id TEXT,
-      task TEXT, model TEXT, status TEXT, started_at INTEGER, finished_at INTEGER);`);
-    return d;
-  }
-
-  it("沉寂非置顶✓ 沉寂置顶✓ cron 超体量✓ 完结子任务✓；运行中子任务/近期/小 cron 排除；已蒸馏不重复", () => {
+  it("沉寂非置顶✓ 沉寂置顶✓ cron 超体量✓ 完结子任务✓；运行中子任务/近期/小 cron 排除；已蒸馏不重复；skip 冷却", () => {
     const db = freshDb();
     const now = Date.now();
     const old = now - 11 * 86400000;
@@ -76,21 +77,49 @@ describe("listDistillCandidates 选单扩容", () => {
     mk("child-done", "[子] 完结", 0, old, 5);
     db.prepare("INSERT INTO sub_agent_runs (id,parent_session_id,child_session_id,task,model,status,started_at,finished_at) VALUES ('r2','p','child-done','t','m','ok',?,?)").run(now, now);
 
-    const picked = new Set(listDistillCandidates(10, 200, 50, db as any).map((x) => x.id));
+    let picked = new Set(listDistillCandidates(10, 200, 50, db as any).map((x) => x.id));
     expect(picked.has("idle-normal")).toBe(true);
-    expect(picked.has("idle-pinned")).toBe(true);   // 首页纳入蒸馏（不隐藏）
+    expect(picked.has("idle-pinned")).toBe(true);   // 首页纳入蒸馏（就地换届不隐藏）
     expect(picked.has("cron-huge")).toBe(true);     // 体量触发
     expect(picked.has("child-done")).toBe(true);    // 完结子任务不再被永久排除
     expect(picked.has("child-running")).toBe(false);
     expect(picked.has("cron-small")).toBe(false);
     expect(picked.has("fresh")).toBe(false);
+
+    // 已蒸馏的非置顶不再出现
     db.prepare("UPDATE sessions SET distilled_at=? WHERE id='idle-normal'").run(now);
-    expect(new Set(listDistillCandidates(10, 200, 50, db as any).map((x) => x.id)).has("idle-normal")).toBe(false);
-    // 重试冷却：skip 近期排除；冷却过期（>3d）的回来
-    db.prepare("INSERT INTO sessions (id,title,agent_id,model,status,pinned,created_at,updated_at,distill_skip_at) VALUES ('skip-hot','x','a','m','active',0,1,?,?)").run(now - 11*86400000, now);
-    db.prepare("INSERT INTO sessions (id,title,agent_id,model,status,pinned,created_at,updated_at,distill_skip_at) VALUES ('skip-cold','x','a','m','active',0,1,?,?)").run(now - 11*86400000, now - 4*86400000);
-    const p2 = new Set(listDistillCandidates(10, 200, 50, db as any).map((x) => x.id));
-    expect(p2.has("skip-hot")).toBe(false);
-    expect(p2.has("skip-cold")).toBe(true);
+    picked = new Set(listDistillCandidates(10, 200, 50, db as any).map((x) => x.id));
+    expect(picked.has("idle-normal")).toBe(false);
+
+    // 首页周期性换届：蒸馏后又有新活动且重新沉寂 → 再入单；蒸馏后无新活动 → 不重复
+    db.prepare("INSERT INTO sessions (id,title,agent_id,model,status,pinned,created_at,updated_at,distilled_at) VALUES ('home-again','首页','a','m','active',1,?,?,?)").run(1, now - 11 * 86400000, now - 15 * 86400000);
+    db.prepare("INSERT INTO sessions (id,title,agent_id,model,status,pinned,created_at,updated_at,distilled_at) VALUES ('home-stale','首页','a','m','active',1,?,?,?)").run(1, now - 11 * 86400000, now - 2 * 86400000);
+    picked = new Set(listDistillCandidates(10, 200, 50, db as any).map((x) => x.id));
+    expect(picked.has("home-again")).toBe(true);
+    expect(picked.has("home-stale")).toBe(false);
+
+    // transient 失败冷却：近期 skip 排除；冷却过期回来
+    db.prepare("INSERT INTO sessions (id,title,agent_id,model,status,pinned,created_at,updated_at,distill_skip_at) VALUES ('skip-hot','x','a','m','active',0,?,?,?)").run(now - 11 * 86400000, now - 11 * 86400000, now);
+    db.prepare("INSERT INTO sessions (id,title,agent_id,model,status,pinned,created_at,updated_at,distill_skip_at) VALUES ('skip-cold','x','a','m','active',0,?,?,?)").run(now - 11 * 86400000, now - 11 * 86400000, now - 4 * 86400000);
+    picked = new Set(listDistillCandidates(10, 200, 50, db as any).map((x) => x.id));
+    expect(picked.has("skip-hot")).toBe(false);
+    expect(picked.has("skip-cold")).toBe(true);
+  });
+});
+
+describe("archiveHomeMessagesForRotation（首页就地换届搬运）", () => {
+  it("非 system 消息全量移入归档表；system 头部保留；重复调用幂等", () => {
+    const db = freshDb();
+    db.prepare("INSERT INTO sessions (id,title,agent_id,model,status,pinned,created_at,updated_at) VALUES ('h','首页','a','m','active',1,1,1)").run();
+    const ins = db.prepare("INSERT INTO messages (id,session_id,role,content,created_at) VALUES (?,?,?,?,?)");
+    ins.run("sys1", "h", "system", "工作区头部快照", 1);
+    ins.run("u1", "h", "user", "旧问题", 2);
+    ins.run("a1", "h", "assistant", "旧回答", 3);
+    expect(archiveHomeMessagesForRotation("h", db as any)).toBe(2);
+    const left = db.prepare("SELECT role, COUNT(*) c FROM messages WHERE session_id='h' GROUP BY role").all() as any[];
+    expect(left.length).toBe(1);
+    expect(left[0].role).toBe("system");
+    expect((db.prepare("SELECT COUNT(*) c FROM messages_archive WHERE session_id='h'").get() as any).c).toBe(2);
+    expect(archiveHomeMessagesForRotation("h", db as any)).toBe(0); // 幂等
   });
 });

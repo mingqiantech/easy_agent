@@ -95,12 +95,43 @@ export async function distillSession(
   const head = `# 知识点 · ${sess.title ?? sessionId}\n\n> 蒸馏自 ${new Date(sess.createAt ?? full[0]?.createdAt ?? Date.now()).toLocaleDateString("zh-CN")}–${new Date(sess.updateAt).toLocaleDateString("zh-CN")} 的会话（${full.length} 条），原会话已归档可查。\n\n`;
   fs.writeFileSync(file, head + body + "\n", "utf-8");
   db.prepare("UPDATE sessions SET distilled_at = ? WHERE id = ?").run(Date.now(), sessionId);
-  // 非置顶整场隐藏出列表（数据全留可查）；首页置顶只提知识不隐藏（2026-11-12：
-  // 首页的零散旧内容由"知识文件+压缩+60天归档"三层消化，会话本体永不消失）
-  if (!sess.pinned)
+  // 非置顶整场隐藏出列表（数据全留可查）。首页置顶就地换届（2026-11-12 elf：“不自建新页面，页面自己更新”）：
+  // 不建新会话——把非 system 消息全部移入 messages_archive（UI 默认折叠可展开，搜索命中），
+  // 工作区头部保留，会话继续 id 不变从干净上下文滚动；旧事实靠知识文件 + recall 召回
+  if (!sess.pinned) {
     db.prepare("UPDATE sessions SET status = 'archived' WHERE id = ?").run(sessionId);
+  } else {
+    archiveHomeMessagesForRotation(sessionId, db);
+  }
   const points = (body.match(/^[-*]|^\d+\./gm) ?? []).length;
   return { file, points, archived: !sess.pinned };
+}
+
+/** 首页就地换届的搬运步骤（导出供测试）：非 system 消息全量移入归档表；
+ * 失败只警告不阻断（知识文件已写成，宁多保留上下文不可丢数据） */
+export function archiveHomeMessagesForRotation(sessionId: string, db = getDatabase()): number {
+  try {
+    const rows = db
+      .prepare("SELECT id, role, content, metadata, created_at FROM messages WHERE session_id = ? AND role != 'system'")
+      .all(sessionId) as any[];
+    if (!rows.length) return 0;
+    const ts0 = Date.now();
+    const ins = db.prepare(
+      `INSERT OR REPLACE INTO messages_archive (id, session_id, role, content, metadata, created_at, archived_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    );
+    const del = db.prepare("DELETE FROM messages WHERE id = ?");
+    db.transaction(() => {
+      for (const m of rows) {
+        ins.run(m.id, sessionId, m.role, m.content, m.metadata ?? "{}", m.created_at, ts0);
+        del.run(m.id);
+      }
+    })();
+    return rows.length;
+  } catch (e: any) {
+    console.warn("首页换届消息归档失败（知识文件已成，不强求）:", String(e?.message).slice(0, 120));
+    return 0;
+  }
 }
 
 /**
@@ -123,7 +154,8 @@ export function listDistillCandidates(
   return db
     .prepare(
       `SELECT id, agent_id, pinned FROM sessions
-       WHERE status='active' AND distilled_at IS NULL
+       WHERE status='active'
+         AND (distilled_at IS NULL OR (pinned = 1 AND updated_at > COALESCE(distilled_at, 0)))
          AND (distill_skip_at IS NULL OR distill_skip_at < ?)
          AND id NOT IN (SELECT child_session_id FROM sub_agent_runs WHERE status='running')
          AND (

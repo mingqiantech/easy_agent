@@ -123,6 +123,11 @@
     .message.toolchip .bubble{background:var(--tool);color:var(--muted);font-size:12px;font-family:monospace}
     .message.summ{max-width:100%}
     .message.summ .bubble{border-left:4px solid var(--accent2);background:rgba(139,92,246,.06)}
+    .arch-block{margin-bottom:14px}
+    .arch-block summary{cursor:pointer;font-size:12px;color:var(--muted);background:var(--card);border:1px dashed var(--border);border-radius:10px;padding:7px 12px;user-select:none}
+    .arch-block summary:hover{color:var(--accent);border-color:var(--accent)}
+    .arch-block[open]{padding-top:4px}
+    .arch-block[open] summary{margin-bottom:8px}
     .ts{font-size:10px;color:var(--muted);margin-top:5px}
     .input-area{padding:6px 14px;display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;background:transparent}
     /* 宽屏时输入行居中限宽，不再整条横穿；窄屏自动全宽 */
@@ -298,7 +303,7 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
 </head>
 <body>
   <div class="sidebar" id="sidebar">
-    <div class="brand">⚡ Easy Agent <span style="font-size:10px;color:var(--muted);font-weight:400" title="构建水印：看不到 1112d 说明浏览器还在用旧缓存">1112d</span></div>
+    <div class="brand">⚡ Easy Agent <span style="font-size:10px;color:var(--muted);font-weight:400" title="构建水印：看不到 1112e 说明浏览器还在用旧缓存">1112e</span></div>
     <div class="agent-pick"><select id="agentSel" onchange="switchAgent()"></select></div>
     <div class="top-row">
       <div class="new-btn" onclick="goHome()" title="2026-11-02 起单会话滚动：日常对话都进首页会话">⌂ 首页会话</div>
@@ -1020,7 +1025,21 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
       const{messages}=await r.json().catch(()=>({messages:undefined}));
       if(!Array.isArray(messages))return;
       const c=document.getElementById('messages');
-      const rows=messages.map(bubbleHtml).filter(Boolean).join('');
+      // 就地换届（2026-11-12）：连续归档段折叠为可展开块，页面默认只露活跃窗口
+      let rows='',archRun=[];
+      const flushArch=()=>{
+        if(!archRun.length)return;
+        const inner=archRun.map(bubbleHtml).filter(Boolean).join('');
+        rows+=`<details class="arch-block"><summary>↑ ${archRun.length} 条更早消息（已蒸馏/归档，点击展开）</summary>${inner}</details>`;
+        archRun=[];
+      };
+      for(const m of messages){
+        if(m.archived && m.role!=='system'){archRun.push(m);continue;}
+        // 压缩摘要分隔条（system+对话摘要）也归入折叠区（其内容已在知识文件/新摘要里）
+        flushArch();
+        const h=bubbleHtml(m);if(h)rows+=h;
+      }
+      flushArch();
       c.innerHTML=rows||'<div class="empty">开始对话吧</div>';
       groupToolMessages();
       decorateTables(c);
