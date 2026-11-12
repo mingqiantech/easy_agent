@@ -98,6 +98,7 @@
     .summ-nav.show{display:flex}
     .sn-item{width:8px;height:8px;flex-shrink:0;border-radius:50%;background:#c8cbd2;cursor:pointer;transition:transform .12s,background .12s;box-shadow:0 0 0 2px var(--bg)}
     .sn-item:hover{background:var(--accent2);transform:scale(1.6)}
+    .sn-item[data-n]{height:6px;border-radius:3px;background:#d3d6dc}
     /* 当前节点：实心主色点（比灰点大一档）+ 上下撑开拉开间距；其余紧凑灰点 */
     .sn-item.sn-active{position:relative;width:10px;height:10px;background:var(--accent);box-shadow:0 0 0 2px var(--bg);transform:none;margin:16px 0}
     .sn-item.sn-active:hover{transform:scale(1.3)}
@@ -297,7 +298,7 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
 </head>
 <body>
   <div class="sidebar" id="sidebar">
-    <div class="brand">⚡ Easy Agent <span style="font-size:10px;color:var(--muted);font-weight:400" title="构建水印：看不到 1110b 说明浏览器还在用旧缓存">1110b</span></div>
+    <div class="brand">⚡ Easy Agent <span style="font-size:10px;color:var(--muted);font-weight:400" title="构建水印：看不到 1112a 说明浏览器还在用旧缓存">1112a</span></div>
     <div class="agent-pick"><select id="agentSel" onchange="switchAgent()"></select></div>
     <div class="top-row">
       <div class="new-btn" onclick="goHome()" title="2026-11-02 起单会话滚动：日常对话都进首页会话">⌂ 首页会话</div>
@@ -1037,6 +1038,10 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
       return String(t).replace(/\[长文本已存文件：[^\]]*\][\s\S]*?--- 前 400 字预览 ---/,'')
         .replace(/^#+\s*/gm,'').replace(/[*`>]/g,'').replace(/\s+/g,' ').trim().slice(0,38);
     }
+    /* 右侧导航条防溢出（2026-11-12）：锚点数 ≤MAX_DOTS 一一对应；
+       超长会话旧区聚合——摘要点保留，连续用户消息折成"×N"组点（点跳组内第一条），
+       最近 RECENT_DOTS 条恒逐个渲染。每点带 data-a/data-b 索引区间供高亮判定 */
+    const MAX_DOTS=40, RECENT_DOTS=24;
     function buildSummNav(messages){
       const nav=document.getElementById('summNav');
       const anchors=(messages||[]).flatMap((m,i)=>{
@@ -1045,13 +1050,30 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
         return [];
       });
       if(!anchors.length){nav.classList.remove('show');nav.innerHTML='';return;}
-      nav.innerHTML=anchors.map((x,idx)=>{
+      const mk=(x,idx,a,b)=>{
         const ts=x.m.createdAt?hhmm(x.m.createdAt):'';
         let body,tag='';
         if(x.kind==='s'){body=navPreview(String(x.m.content).split('[对话摘要]')[1]||'');tag='🗜 压缩 · ';}
         else body=navPreview(x.m.content)||((x.m.metadata&&x.m.metadata.images&&x.m.metadata.images.length)?`🖼 图片 ×${x.m.metadata.images.length}`:'（空消息）');
-        return `<div class="sn-item${x.kind==='s'?' sn-summ':''}" onclick="jumpNav(${idx})" data-ts="${esc(tag+ts)}" data-body="${esc(body.slice(0,200))}"></div>`;
-      }).join('');
+        return `<div class="sn-item${x.kind==='s'?' sn-summ':''}" onclick="jumpNav(${idx})" data-a="${a}" data-b="${b}" data-ts="${esc(tag+ts)}" data-body="${esc(body.slice(0,200))}"${b>a?` data-n="${b-a+1}"`:''}></div>`;
+      };
+      let html='';
+      if(anchors.length<=MAX_DOTS){
+        html=anchors.map((x,idx)=>mk(x,idx,idx,idx)).join('');
+      }else{
+        const split=Math.max(0,anchors.length-RECENT_DOTS);
+        // 旧区：摘要逐个保留；连续 q 段折成组点
+        let i=0, run=null;
+        const flush=()=>{ if(run) html+=mk(anchors[run.a],run.a,run.a,run.b); run=null; };
+        for(;i<split;i++){
+          const x=anchors[i];
+          if(x.kind==='s'){flush();html+=mk(x,i,i,i);}
+          else{ run? run.b=i : run={a:i,b:i}; }
+        }
+        flush();
+        for(i=split;i<anchors.length;i++) html+=mk(anchors[i],i,i,i);
+      }
+      nav.innerHTML=html;
       nav.classList.add('show');
       // 悬停浮卡：委托在轨道上（绑定一次即可，innerHTML 重渲染不影响）
       if(!nav.dataset.tipBound){
@@ -1081,14 +1103,18 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
       if(!dots.length)return;
       const c=document.getElementById('messages');
       const anchors=document.querySelectorAll('#messages .message.user, #messages .message.summ.titem');
-      if(anchors.length!==dots.length)return; // DOM 与锚点错位时不动作
+      if(!anchors.length)return;
       const line=c.scrollTop+c.clientHeight*0.33;
       let act=-1;
       anchors.forEach((el,i)=>{if(el.offsetTop<line)act=i;});
-      // 已滚到底：最后一条消息高于 1/3 线时按线判断永远够不到末点 → 直接钉最后一个
       if(c.scrollHeight-c.scrollTop-c.clientHeight<8)act=anchors.length-1;
-      dots.forEach((d,i)=>d.classList.toggle('sn-active',i===act));
-      if(act>=0&&dots[act]&&dots[act].scrollIntoView)dots[act].scrollIntoView({block:'nearest'}); // 轨道跟着走 */
+      // 区间高亮（组点 data-a..data-b 覆盖多个锚点）
+      dots.forEach(d=>{
+        const a=+d.dataset.a, b=+(d.dataset.b??d.dataset.a);
+        d.classList.toggle('sn-active', act>=a && act<=b);
+      });
+      const actDot=[...dots].find(d=>d.classList.contains('sn-active'));
+      if(actDot&&actDot.scrollIntoView)actDot.scrollIntoView({block:'nearest'}); // 轨道跟着走 */
     }
     function jumpNav(idx){
       // DOM 里用户消息按气泡类匹配；工具内嵌的 user 变体不存在，顺位与 anchors 一致
