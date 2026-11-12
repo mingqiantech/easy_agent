@@ -129,3 +129,43 @@ describe("archiveOlderThan（换届搬运：只动 cutoff 前）", () => {
     expect(archiveOlderThan("h", now + 9 * 86400000, db as any)).toBe(2);
   });
 });
+
+describe("distillSession 截断续写", () => {
+  it("finishReason=length 时以 assistant 前缀续写并拼接全文", async () => {
+    const fs = await import("node:fs");
+    const os = await import("node:os");
+    const path = await import("node:path");
+    const { distillSession } = await import("../src/knowledge.js");
+    const { getDatabase } = await import("@easy-agent/core/database");
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ea-cont-"));
+    getDatabase(":memory:");
+    const db = getDatabase();
+    const now = Date.now(), DAY = 86400000;
+    db.prepare("INSERT INTO sessions (id,agent_id,model,title,status,pinned,created_at,updated_at) VALUES ('csess','cont','m','续写会话','active',1,?,?)").run(now - 30 * DAY, now - 20 * DAY);
+    const ins = db.prepare("INSERT INTO messages (id,session_id,role,content,metadata,created_at) VALUES (?,?,?,?,?,?)");
+    for (let i = 0; i < 8; i++)
+      ins.run("c" + i, "csess", i % 2 ? "assistant" : "user", `旧对话第${i}条，内容是关于 X${i} 的参数与结论，足够长以通过清洗${"详".repeat(60)}`, "{}", now - (25 - i) * DAY);
+    const segs = ["## 结论与事实\n- 前半段结论到「双 Sp", "ark 为例：约 19 tok/s。」\n", "尾巴收尾。"];
+    let call = 0, lastMsgs: any;
+    const llm: any = {
+      generate: async (req: any) => {
+        lastMsgs = req.messages;
+        const out = segs[Math.min(call, 2)];
+        call++;
+        return { content: out, finishReason: call < 3 ? "length" : "stop" };
+      },
+    };
+    const sm: any = { get: () => ({ id: "csess", agentId: "cont", model: "m", title: "续写会话", pinned: true, status: "active", createAt: now - 30 * DAY, updateAt: now }), getFullMessages: () => db.prepare("SELECT * FROM messages WHERE session_id='csess' ORDER BY created_at").all() };
+    const r = await distillSession(llm, sm, "csess", dir, "m", 10);
+    expect(call).toBe(3);
+    expect(r.points).toBeGreaterThanOrEqual(1);
+    const kp = db.prepare("SELECT content FROM messages WHERE session_id='csess' AND content LIKE '【知识要点】%'").get() as any;
+    expect(kp.content).toContain("前半段结论到「双 Spark 为例"); // 断点无缝拼接
+    expect(kp.content).toContain("尾巴收尾");
+    // 续写请求带 assistant 前缀 + 继续指令
+    expect(lastMsgs.some((m: any) => m.role === "assistant")).toBe(true);
+    // 文件也是全文
+    const f = r.file;
+    expect(fs.readFileSync(f, "utf-8")).toContain("尾巴收尾");
+  });
+});

@@ -79,13 +79,26 @@ export async function distillSession(
   let body = "";
   for (let attempt = 0; attempt < 2 && body.length < 40; attempt++) {
     try {
-      const resp = await llm.generate({
-        model: sess.model || defaultModel,
-        system: KP_SYSTEM,
-        messages: [{ role: "user", content: input }],
-        generation: { maxTokens: 2600 },
-      });
-      body = String(resp.content ?? "").trim();
+      // maxTokens 截断续写（2026-11-12：知识卡尾部"• 双"拦腰断事故）：
+      // finishReason=length 且未到上限段数 → 把已输出做 assistant 前缀接着要
+      const msgs: any[] = [{ role: "user", content: input }];
+      let acc = "";
+      for (let seg = 0; seg < 3; seg++) {
+        const resp = await llm.generate({
+          model: sess.model || defaultModel,
+          system: KP_SYSTEM,
+          messages: msgs,
+          generation: { maxTokens: 2600 },
+        });
+        acc += String(resp.content ?? "");
+        if (resp.finishReason !== "length" || seg === 2) break;
+        console.log(`✂️ 蒸馏输出截断，续写第 ${seg + 2} 段`);
+        msgs.push(
+          { role: "assistant", content: acc },
+          { role: "user", content: "从上文断点处继续输出剩余内容，只写后半截，不要重复已输出部分" },
+        );
+      }
+      body = acc.trim();
     } catch (e: any) {
       if (attempt === 1) throw new Error(`蒸馏调用失败: ${String(e?.message).slice(0, 120)}`);
     }

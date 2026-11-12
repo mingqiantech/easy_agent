@@ -90,7 +90,11 @@ export class OpenAIProvider implements LLMProvider {
             Number((result.experimental_providerMetadata as any)?.openai?.cachedTokens ?? 0) || undefined,
         },
         finishReason:
-          result.finishReason === "tool-calls" ? "tool_calls" : "stop",
+          result.finishReason === "tool-calls"
+            ? "tool_calls"
+            : result.finishReason === "length"
+              ? "length"
+              : "stop",
       };
     } catch (error: any) {
       throw new Error(`OpenAI API error: ${error.message}`);

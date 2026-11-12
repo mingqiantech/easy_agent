@@ -286,7 +286,11 @@ export class AnthropicProvider implements LLMProvider {
           (result.experimental_providerMetadata as any)?.anthropic,
         ),
         finishReason:
-          result.finishReason == "tool-calls" ? "tool_calls" : "stop",
+          result.finishReason == "tool-calls"
+            ? "tool_calls"
+            : result.finishReason == "length"
+              ? "length" // 截断信号必须透传（2026-11-12：知识卡被 maxTokens 拦腰砍无法感知）
+              : "stop",
       };
     } catch (error: any) {
       throw new Error(`Anthropic API error: ${error.message}`);
