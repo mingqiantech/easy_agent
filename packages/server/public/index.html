@@ -1147,6 +1147,7 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
       // DOM 里用户消息按气泡类匹配；工具内嵌的 user 变体不存在，顺位与 anchors 一致
       const els=document.querySelectorAll('#messages .message.user, #messages .message.summ.titem');
       const el=els[idx];if(!el)return;
+      el.closest("details")&&el.closest("details").setAttribute("open",""); // 归档折叠块内锚点先展开再跳
       hideNavTip();
       el.scrollIntoView({block:'center',behavior:'smooth'});
       el.classList.add('flash');setTimeout(()=>el.classList.remove('flash'),2600);
