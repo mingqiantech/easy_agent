@@ -115,19 +115,26 @@ export class MemorySearcher {
     return hits;
   }
 
+  /** 手动递归（2026-11-12 修）：readdir 的 recursive 模式 Dirent.name 只有文件名，
+   * path.join(dir, e.name) 会丢子目录——knowledge//archive//.dreams/ 下的文件
+   * 全部拼成不存在的路径被静默跳过。点目录（含 .dreams）沿用原行为全量纳入 */
   private async listMdFiles(dir: string): Promise<string[]> {
     const results: string[] = [];
-    try {
-      const entries = await fs.readdir(dir, {
-        withFileTypes: true,
-        recursive: true,
-      });
-      for (const e of entries) {
-        if (e.isFile() && e.name.endsWith(".md") && !e.name.startsWith(".")) {
-          results.push(path.join(dir, e.name));
-        }
+    const walk = async (d: string) => {
+      let entries: any[];
+      try {
+        entries = await fs.readdir(d, { withFileTypes: true });
+      } catch {
+        return;
       }
-    } catch {}
+      for (const e of entries) {
+        const p = path.join(d, e.name);
+        if (e.isDirectory()) await walk(p);
+        else if (e.isFile() && e.name.endsWith(".md") && !e.name.startsWith("."))
+          results.push(p);
+      }
+    };
+    await walk(dir);
     return results;
   }
 }
