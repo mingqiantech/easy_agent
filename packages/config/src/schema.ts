@@ -176,6 +176,16 @@ export const ConfigSchema = z.object({
   approvals: z
     .object({ enabled: z.boolean().default(false) })
     .optional(),
+  /** 会话知识蒸馏（2026-11-12）：沉寂≥idleDays 的非置顶会话自动提炼知识点入
+   *  memory/knowledge/（可检索可展示），原会话归档隐藏；enabled=false 关闭自动（手动 API 仍可用） */
+  knowledge: z
+    .object({
+      enabled: z.boolean().default(true),
+      idleDays: z.number().int().min(3).max(90).default(14),
+      /** 单次最多蒸馏几场（LLM 成本防抖） */
+      maxPerRun: z.number().int().min(1).max(10).default(3),
+    })
+    .optional(),
   /** 检索式记忆（2026-11-11）：每轮回答前按用户问题从记忆/会话索引捞相关片段，
    *  作临时 system 追加在请求末尾（不落库、不动缓存前缀）。默认关——
    *  开启需 bge 向量服务在线；ea-config recall on 打开 */

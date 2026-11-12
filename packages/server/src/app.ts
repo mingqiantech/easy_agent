@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { distillSession } from "./knowledge.js";
 import { PermissionManager, defaultRules } from "@easy-agent/core/permission/index";
 import { SkillManager } from "@easy-agent/core/skill/manager";
 import { resolveRef } from "@easy-agent/config/models";
@@ -770,6 +771,55 @@ export function createApp(deps: ServerDeps): Hono {
         thinking: agent.thinking,
       },
     });
+  });
+
+  // 知识蒸馏（2026-11-12）：单场手动触发；结果写 agent 工作区 memory/knowledge/，会话归档隐藏
+  app.post("/api/sessions/:id/distill", async (c) => {
+    const id = c.req.param("id");
+    const sess = deps.sessions.get(id);
+    if (!sess) return c.json({ error: "not found" }, 404);
+    const ws = (deps.agents[sess.agentId] as any)?.workspaceDir;
+    if (!ws) return c.json({ error: "agent 工作区缺失" }, 500);
+    try {
+      const r = await distillSession(deps.llm, deps.sessions, id, ws, deps.config.defaultModel ?? sess.model);
+      return c.json({ ok: true, file: r.file, points: r.points, knowledge: r.file });
+    } catch (e: any) {
+      return c.json({ error: String(e?.message ?? e) }, 400);
+    }
+  });
+
+  // 知识点列表（供 📚 页）：本 agent 工作区 memory/knowledge/*.md，新→旧
+  app.get("/api/knowledge", async (c) => {
+    const agentName = c.req.query("agent") || undefined;
+    const wd = agentName ? (deps.agents[agentName] as any)?.workspaceDir : undefined;
+    const all = Object.values(deps.agents) as any[];
+    const dirs = wd ? all.filter((a) => a.workspaceDir === wd) : all;
+    const items: Array<{ agent: string; name: string; file: string; mtime: number; chars: number }> = [];
+    for (const d of dirs) {
+      const kdir = path.join(d.workspaceDir, "memory", "knowledge");
+      try {
+        for (const f of fs.readdirSync(kdir)) {
+          if (!f.endsWith(".md")) continue;
+          const st = fs.statSync(path.join(kdir, f));
+          items.push({ agent: d.name, name: f.replace(/\.md$/, ""), file: path.join(kdir, f), mtime: st.mtimeMs, chars: st.size });
+        }
+      } catch {}
+    }
+    items.sort((a, b) => b.mtime - a.mtime);
+    return c.json({ items: items.slice(0, 100) });
+  });
+  // 知识点正文读取
+  app.get("/api/knowledge/file", async (c) => {
+    const q = c.req.query("path") ?? "";
+    const dirs = Object.values(deps.agents).map((a: any) => a.workspaceDir).filter(Boolean) as string[];
+    const abs = path.resolve(q);
+    if (!dirs.some((d) => abs.startsWith(path.join(d, "memory", "knowledge"))) || !abs.endsWith(".md"))
+      return c.json({ error: "路径不在知识目录内" }, 403);
+    try {
+      return c.json({ markdown: await fs.promises.readFile(abs, "utf-8") });
+    } catch {
+      return c.json({ error: "文件不存在" }, 404);
+    }
   });
 
   // 记忆资源按 agent 归属（多工作区隔离）；缺省 default 旧共享区

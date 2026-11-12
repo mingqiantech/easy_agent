@@ -5,6 +5,7 @@ import path from "node:path";
 import { createApp } from "./app.js";
 import { createRecallProvider } from "./recall.js";
 import { purgeUploads } from "./uploads.js";
+import { autoDistillIdle } from "./knowledge.js";
 import { LLMClient } from "@easy-agent/llm/client";
 import { SessionManager } from "@easy-agent/core/session";
 import { ToolRegistry } from "@easy-agent/core/tool/registry";
@@ -711,6 +712,20 @@ async function main() {
       };
       setTimeout(runArchive, 8000);
       setInterval(runArchive, 12 * 3600000);
+      // 知识蒸馏自动扫尾（2026-11-12）：沉寂≥idleDays 的非置顶会话提炼知识点后归档；
+      // 首次延后 3 分钟（等索引/模型就绪），之后每 12h 搭时间归档同一节奏
+      if (config.knowledge?.enabled !== false) {
+        const runDistill = () =>
+          autoDistillIdle(llm, sessions, {
+            idleDays: config.knowledge?.idleDays ?? 14,
+            maxPerRun: config.knowledge?.maxPerRun ?? 3,
+            agents: agents as unknown as Record<string, { workspaceDir: string }>,
+            defaultModel: config.defaultModel,
+            log: (m) => console.log(m),
+          }).catch(() => {});
+        setTimeout(runDistill, 180000);
+        setInterval(runDistill, 12 * 3600000);
+      }
       // uploads 回收（引用感知，2026-11-10）：搭同一调度，无引用且超保留期才删
       const purgeDays = Number(process.env.EASY_AGENT_UPLOADS_PURGE_DAYS ?? 14);
       if (Number.isFinite(purgeDays) && purgeDays > 0) {

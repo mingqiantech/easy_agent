@@ -298,7 +298,7 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
 </head>
 <body>
   <div class="sidebar" id="sidebar">
-    <div class="brand">⚡ Easy Agent <span style="font-size:10px;color:var(--muted);font-weight:400" title="构建水印：看不到 1112a 说明浏览器还在用旧缓存">1112a</span></div>
+    <div class="brand">⚡ Easy Agent <span style="font-size:10px;color:var(--muted);font-weight:400" title="构建水印：看不到 1112b 说明浏览器还在用旧缓存">1112b</span></div>
     <div class="agent-pick"><select id="agentSel" onchange="switchAgent()"></select></div>
     <div class="top-row">
       <div class="new-btn" onclick="goHome()" title="2026-11-02 起单会话滚动：日常对话都进首页会话">⌂ 首页会话</div>
@@ -321,6 +321,7 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
         <div class="tab" id="tabKnow" onclick="showView('know')">🧠 知识拓扑</div>
         <div class="tab" id="tabSettings" onclick="showView('settings')">⚙️ 设置</div>
         <div class="tab" id="tabUsage" onclick="showView('usage')">📊 用量</div>
+        <div class="tab" id="tabKp" onclick="showView('kp')">📚 知识点</div>
       </div>
       <div class="model-pick">
         <label>💭 思考</label>
@@ -442,6 +443,11 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
       </div>
     </div>
 
+    <div class="view" id="kpView" hidden>
+      <div class="know-bar"><select id="kpAgent" onchange="loadKp()"><option value="">全部 agent</option></select>
+      <span class="hint" style="margin:4px 0 0">长会话沉寂后自动提炼成知识点（也可在会话列表点 🧪 手动蒸馏）；原会话归档隐藏但数据保留可查。</span></div>
+      <div class="settings-grid" id="kpList"></div>
+    </div>
     <div class="view" id="usageView" hidden>
       <div class="usage-head">统计范围
         <select id="usageDays" onchange="try{localStorage.setItem('ea.usageDays',this.value)}catch(e){};loadUsage()">
@@ -566,7 +572,8 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
             <div class="session-title">${s.pinned?'<span class="home-tag">⌂</span>':''}${esc(s.title||'新会话')}</div>
             <div class="session-meta">${s.messageCount} 条 · ${hhmm(s.updateAt)} · ${esc((s.model||'').split('/').pop())}</div>
           </div>
-          ${s.pinned?'':`<button class="act-btn" title="重命名" onclick="event.stopPropagation();renameSession('${s.id}')">✎</button>
+          ${s.pinned?'':`<button class="act-btn" title="蒸馏知识点（提炼后归档）" onclick="event.stopPropagation();distillSession('${s.id}')">🧪</button>
+          <button class="act-btn" title="重命名" onclick="event.stopPropagation();renameSession('${s.id}')">✎</button>
           <button class="act-btn del" title="删除会话" onclick="event.stopPropagation();delSession('${s.id}')">✕</button>`}
         </div>`).join('');
       {const cur=sorted.find(x=>x.id===sid);window.__sessTitle=cur?(cur.title||"首页会话"):"会话";}
@@ -1271,7 +1278,7 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
     /* ── 拓扑视图 ── */
     function showView(v){
       curView=v;syncHash();
-      const map={chat:'chatView',topo:'topoView',settings:'settingsView',usage:'usageView',know:'knowView'};
+      const map={chat:'chatView',topo:'topoView',settings:'settingsView',usage:'usageView',know:'knowView',kp:'kpView'};
       for(const k in map)document.getElementById(map[k]).hidden=v!==k;
       for(const t of ['Chat','Topo','Know','Settings','Usage'])document.getElementById('tab'+t).classList.toggle('active',v===t.toLowerCase());
       if(topoTimer){clearInterval(topoTimer);topoTimer=null;}
@@ -1280,6 +1287,7 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
       if(v==='know'){loadKnowledge();}
       if(v==='settings'){loadSettingsView();loadBackups();loadRetrieval();loadSkillsCard();}
       if(v==='usage'){loadUsage();usageTimer=setInterval(loadUsage,15000);}
+      if(v==='kp'){loadKp();}
     }
     async function refreshTopo(){
       try{
@@ -1935,6 +1943,40 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
         return `<g>${bars}<text x="${x+bw/2}" y="${H-12}" font-size="9" fill="#8b93a3" text-anchor="middle">${d.slice(5)}</text></g>`;
       }).join('');
       document.getElementById('agentChartLegend').innerHTML=agents.map((ag,ix)=>`<span style="margin-right:12px"><i style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${COLORS[ix%COLORS.length]}"></i> ${esc(ag)}</span>`).join('');
+    }
+
+
+    /* ── 知识点页（2026-11-12）：蒸馏产物列表 + 展开阅读；单会话手动蒸馏 ── */
+    async function loadKp(){
+      try{
+        const sel=document.getElementById('kpAgent');
+        if(sel.options.length<=1)(window.__agents||[]).forEach(a=>{const o=document.createElement('option');o.value=a.name;o.textContent=a.name;sel.appendChild(o);});
+        if(!window.__kpAgentInited){window.__kpAgentInited=1;try{sel.value=agent;}catch(e){}}
+        const q=sel.value?`?agent=${encodeURIComponent(sel.value)}`:'';
+        const j=await (await fetch(`${API}/api/knowledge${q}`)).json();
+        const el=document.getElementById('kpList');
+        if(!(j.items||[]).length){el.innerHTML='<div class="card" style="grid-column:1/-1"><h3>暂无知识点</h3><div class="hint" style="margin-top:0">会话沉寂 ≥14 天会自动蒸馏；或在左侧会话条目点 🧪 立即蒸馏。</div></div>';return;}
+        el.innerHTML=j.items.map(k=>`<div class="card"><h3>📚 ${esc(k.name)}</h3>
+          <div class="hint" style="margin-top:0">${esc(k.agent)} · ${new Date(k.mtime).toLocaleDateString('zh-CN')} · ${(k.chars/1024).toFixed(1)}KB
+          <span class="expand-btn" onclick="kpOpen('${esc(k.file)}',this)">展开全文 ▾</span></div>
+          <div class="kp-body md" style="display:none;margin-top:8px"></div></div>`).join('');
+      }catch(e){}
+    }
+    async function kpOpen(file,btn){
+      const body=btn.closest('.card').querySelector('.kp-body');
+      if(body.style.display!=='none'){body.style.display='none';btn.textContent='展开全文 ▾';return;}
+      btn.textContent='加载中…';
+      const j=await (await fetch(`${API}/api/knowledge/file?path=${encodeURIComponent(file)}`)).json();
+      body.innerHTML=j.error?'<i>'+esc(j.error)+'</i>':mdToHtml(j.markdown||'');
+      body.style.display='block';btn.textContent='收起 ▴';
+    }
+    async function distillSession(id){
+      if(!confirm('蒸馏该会话？\n· 剔除巡检流水/工具轮等无效内容\n· LLM 提炼知识点写入工作区 memory/knowledge/\n· 原会话归档隐藏（数据保留，可在知识点页溯源）'))return;
+      const r=await (await fetch(`${API}/api/sessions/${id}/distill`,{method:'POST'})).json();
+      if(r.error){alert('❌ '+r.error);return;}
+      alert(`🧪 蒸馏完成：${r.points} 条知识点\n${r.file.split('/').pop()}\n会话已归档（知识点页可看）`);
+      if(id===sid){sid=null;syncHash();}
+      await loadSessions();
     }
 
     (async function init(){

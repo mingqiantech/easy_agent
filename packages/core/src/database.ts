@@ -365,6 +365,10 @@ function initializeSchema(db: Database): void {
   if (!cols.some((c) => c.name === "pinned")) {
     db.exec("ALTER TABLE sessions ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0");
   }
+  // 知识蒸馏（2026-11-12 elf 点单）：长会话提炼成知识文件后打标，防重复蒸馏
+  if (!cols.some((c) => c.name === "distilled_at")) {
+    db.exec("ALTER TABLE sessions ADD COLUMN distilled_at INTEGER");
+  }
 
   // 2026-10-27 Dreaming 分层改造：软休眠列（行永不删，被召回可复活）
   const stmCols = db.prepare("PRAGMA table_info(short_term_memory)").all() as Array<{ name: string }>;
