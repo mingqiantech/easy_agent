@@ -102,6 +102,12 @@ export async function distillSession(
     db.prepare("UPDATE sessions SET status = 'archived' WHERE id = ?").run(sessionId);
   } else {
     archiveHomeMessagesForRotation(sessionId, db);
+    // 知识要点回注会话头部之后：页面直接显示这份干净总结，同时进 LLM 上下文
+    //（比按 problem 碰运气召回稳）；UI 按【知识要点】渲染成知识卡
+    db.prepare(
+      `INSERT INTO messages (id, session_id, role, content, metadata, created_at)
+       VALUES (?, ?, 'system', ?, '{}', ?)`,
+    ).run(Date.now().toString(36) + "-kp", sessionId, `【知识要点】\n${body}`, Date.now());
   }
   const points = (body.match(/^[-*]|^\d+\./gm) ?? []).length;
   return { file, points, archived: !sess.pinned };
