@@ -717,7 +717,7 @@ async function main() {
       if (config.knowledge?.enabled !== false) {
         const runDistill = () =>
           autoDistillIdle(llm, sessions, {
-            idleDays: config.knowledge?.idleDays ?? 14,
+            idleDays: config.knowledge?.idleDays ?? 21,
             maxPerRun: config.knowledge?.maxPerRun ?? 3,
             agents: agents as unknown as Record<string, { workspaceDir: string }>,
             defaultModel: config.defaultModel,

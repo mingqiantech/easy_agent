@@ -298,7 +298,7 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
 </head>
 <body>
   <div class="sidebar" id="sidebar">
-    <div class="brand">⚡ Easy Agent <span style="font-size:10px;color:var(--muted);font-weight:400" title="构建水印：看不到 1112b 说明浏览器还在用旧缓存">1112b</span></div>
+    <div class="brand">⚡ Easy Agent <span style="font-size:10px;color:var(--muted);font-weight:400" title="构建水印：看不到 1112c 说明浏览器还在用旧缓存">1112c</span></div>
     <div class="agent-pick"><select id="agentSel" onchange="switchAgent()"></select></div>
     <div class="top-row">
       <div class="new-btn" onclick="goHome()" title="2026-11-02 起单会话滚动：日常对话都进首页会话">⌂ 首页会话</div>
@@ -1955,7 +1955,7 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
         const q=sel.value?`?agent=${encodeURIComponent(sel.value)}`:'';
         const j=await (await fetch(`${API}/api/knowledge${q}`)).json();
         const el=document.getElementById('kpList');
-        if(!(j.items||[]).length){el.innerHTML='<div class="card" style="grid-column:1/-1"><h3>暂无知识点</h3><div class="hint" style="margin-top:0">会话沉寂 ≥14 天会自动蒸馏；或在左侧会话条目点 🧪 立即蒸馏。</div></div>';return;}
+        if(!(j.items||[]).length){el.innerHTML='<div class="card" style="grid-column:1/-1"><h3>暂无知识点</h3><div class="hint" style="margin-top:0">会话沉寂 ≥21 天会自动蒸馏；或在左侧会话条目点 🧪 立即蒸馏。</div></div>';return;}
         el.innerHTML=j.items.map(k=>`<div class="card"><h3>📚 ${esc(k.name)}</h3>
           <div class="hint" style="margin-top:0">${esc(k.agent)} · ${new Date(k.mtime).toLocaleDateString('zh-CN')} · ${(k.chars/1024).toFixed(1)}KB
           <span class="expand-btn" onclick="kpOpen('${esc(k.file)}',this)">展开全文 ▾</span></div>
