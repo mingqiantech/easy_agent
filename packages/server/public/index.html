@@ -310,7 +310,7 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
 </head>
 <body>
   <div class="sidebar" id="sidebar">
-    <div class="brand">⚡ Easy Agent <span style="font-size:10px;color:var(--muted);font-weight:400" title="构建水印：看不到 1112i 说明浏览器还在用旧缓存">1112i</span></div>
+    <div class="brand">⚡ Easy Agent <span style="font-size:10px;color:var(--muted);font-weight:400" title="构建水印：看不到 1112j 说明浏览器还在用旧缓存">1112j</span></div>
     <div class="agent-pick"><select id="agentSel" onchange="switchAgent()"></select></div>
     <div class="top-row">
       <div class="new-btn" onclick="goHome()" title="2026-11-02 起单会话滚动：日常对话都进首页会话">⌂ 首页会话</div>
@@ -1078,7 +1078,9 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
     const MAX_DOTS=40, RECENT_DOTS=24;
     function buildSummNav(messages){
       const nav=document.getElementById('summNav');
-      const anchors=(messages||[]).flatMap((m,i)=>{
+      // 锚点口径必须与渲染一致（2026-11-12 修"右侧节点对应出了问题"）：
+      // 归档消息不上屏，也不能生成圆点，否则索引整体错位
+      const anchors=(messages||[]).filter(m=>!m.archived).flatMap((m,i)=>{
         if(m.role==='user') return [{kind:'q',m}];
         if(m.role==='system'&&String(m.content||'').startsWith('【知识要点】')){
           // 蒸馏知识卡：每个 ## 小节一个圆点（不同主题分别定位，elf 11-12 点单）
