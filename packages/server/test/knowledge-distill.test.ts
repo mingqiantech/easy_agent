@@ -49,7 +49,7 @@ describe("listDistillCandidates 选单扩容", () => {
   function freshDb() {
     const d = new Database(":memory:");
     d.exec(`CREATE TABLE sessions (id TEXT PRIMARY KEY, title TEXT, agent_id TEXT, model TEXT,
-      status TEXT, pinned INTEGER DEFAULT 0, created_at INTEGER, updated_at INTEGER, distilled_at INTEGER);
+      status TEXT, pinned INTEGER DEFAULT 0, created_at INTEGER, updated_at INTEGER, distilled_at INTEGER, distill_skip_at INTEGER);
       CREATE TABLE messages (id TEXT PRIMARY KEY, session_id TEXT, role TEXT, content TEXT, created_at INTEGER);
       CREATE TABLE sub_agent_runs (id TEXT PRIMARY KEY, parent_session_id TEXT, child_session_id TEXT,
       task TEXT, model TEXT, status TEXT, started_at INTEGER, finished_at INTEGER);`);
@@ -86,5 +86,11 @@ describe("listDistillCandidates 选单扩容", () => {
     expect(picked.has("fresh")).toBe(false);
     db.prepare("UPDATE sessions SET distilled_at=? WHERE id='idle-normal'").run(now);
     expect(new Set(listDistillCandidates(10, 200, 50, db as any).map((x) => x.id)).has("idle-normal")).toBe(false);
+    // 重试冷却：skip 近期排除；冷却过期（>3d）的回来
+    db.prepare("INSERT INTO sessions (id,title,agent_id,model,status,pinned,created_at,updated_at,distill_skip_at) VALUES ('skip-hot','x','a','m','active',0,1,?,?)").run(now - 11*86400000, now);
+    db.prepare("INSERT INTO sessions (id,title,agent_id,model,status,pinned,created_at,updated_at,distill_skip_at) VALUES ('skip-cold','x','a','m','active',0,1,?,?)").run(now - 11*86400000, now - 4*86400000);
+    const p2 = new Set(listDistillCandidates(10, 200, 50, db as any).map((x) => x.id));
+    expect(p2.has("skip-hot")).toBe(false);
+    expect(p2.has("skip-cold")).toBe(true);
   });
 });

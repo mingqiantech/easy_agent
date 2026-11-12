@@ -124,6 +124,7 @@ export function listDistillCandidates(
     .prepare(
       `SELECT id, agent_id, pinned FROM sessions
        WHERE status='active' AND distilled_at IS NULL
+         AND (distill_skip_at IS NULL OR distill_skip_at < ?)
          AND id NOT IN (SELECT child_session_id FROM sub_agent_runs WHERE status='running')
          AND (
            updated_at < ?
@@ -132,7 +133,7 @@ export function listDistillCandidates(
          )
        ORDER BY updated_at ASC LIMIT ?`,
     )
-    .all(cutoff, cronMessages, max) as Array<{ id: string; agent_id: string; pinned: number }>;
+    .all(Date.now() - 3 * 86400000, cutoff, cronMessages, max) as Array<{ id: string; agent_id: string; pinned: number }>;
 }
 
 /** 自动蒸馏：见 listDistillCandidates（12h 调度搭车） */export async function autoDistillIdle(
@@ -160,9 +161,15 @@ export function listDistillCandidates(
       done++;
     } catch (e: any) {
       const msg = String(e?.message ?? e);
-      // 内容太少/结果过短的低价值会话：打标不再反复扫（省 12h 空转）
-      if (/太少|过短/.test(msg))
-        getDatabase().prepare("UPDATE sessions SET distilled_at = ? WHERE id = ?").run(Date.now(), r.id);
+      // 分流（2026-11-12）：真·无价值 → 永久跳过 + 非置顶直接归档隐藏
+      //（elf：十天前的零散会话就该从列表消失——薄内容没知识可提炼，但同样该让位）；
+      // 空返回/调用失败等 transient → 3 天重试冷却，绝不误标 distilled_at（那=已处理=永久隐藏误伤）
+      if (/太少/.test(msg)) {
+        getDatabase()
+          .prepare("UPDATE sessions SET distilled_at = ?, status = CASE WHEN pinned=1 THEN status ELSE 'archived' END WHERE id = ?")
+          .run(Date.now(), r.id);
+      } else if (/过短|失败/.test(msg))
+        getDatabase().prepare("UPDATE sessions SET distill_skip_at = ? WHERE id = ?").run(Date.now(), r.id);
       log(`🧪 蒸馏跳过 ${r.id}: ${msg.slice(0, 100)}`);
     }
   }

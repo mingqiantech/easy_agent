@@ -385,6 +385,11 @@ function initializeSchema(db: Database): void {
   if (!cols.some((c) => c.name === "distilled_at")) {
     db.exec("ALTER TABLE sessions ADD COLUMN distilled_at INTEGER");
   }
+  // 蒸馏重试冷却标记（2026-11-12）：transient 失败（LLM 空返回等）只进这列，
+  // 不能借 distilled_at——那是"已处理完"语义，会让列表误隐藏
+  if (!cols.some((c) => c.name === "distill_skip_at")) {
+    db.exec("ALTER TABLE sessions ADD COLUMN distill_skip_at INTEGER");
+  }
 
   // 2026-10-27 Dreaming 分层改造：软休眠列（行永不删，被召回可复活）
   const stmCols = db.prepare("PRAGMA table_info(short_term_memory)").all() as Array<{ name: string }>;
