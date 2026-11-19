@@ -312,7 +312,7 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
 </head>
 <body>
   <div class="sidebar" id="sidebar">
-    <div class="brand">⚡ Easy Agent <span style="font-size:10px;color:var(--muted);font-weight:400" title="构建水印：看不到 1113a 说明浏览器还在用旧缓存">1113a</span></div>
+    <div class="brand">⚡ Easy Agent <span style="font-size:10px;color:var(--muted);font-weight:400" title="构建水印：看不到 1113b 说明浏览器还在用旧缓存">1113b</span></div>
     <div class="agent-pick"><select id="agentSel" onchange="switchAgent()"></select></div>
     <div class="top-row">
       <div class="new-btn" onclick="goHome()" title="2026-11-02 起单会话滚动：日常对话都进首页会话">⌂ 首页会话</div>
@@ -1167,9 +1167,12 @@ mark{background:rgba(200,150,60,.35);color:inherit;border-radius:3px;padding:0 2
       // DOM 里用户消息按气泡类匹配；工具内嵌的 user 变体不存在，顺位与 anchors 一致
       const els=document.querySelectorAll('#messages .message.user, #messages .message.summ.titem, #messages .kp-sec');
       const el=els[idx];if(!el)return;
-      if(el.classList&&el.classList.contains('kp-sec')){const kb=el.querySelector('.kp-body');if(kb&&kb.style.display==='none')el.querySelector('.expand-btn').click();}
+      let expanded=false;
+      if(el.classList&&el.classList.contains('kp-sec')){const kb=el.querySelector('.kp-body');if(kb&&kb.style.display==='none'){el.querySelector('.expand-btn').click();expanded=true;}}
       hideNavTip();
-      (dd?requestAnimationFrame.bind(window):f=>f())(()=>el.scrollIntoView({block:'center',behavior:'smooth'})); // 展开后等一帧再滚，防落点偏移
+      // 展开知识节会让下方内容位移，等一帧布局稳定再滚，防落点偏移
+      if(expanded)requestAnimationFrame(()=>requestAnimationFrame(()=>el.scrollIntoView({block:'center',behavior:'smooth'})));
+      else el.scrollIntoView({block:'center',behavior:'smooth'});
       el.classList.add('flash');setTimeout(()=>el.classList.remove('flash'),2600);
     }
 
