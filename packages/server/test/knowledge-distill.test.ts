@@ -199,3 +199,29 @@ describe("packChunks / mergeKnowledgeSections（map-reduce 分块与合并）", 
     expect(out.indexOf("## 接线")).toBeGreaterThan(out.indexOf("## 显卡"));
   });
 });
+
+describe("sanitizeSectionTitle（节名消毒，2026-11-19 life 卡畸形标题回归）", () => {
+  it("剥（未决…）尾巴/中缀、编号前缀、过程词；正常节名不动", async () => {
+    const { sanitizeSectionTitle } = await import("../src/knowledge.js");
+    expect(sanitizeSectionTitle("DGX Spark vs Mac Studio（未决：实测数据待补）")).toBe("DGX Spark vs Mac Studio");
+    expect(sanitizeSectionTitle("二、10 万 km 费用估算（钛7 DM 1.5T 插混）")).toBe("10 万 km 费用估算（钛7 DM 1.5T 插混）");
+    expect(sanitizeSectionTitle("Mac Studio Ultra 512GB 选配价格计算（断点续）")).toBe("Mac Studio Ultra 512GB 选配价格计算");
+    expect(sanitizeSectionTitle("74HC126 半双工串口转换文章技术评判")).toBe("74HC126 半双工串口转换文章技术评判");
+  });
+  it("mergeKnowledgeSections 用消毒后节名归并（消毒后同名=合并）", async () => {
+    const { mergeKnowledgeSections } = await import("../src/knowledge.js");
+    const out = mergeKnowledgeSections("## 一、保养周期\n- A\n## 保养周期\n- B");
+    expect(out.match(/^## /gm)).toHaveLength(1);
+    expect(out).toBe("## 保养周期\n- A\n- B");
+  });
+});
+
+describe("sanitizeSectionTitle 补丁（未闭合括号/补后半截）", () => {
+  it("续写截断产生的未闭合畸形尾巴也能剥", async () => {
+    const { sanitizeSectionTitle } = await import("../src/knowledge.js");
+    expect(sanitizeSectionTitle("DGX Spark vs Mac Studio（未决：…")).toBe("DGX Spark vs Mac Studio");
+    expect(sanitizeSectionTitle("方程豹钛7 DM：保养日历（补后半截）")).toBe("方程豹钛7 DM：保养日历");
+    expect(sanitizeSectionTitle("1.5T 插混比 1.5L DM-i 多出的关注点")).toBe("1.5T 插混比 1.5L DM-i 多出的关注点"); // 版本号不误剥（曾被"1."序号规则误伤）
+    expect(sanitizeSectionTitle("2. 费用估算")).toBe("费用估算");
+  });
+});

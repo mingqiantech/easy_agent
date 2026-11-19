@@ -69,14 +69,26 @@ export function packChunks(lines: string[], chunkChars = 9000): string[] {
   return out;
 }
 
-/** 合并各块的主题小节：同名 `## X` 节合并内容（横向经验等通用节去重关键） */
+/** 节名消毒：剥"（未决…"尾巴、"二、"式编号前缀、续写过程词——分块续写拼接
+ * 产生的畸形标题（2026-11-19 life 卡实锤：'DGX Spark vs Mac Studio（未决：…'、'## 二、费用估算'） */
+export function sanitizeSectionTitle(t: string): string {
+  return t
+    .replace(/\s*[（(][^（）()]*未决[^（）()]*[）)]?\s*/g, "")    // （未决：…）任意位置（容忍续写截断的未闭合括号）
+    .replace(/\s*[（(][^（）()]*(补后半截|续|接上|同上|断点)[^（）()]*[）)]?\s*/g, "") // 过程词括号（含未闭合）
+    .replace(/^(一|二|三|四|五|六|七|八|九|十|[0-9]{1,2})[、．]\s*/, "")  // 顿号编号前缀
+    .replace(/^([0-9]{1,2})\.\s(?=\D)/, "")                      // "1. 标题"式序号（负向断言护住 1.5T 版本号）
+    .replace(/\s*[（(]?(断点)?(续写|续|接上|同上)[）)]?\s*$/, "")       // 尾部过程词
+    .trim();
+}
+
+/** 合并各块的主题小节：同名（消毒后）`## X` 节合并内容（横向经验等通用节去重关键） */
 export function mergeKnowledgeSections(joined: string): string {
   const order: string[] = [];
   const map = new Map<string, string[]>();
   let curTitle = "", curBuf: string[] = [];
   const flush = () => {
     if (!curTitle && !curBuf.length) return;
-    const t = curTitle || "_preamble";
+    const t = sanitizeSectionTitle(curTitle) || "_preamble";
     if (!map.has(t)) { map.set(t, []); order.push(t); }
     map.get(t)!.push(...curBuf.filter(Boolean));
     curBuf = [];
@@ -124,6 +136,8 @@ const KP_SYSTEM =
   "  主题名从对话内容里概括，**对话里出现过的重要话题每个都要单独成节，不许合并成一坨、不许只写一个主题**\n" +
   "- 节内条目：关键结论/数字/命令/路径等硬信息每条一行，注明适用条件；可复用的做法与踩过的坑并入同节\n" +
   "- 该主题有未解决事项时，节末加一行 `未决：…`\n" +
+  "- **小节一律用主题名，禁止'一、二、三'编号式 `## ` 标题**（编号层级用节内列表表达）；" +
+  "每节自成一体，不要把'未决'或过程词写进节名；续写内容必须接在上一节内不得另起节\n" +
   "- 最后可加一节 `## 横向经验` 收纳跨主题的通用心得（没有就省略）\n" +
   "只写有信息量的内容，寒暄与流水账丢弃；**宁全勿简**——硬信息一条不许丢，篇幅随内容走；" +
   "输出前自查：按时间顺序通读对话，确保每个讨论过的主题都有对应小节。";

@@ -1,3 +1,5 @@
+import { describe, it, expect } from "bun:test";
+
 
 describe("listMdFiles 子目录递归（2026-11-12 修 readdir.recursive 丢路径）", () => {
   it("memory/ 子目录（knowledge/archive/.dreams）下的 md 能被检索到", async () => {
